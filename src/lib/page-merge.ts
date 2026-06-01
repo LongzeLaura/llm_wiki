@@ -24,7 +24,10 @@
  * an optional backup of the existing content for user recovery.
  */
 import { parseFrontmatter } from "./frontmatter"
-import { mergeArrayFieldsIntoContent } from "./sources-merge"
+import {
+  mergeArrayFieldsIntoContent,
+  writeFrontmatterScalar,
+} from "./sources-merge"
 
 /** Frontmatter array fields unioned across re-ingests. */
 const UNION_FIELDS = ["sources", "tags", "related"] as const
@@ -164,7 +167,7 @@ export async function mergePageContent(
   for (const field of LOCKED_FIELDS) {
     const existingValue = oldParsed.frontmatter?.[field]
     if (typeof existingValue === "string" && existingValue !== "") {
-      final = setFrontmatterScalar(final, field, existingValue)
+      final = writeFrontmatterScalar(final, field, existingValue)
     }
   }
   // Re-apply union merges on top of the LLM's frontmatter using
@@ -175,7 +178,7 @@ export async function mergePageContent(
   final = mergeArrayFieldsIntoContent(final, arrayMerged, [...UNION_FIELDS])
   // Updated is always today on a successful merge.
   const todayFn = opts.today ?? defaultToday
-  final = setFrontmatterScalar(final, "updated", todayFn())
+  final = writeFrontmatterScalar(final, "updated", todayFn())
 
   return final
 }
@@ -196,42 +199,4 @@ async function tryBackup(
 
 function defaultToday(): string {
   return new Date().toISOString().slice(0, 10)
-}
-
-/**
- * Set a scalar frontmatter field to `value` in the inline form
- * `field: value`. If the field already exists in the frontmatter,
- * the line is replaced in place. If it doesn't, the field is
- * appended at the end of the frontmatter block.
- *
- * Keeps the rest of the document unchanged. Returns content
- * unchanged if it has no frontmatter at all.
- *
- * Quoting: the value is written verbatim; the caller is
- * responsible for quoting if the value contains characters that
- * would otherwise break YAML parsing (`:` etc). Today's callers
- * pass plain identifiers and ISO dates so this hasn't been an
- * issue.
- */
-function setFrontmatterScalar(
-  content: string,
-  fieldName: string,
-  value: string,
-): string {
-  const fmMatch = content.match(/^(---\n)([\s\S]*?)(\n---)/)
-  if (!fmMatch) return content
-  const [, openDelim, fmBody, closeDelim] = fmMatch
-  const escapedName = fieldName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
-  const newLine = `${fieldName}: ${value}`
-
-  // Only match scalar form (no `[`, no `\n  -`). Array-form fields
-  // are handled by sources-merge.
-  const lineRe = new RegExp(`^${escapedName}:\\s*(?!\\[)([^\\n]*)`, "m")
-  if (lineRe.test(fmBody)) {
-    const rewritten = fmBody.replace(lineRe, newLine)
-    return `${openDelim}${rewritten}${closeDelim}${content.slice(fmMatch[0].length)}`
-  }
-  // Field absent — append.
-  const rewritten = `${fmBody}\n${newLine}`
-  return `${openDelim}${rewritten}${closeDelim}${content.slice(fmMatch[0].length)}`
 }

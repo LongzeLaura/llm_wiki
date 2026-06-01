@@ -1,0 +1,39 @@
+{
+  "writtenPaths": [
+    "wiki/catalytic-systems/h-zsm-5-mfi-mto.md",
+    "wiki/elementary-processes/surface-methoxy-formation.md",
+    "wiki/mechanistic-networks/dual-cycle-mto.md",
+    "wiki/evidence-claims/isotope-labeling-retained-hydrocarbons.md",
+    "wiki/sources/zeolite-mto-smoke-paper.md",
+    "wiki/index.md",
+    "wiki/log.md",
+    "wiki/overview.md"
+  ],
+  "fileContains": {
+    "wiki/catalytic-systems/h-zsm-5-mfi-mto.md": [
+      "type: catalytic_system",
+      "system_type: zeolite_catalyst_system",
+      "[[surface-methoxy-formation]]"
+    ],
+    "wiki/elementary-processes/surface-methoxy-formation.md": [
+      "type: elementary_process",
+      "process_scope: chemical_step",
+      "[[dual-cycle-mto]]"
+    ],
+    "wiki/mechanistic-networks/dual-cycle-mto.md": [
+      "type: mechanistic_network",
+      "network_nodes: [surface_methoxy_species, olefin_cycle, aromatic_cycle]",
+      "olefin cycle"
+    ],
+    "wiki/evidence-claims/isotope-labeling-retained-hydrocarbons.md": [
+      "type: evidence_claim",
+      "relation_type: supports",
+      "13C isotope labeling"
+    ],
+    "wiki/sources/zeolite-mto-smoke-paper.md": [
+      "sources: [\"zeolite-mto-smoke-paper.md\"]",
+      "[[h-zsm-5-mfi-mto]]"
+    ]
+  },
+  "reviewsCreated": []
+}

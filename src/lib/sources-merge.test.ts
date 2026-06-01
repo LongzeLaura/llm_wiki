@@ -19,6 +19,8 @@ import {
   mergeSourcesIntoContent,
   mergeArrayFieldsIntoContent,
   parseFrontmatterArray,
+  parseFrontmatterScalar,
+  writeFrontmatterScalar,
 } from "./sources-merge"
 
 const WRAP = (fm: string, body = "body\n") => `---\n${fm}\n---\n${body}`
@@ -346,6 +348,23 @@ describe("parseFrontmatterArray", () => {
     const c = WRAP("related: [a, b]")
     expect(parseFrontmatterArray(c, "relate")).toEqual([])
     expect(parseFrontmatterArray(c, "related")).toEqual(["a", "b"])
+  })
+})
+
+describe("frontmatter scalar helpers", () => {
+  it("parses scalar values with or without quotes", () => {
+    expect(parseFrontmatterScalar(WRAP('type: "Catalytic System"'), "type")).toBe("Catalytic System")
+    expect(parseFrontmatterScalar(WRAP("created: 2026-05-31"), "created")).toBe("2026-05-31")
+  })
+
+  it("rewrites or inserts scalar fields while preserving the body", () => {
+    const existing = WRAP("title: Foo\ntype: concept", "# Body")
+    const rewritten = writeFrontmatterScalar(existing, "type", "catalytic_system")
+    expect(parseFrontmatterScalar(rewritten, "type")).toBe("catalytic_system")
+    expect(rewritten).toContain("# Body")
+
+    const inserted = writeFrontmatterScalar(WRAP("title: Foo", "# Body"), "type", "source")
+    expect(parseFrontmatterScalar(inserted, "type")).toBe("source")
   })
 })
 

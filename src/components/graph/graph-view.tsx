@@ -17,21 +17,22 @@ import { optimizeResearchTopic } from "@/lib/optimize-research-topic"
 import { normalizePath } from "@/lib/path-utils"
 import { applyGraphFilters, DEFAULT_GRAPH_FILTERS, hasActiveGraphFilters, type GraphFilterState } from "@/lib/graph-filters"
 import { applyGraphSearch } from "@/lib/graph-search"
-import { wikiTypeLabel } from "@/lib/wiki-page-types"
+import { compareWikiTypeOrder, getWikiTypeStyle, WIKI_TYPE_STYLES } from "@/lib/wiki-type-style"
 import { useTranslation } from "react-i18next"
 
-const NODE_TYPE_COLORS: Record<string, string> = {
-  entity: "#60a5fa",    // blue-400
-  concept: "#c084fc",   // purple-400
-  source: "#fb923c",    // orange-400
-  query: "#4ade80",     // green-400
-  synthesis: "#f87171", // red-400
-  overview: "#facc15",  // yellow-400
-  comparison: "#2dd4bf", // teal-400
-  finding: "#a855f7",    // purple-500
-  thesis: "#f43f5e",     // rose-500
-  methodology: "#14b8a6", // teal-500
-  other: "#94a3b8",     // slate-400
+const FALLBACK_GRAPH_COLOR = "#94a3b8"
+const GRAPH_NODE_TYPE_TRANSLATION_KEYS: Record<string, string> = {
+  entity: "graph.nodeTypeLabels.entity",
+  concept: "graph.nodeTypeLabels.concept",
+  source: "graph.nodeTypeLabels.source",
+  query: "graph.nodeTypeLabels.query",
+  synthesis: "graph.nodeTypeLabels.synthesis",
+  overview: "graph.nodeTypeLabels.overview",
+  comparison: "graph.nodeTypeLabels.comparison",
+  finding: "graph.nodeTypeLabels.finding",
+  thesis: "graph.nodeTypeLabels.thesis",
+  methodology: "graph.nodeTypeLabels.methodology",
+  other: "graph.nodeTypeLabels.other",
 }
 
 const CUSTOM_NODE_COLORS = [
@@ -61,6 +62,7 @@ const COMMUNITY_COLORS = [
 ]
 
 type ColorMode = "type" | "community"
+type GraphNodeTypeTranslator = (key: string) => string
 
 const BASE_NODE_SIZE = 8
 const MAX_NODE_SIZE = 28
@@ -72,10 +74,20 @@ const WORKER_LAYOUT_NODE_THRESHOLD = 220
 type HoverState = { node: string; neighbors: Set<string> } | null
 
 function nodeColor(type: string): string {
-  if (NODE_TYPE_COLORS[type]) return NODE_TYPE_COLORS[type]
+  const key = type.trim().toLowerCase()
+  if (WIKI_TYPE_STYLES[key]) return getWikiTypeStyle(key).graphColor
   let hash = 0
   for (const char of type) hash = (hash * 31 + char.charCodeAt(0)) >>> 0
-  return CUSTOM_NODE_COLORS[hash % CUSTOM_NODE_COLORS.length] ?? NODE_TYPE_COLORS.other
+  return CUSTOM_NODE_COLORS[hash % CUSTOM_NODE_COLORS.length] ?? FALLBACK_GRAPH_COLOR
+}
+
+function graphNodeTypeLabel(type: string, translate: GraphNodeTypeTranslator): string {
+  const translationKey = GRAPH_NODE_TYPE_TRANSLATION_KEYS[type]
+  if (translationKey) {
+    const translated = translate(translationKey)
+    if (translated && translated !== translationKey) return translated
+  }
+  return getWikiTypeStyle(type).label
 }
 
 function hexToRgba(hex: string, alpha: number): string {
@@ -529,8 +541,6 @@ export function GraphView() {
   const [nodeMenu, setNodeMenu] = useState<{ nodeId: string; x: number; y: number } | null>(null)
   const graphContainerRef = useRef<HTMLDivElement>(null)
   const researchDialogTokenRef = useRef(0)
-  // i18n node type labels (populated after mount to support language switching)
-  const [nodeTypeLabels, setNodeTypeLabels] = useState<Record<string, string>>({})
   const graphSearchInputRef = useRef<HTMLInputElement>(null)
 
   // Research confirmation dialog
@@ -561,23 +571,6 @@ export function GraphView() {
       setLoading(false)
     }
   }, [project])
-
-  // Initialize node type labels when i18n is ready
-  useEffect(() => {
-    setNodeTypeLabels({
-      entity: t("graph.nodeTypeLabels.entity"),
-      concept: t("graph.nodeTypeLabels.concept"),
-      source: t("graph.nodeTypeLabels.source"),
-      query: t("graph.nodeTypeLabels.query"),
-      synthesis: t("graph.nodeTypeLabels.synthesis"),
-      overview: t("graph.nodeTypeLabels.overview"),
-      comparison: t("graph.nodeTypeLabels.comparison"),
-      finding: t("graph.nodeTypeLabels.finding"),
-      thesis: t("graph.nodeTypeLabels.thesis"),
-      methodology: t("graph.nodeTypeLabels.methodology"),
-      other: t("graph.nodeTypeLabels.other"),
-    })
-  }, [t])
 
   // Spacing changes trigger ForceAtlas2 layout through GraphLoader's dataKey.
   // Keep the slider responsive while debouncing the expensive relayout.
@@ -752,13 +745,17 @@ export function GraphView() {
     acc[n.type] = (acc[n.type] ?? 0) + 1
     return acc
   }, {})
+  const orderedNodeTypes = useMemo(
+    () => Object.keys(typeCounts).sort(compareWikiTypeOrder),
+    [typeCounts],
+  )
   const nodeTypeLabelMap = useMemo(() => {
-    const labels = { ...nodeTypeLabels }
-    for (const type of Object.keys(typeCounts)) {
-      labels[type] ??= wikiTypeLabel(type)
+    const labels: Record<string, string> = {}
+    for (const type of orderedNodeTypes) {
+      labels[type] = graphNodeTypeLabel(type, (key) => t(key))
     }
     return labels
-  }, [nodeTypeLabels, typeCounts])
+  }, [orderedNodeTypes, t])
 
   const filteredGraph = useMemo(
     () => applyGraphFilters(nodes, edges, filters),

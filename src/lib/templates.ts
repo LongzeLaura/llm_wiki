@@ -1,3 +1,5 @@
+import { CHEMICAL_PROJECT_MODE, DEFAULT_PROJECT_MODE, type ProjectMode } from "@/lib/project-mode"
+
 export interface WikiTemplate {
   id: string
   name: string
@@ -15,6 +17,28 @@ const BASE_SCHEMA_TYPES = `| entity | wiki/entities/ | Named things (people, too
 | comparison | wiki/comparisons/ | Side-by-side analysis of related entities |
 | synthesis | wiki/synthesis/ | Cross-cutting summaries and conclusions |
 | overview | wiki/ | High-level project summary (one per project) |`
+
+const CHEMICAL_SCHEMA_TYPES = `| source | wiki/sources/ | Papers, articles, talks, books, blog posts |
+| catalytic_system | wiki/catalytic-systems/ | Catalytic systems, species, catalyst materials, sites, frameworks, environments, and conditions |
+| elementary_process | wiki/elementary-processes/ | Elementary reaction, transport, deactivation, and regeneration events |
+| mechanistic_network | wiki/mechanistic-networks/ | Mechanisms, pathways, cycles, and competing routes |
+| evidence_claim | wiki/evidence-claims/ | Evidence that supports, challenges, or limits chemical claims |
+| entity | wiki/entities/ | Compatibility pages for legacy named things or mixed-mode content |
+| concept | wiki/concepts/ | Compatibility pages for legacy abstractions or mixed-mode content |
+| query | wiki/queries/ | Open questions under active investigation |
+| comparison | wiki/comparisons/ | Side-by-side analysis of related entities |
+| synthesis | wiki/synthesis/ | Cross-cutting summaries and conclusions |
+| overview | wiki/ | High-level project summary (one per project) |`
+
+const CHEMICAL_MODE_EXTRA_DIRS = [
+  "wiki/catalytic-systems",
+  "wiki/elementary-processes",
+  "wiki/mechanistic-networks",
+  "wiki/evidence-claims",
+]
+
+const BASE_FRONTMATTER_TYPE_LINE = "type: entity | concept | source | query | comparison | synthesis | overview"
+const CHEMICAL_FRONTMATTER_TYPE_LINE = "type: source | catalytic_system | elementary_process | mechanistic_network | evidence_claim | entity | concept | query | comparison | synthesis | overview"
 
 const BASE_NAMING = `- Files: \`kebab-case.md\`
 - Entities: match official name where possible (e.g., \`openai.md\`, \`gpt-4.md\`)
@@ -645,10 +669,45 @@ export const templates: WikiTemplate[] = [
   generalTemplate,
 ]
 
-export function getTemplate(id: string): WikiTemplate {
+function projectModeSchemaSection(mode: ProjectMode): string {
+  const profile = mode === CHEMICAL_PROJECT_MODE ? "chemical-default" : "legacy-default"
+  return [
+    "## Project Mode",
+    "",
+    `- Mode: ${mode}`,
+    `- Category profile: ${profile}`,
+    "- Runtime routing should use the persisted project mode in `.llm-wiki/project.json`; `schema.md` documents the intended organization but does not define the mode.",
+    "",
+  ].join("\n")
+}
+
+function applyProjectModeToSchema(schema: string, mode: ProjectMode): string {
+  const withProjectMode = schema.includes("## Project Mode")
+    ? schema
+    : schema.replace("## Page Types", `${projectModeSchemaSection(mode)}## Page Types`)
+
+  if (mode !== CHEMICAL_PROJECT_MODE) {
+    return withProjectMode
+  }
+
+  return withProjectMode
+    .replace(BASE_SCHEMA_TYPES, CHEMICAL_SCHEMA_TYPES)
+    .replace(BASE_FRONTMATTER_TYPE_LINE, CHEMICAL_FRONTMATTER_TYPE_LINE)
+}
+
+function modeExtraDirs(mode: ProjectMode): string[] {
+  return mode === CHEMICAL_PROJECT_MODE ? CHEMICAL_MODE_EXTRA_DIRS : []
+}
+
+export function getTemplate(id: string, mode: ProjectMode = DEFAULT_PROJECT_MODE): WikiTemplate {
   const found = templates.find((t) => t.id === id)
   if (!found) {
     throw new Error(`Unknown template id: "${id}"`)
   }
-  return found
+
+  return {
+    ...found,
+    schema: applyProjectModeToSchema(found.schema, mode),
+    extraDirs: [...new Set([...found.extraDirs, ...modeExtraDirs(mode)])],
+  }
 }

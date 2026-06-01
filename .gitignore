@@ -22,11 +22,7 @@ src-tauri/gen/
 .env.*.local
 
 # Internal docs (not shipped)
-docs/
 AGENTS.md
-
-# Benchmark and test data (local only)
-tests/
 
 # Editor directories and files
 .vscode/*
@@ -49,3 +45,6 @@ pnpm-debug.log*
 # Brainstorm assets (not tracked in source control)
 .superpowers/
 .claude/
+
+# Local npm cache
+.npm-cache/

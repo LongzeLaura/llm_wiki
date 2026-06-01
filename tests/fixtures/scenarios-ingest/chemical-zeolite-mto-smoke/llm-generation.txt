@@ -1,0 +1,136 @@
+---FILE: wiki/catalytic-systems/h-zsm-5-mfi-mto.md---
+---
+type: catalytic_system
+title: H-ZSM-5 Methanol-to-Olefins System
+created: 2026-05-31
+updated: 2026-05-31
+tags: [zeolite, mto, mfi]
+related: [surface-methoxy-formation, dual-cycle-mto, isotope-labeling-retained-hydrocarbons]
+sources: ["zeolite-mto-smoke-paper.md"]
+system_type: zeolite_catalyst_system
+role: catalyst_system
+catalyst_material: H-ZSM-5
+active_site_type: Bronsted_acid_site
+reaction_conditions: methanol_to_olefins_short_vs_long_contact_time
+---
+
+# H-ZSM-5 Methanol-to-Olefins System
+
+This catalytic system describes methanol conversion over H-ZSM-5 with Bronsted acid sites in MFI straight channels.
+It provides the system context for [[surface-methoxy-formation]] and the [[dual-cycle-mto]] interpretation.
+---END FILE---
+
+---FILE: wiki/elementary-processes/surface-methoxy-formation.md---
+---
+type: elementary_process
+title: Surface Methoxy Formation
+created: 2026-05-31
+updated: 2026-05-31
+tags: [methoxy, dehydration]
+related: [h-zsm-5-mfi-mto, dual-cycle-mto]
+sources: ["zeolite-mto-smoke-paper.md"]
+process_type: methanol_dehydration
+participants: [methanol, surface_methoxy_species, bronsted_acid_site]
+location_context: mfi_straight_channel
+process_scope: chemical_step
+role_in_mechanism: initiation_step
+---
+
+# Surface Methoxy Formation
+
+Methanol dehydration on Bronsted acid sites forms surface methoxy species in the [[h-zsm-5-mfi-mto]] system.
+The process is treated as an initiation step in [[dual-cycle-mto]].
+---END FILE---
+
+---FILE: wiki/mechanistic-networks/dual-cycle-mto.md---
+---
+type: mechanistic_network
+title: Dual-Cycle MTO Network
+created: 2026-05-31
+updated: 2026-05-31
+tags: [mechanism, olefin-cycle, aromatic-cycle]
+related: [h-zsm-5-mfi-mto, surface-methoxy-formation, isotope-labeling-retained-hydrocarbons]
+sources: ["zeolite-mto-smoke-paper.md"]
+mechanism_type: dual_cycle_mechanism
+network_nodes: [surface_methoxy_species, olefin_cycle, aromatic_cycle]
+network_edges: [surface_methoxy_formation, methylation, cycle_competition]
+competing_pathways: [olefin_cycle, aromatic_cycle]
+control_step: methylation_in_straight_channels
+---
+
+# Dual-Cycle MTO Network
+
+The mechanism links [[surface-methoxy-formation]] to competing olefin and aromatic cycles in [[h-zsm-5-mfi-mto]].
+Short contact times favor the olefin cycle, while longer times increase aromatic-cycle contributions.
+---END FILE---
+
+---FILE: wiki/evidence-claims/isotope-labeling-retained-hydrocarbons.md---
+---
+type: evidence_claim
+title: Isotope Labeling Supports Retained Hydrocarbon Participation
+created: 2026-05-31
+updated: 2026-05-31
+tags: [evidence, isotope-labeling, dft]
+related: [dual-cycle-mto, h-zsm-5-mfi-mto]
+sources: ["zeolite-mto-smoke-paper.md"]
+claim: retained_hydrocarbon_species_contribute_to_light_olefin_formation
+evidence_type: isotope_labeling
+relation_type: supports
+target_layer: mechanistic_network
+target_page: dual-cycle-mto
+evidence_summary: isotope_labeling_and_dft_support_retained_hydrocarbon_participation
+---
+
+# Isotope Labeling Supports Retained Hydrocarbon Participation
+
+13C isotope labeling supports the claim that retained hydrocarbon species participate in [[dual-cycle-mto]].
+The paper also reports DFT evidence that methylation barriers are lower in MFI straight channels of [[h-zsm-5-mfi-mto]].
+---END FILE---
+
+---FILE: wiki/sources/zeolite-mto-smoke-paper.md---
+---
+type: source
+title: "Source: zeolite-mto-smoke-paper.md"
+created: 2026-05-31
+updated: 2026-05-31
+tags: [source, zeolite]
+related: [h-zsm-5-mfi-mto, surface-methoxy-formation, dual-cycle-mto, isotope-labeling-retained-hydrocarbons]
+sources: ["zeolite-mto-smoke-paper.md"]
+---
+
+# Source: zeolite-mto-smoke-paper.md
+
+Smoke-test summary for a chemical paper covering [[h-zsm-5-mfi-mto]], [[surface-methoxy-formation]], and [[dual-cycle-mto]].
+---END FILE---
+
+---FILE: wiki/index.md---
+# Index
+
+## Sources
+- [[zeolite-mto-smoke-paper]]
+
+## Catalytic Systems
+- [[h-zsm-5-mfi-mto]]
+
+## Elementary Processes
+- [[surface-methoxy-formation]]
+
+## Mechanistic Networks
+- [[dual-cycle-mto]]
+
+## Evidence Claims
+- [[isotope-labeling-retained-hydrocarbons]]
+---END FILE---
+
+---FILE: wiki/log.md---
+## [2026-05-31] ingest | zeolite-mto-smoke-paper.md
+
+- Added chemical smoke-test pages for H-ZSM-5 methanol-to-olefins.
+---END FILE---
+
+---FILE: wiki/overview.md---
+# Overview
+
+This wiki tracks catalytic chemistry papers and their linked system, process, mechanism, and evidence pages.
+It now includes a methanol-to-olefins smoke-test source centered on H-ZSM-5, surface methoxy formation, a dual-cycle mechanism, and supporting isotope-labeling evidence.
+---END FILE---

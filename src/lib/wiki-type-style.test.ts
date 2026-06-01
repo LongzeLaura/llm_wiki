@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest"
 import {
+  compareWikiTypeOrder,
   getWikiTypeStyle,
   WIKI_TYPE_STYLES,
   FALLBACK_TYPE_STYLE,
@@ -31,13 +32,18 @@ describe("getWikiTypeStyle", () => {
     expect(getWikiTypeStyle("")).toBe(FALLBACK_TYPE_STYLE)
   })
 
-  it("returns fallback for an unknown type", () => {
-    expect(getWikiTypeStyle("zorbax")).toBe(FALLBACK_TYPE_STYLE)
+  it("returns a titled fallback for an unknown type", () => {
+    const style = getWikiTypeStyle("zorbax")
+    expect(style.icon).toBe(FALLBACK_TYPE_STYLE.icon)
+    expect(style.graphColor).toBe(FALLBACK_TYPE_STYLE.graphColor)
+    expect(style.label).toBe("Zorbax")
+    expect(style.pluralLabel).toBe("Zorbax")
   })
 
   it("covers every documented page type", () => {
     const expected = [
-      "entity", "concept", "query", "source",
+      "entity", "concept", "query", "source", "comparison", "synthesis",
+      "catalytic_system", "elementary_process", "mechanistic_network", "evidence_claim",
       "thesis", "finding", "methodology", "event", "overview",
     ]
     for (const t of expected) {
@@ -47,5 +53,20 @@ describe("getWikiTypeStyle", () => {
       expect(style.chipClass).toContain("bg-")
       expect(style.dotClass).toContain("bg-")
     }
+  })
+
+  it("uses registry labels for chemical categories", () => {
+    expect(getWikiTypeStyle("catalytic_system").label).toBe("Catalytic System")
+    expect(getWikiTypeStyle("elementary_process").label).toBe("Elementary Process")
+    expect(getWikiTypeStyle("mechanistic_network").label).toBe("Mechanistic Network")
+    expect(getWikiTypeStyle("evidence_claim").label).toBe("Evidence Claim")
+  })
+
+  it("preserves stable ordering across legacy and chemical categories", () => {
+    expect(compareWikiTypeOrder("overview", "source")).toBeLessThan(0)
+    expect(compareWikiTypeOrder("source", "entity")).toBeLessThan(0)
+    expect(compareWikiTypeOrder("concept", "catalytic_system")).toBeLessThan(0)
+    expect(compareWikiTypeOrder("catalytic_system", "elementary_process")).toBeLessThan(0)
+    expect(compareWikiTypeOrder("mechanistic_network", "evidence_claim")).toBeLessThan(0)
   })
 })

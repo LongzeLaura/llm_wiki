@@ -10,7 +10,12 @@ import {
   sourceIdentityForPath,
   sourceSummarySlugFromIdentity,
 } from "@/lib/source-identity"
-import { parseSources, writeSources } from "@/lib/sources-merge"
+import {
+  parseFrontmatterScalar,
+  parseSources,
+  writeFrontmatterScalar,
+  writeSources,
+} from "@/lib/sources-merge"
 import { checkIngestCache, saveIngestCache } from "@/lib/ingest-cache"
 import { sanitizeIngestedFileContent } from "@/lib/ingest-sanitize"
 import { mergePageContent, type MergeFn } from "@/lib/page-merge"
@@ -24,8 +29,25 @@ import {
 } from "@/lib/extract-source-images"
 import { captionMarkdownImages, loadCaptionCache } from "@/lib/image-caption-pipeline"
 import type { MultimodalConfig } from "@/stores/wiki-store"
-import { GENERATION_WIKI_TYPES } from "@/lib/wiki-page-types"
+import {
+  CHEMICAL_CATEGORY_PROFILE_ID,
+  getCategoryDefinition,
+  getGenerationCategoryIds,
+  type CategoryDefinition,
+  type CategoryProfile,
+} from "@/lib/category-registry"
+import {
+  applyChemicalSemanticContract,
+  buildChemicalPromptContractLines,
+} from "@/lib/chemical-semantic-contract"
 import { computeContextBudget } from "@/lib/context-budget"
+import { resolveRegisteredWikiPageType } from "@/lib/wiki-page-types"
+import {
+  inferProjectModeFromSchema,
+  resolveCategoryProfileForProjectMode,
+  type ProjectMode,
+} from "@/lib/project-mode"
+import { loadProjectMode } from "@/lib/project-identity"
 
 const LONG_SOURCE_MIN_BUDGET = 8_000
 const LONG_SOURCE_MAX_SINGLE_PASS_BUDGET = 300_000
@@ -39,6 +61,29 @@ const INGEST_GENERATION_TOKENS_256K = 24_576
 const INGEST_GENERATION_TOKENS_512K = 32_768
 const REVIEW_STAGE_MIN_SIGNAL_CHARS = 10_000
 const REVIEW_STAGE_MIN_FILE_BLOCKS = 4
+function resolveIngestPromptProfile(
+  schema: string,
+  projectMode?: ProjectMode | null,
+): CategoryProfile {
+  const resolvedMode = projectMode ?? inferProjectModeFromSchema(schema)
+  return resolveCategoryProfileForProjectMode(resolvedMode)
+}
+
+function promptVisibleWikiTypes(profile: CategoryProfile): string[] {
+  return getGenerationCategoryIds(profile.id)
+}
+
+function isChemicalPromptProfile(profile: CategoryProfile): boolean {
+  return profile.id === CHEMICAL_CATEGORY_PROFILE_ID
+}
+
+function chemicalCategoryDefinition(categoryId: string): CategoryDefinition {
+  const definition = getCategoryDefinition(categoryId)
+  if (!definition) {
+    throw new Error(`Missing required category definition: ${categoryId}`)
+  }
+  return definition
+}
 
 function appendSavedImageRefsForCaption(content: string, images: SavedImage[]): string {
   if (images.length === 0) return content
@@ -407,6 +452,7 @@ async function autoIngestImpl(
     tryReadFile(`${pp}/wiki/index.md`),
     tryReadFile(`${pp}/wiki/overview.md`),
   ])
+  const projectMode = await loadProjectMode(pp)
 
   // ── Cache check: skip re-ingest if source content hasn't changed ──
   //
@@ -632,6 +678,7 @@ async function autoIngestImpl(
       purpose,
       schema,
       index,
+      projectMode,
       sourceIdentity,
       sourceSummarySlug,
       folderContext,
@@ -662,7 +709,7 @@ async function autoIngestImpl(
     await streamChat(
       llmConfig,
       [
-        { role: "system", content: buildAnalysisPrompt(purpose, index, sourceContext) },
+        { role: "system", content: buildAnalysisPrompt(purpose, index, sourceContext, schema, projectMode) },
         { role: "user", content: `Analyze this source document:\n\n**File:** ${sourceIdentity}${folderContext ? `\n**Folder context:** ${folderContext}` : ""}\n\n---\n\n${sourceContext}` },
       ],
       {
@@ -694,7 +741,19 @@ async function autoIngestImpl(
   await streamChat(
     llmConfig,
     [
-      { role: "system", content: buildGenerationPrompt(schema, purpose, index, sourceIdentity, overview, sourceContext, sourceSummaryPath) },
+      {
+        role: "system",
+        content: buildGenerationPrompt(
+          schema,
+          purpose,
+          index,
+          sourceIdentity,
+          overview,
+          sourceContext,
+          sourceSummaryPath,
+          projectMode,
+        ),
+      },
       {
         role: "user",
         content: [
@@ -757,6 +816,8 @@ async function autoIngestImpl(
               sourceContext,
               generation,
               llmConfig.maxContextSize,
+              schema,
+              projectMode,
             ),
           },
           {
@@ -1004,6 +1065,24 @@ function canonicalizeSourcesField(content: string, sourceIdentity: string): stri
   return writeSources(content, deduped)
 }
 
+function canonicalizeRegisteredPageType(
+  content: string,
+  relativePath: string,
+): string {
+  const rawType = parseFrontmatterScalar(content, "type")
+  const canonicalType = resolveRegisteredWikiPageType(rawType, relativePath)
+  if (!canonicalType) return content
+  if (rawType === canonicalType) return content
+  return writeFrontmatterScalar(content, "type", canonicalType)
+}
+
+function canonicalizeChemicalSemanticFields(
+  content: string,
+  relativePath: string,
+): string {
+  return applyChemicalSemanticContract(content, relativePath)
+}
+
 async function migrateLegacySourceSummaryIfSafe(
   projectPath: string,
   sourceIdentity: string,
@@ -1139,6 +1218,8 @@ async function writeFileBlocks(
     let content = sanitizeIngestedFileContent(rawContent)
     if (!isLogPath(relativePath) && !isListingPath(relativePath)) {
       content = canonicalizeSourcesField(content, sourceFileName)
+      content = canonicalizeRegisteredPageType(content, relativePath)
+      content = canonicalizeChemicalSemanticFields(content, relativePath)
     }
 
     // Language guard: reject individual FILE blocks whose body contradicts
@@ -1210,7 +1291,13 @@ async function writeFileBlocks(
             backup: (oldContent) => backupExistingPage(projectPath, relativePath, oldContent),
           },
         )
-        await writeFile(fullPath, toWrite)
+        await writeFile(
+          fullPath,
+          canonicalizeChemicalSemanticFields(
+            canonicalizeRegisteredPageType(toWrite, relativePath),
+            relativePath,
+          ),
+        )
       }
       writtenPaths.push(relativePath)
     } catch (err) {
@@ -1303,31 +1390,91 @@ function shouldRunDedicatedReviewStage(generation: string): boolean {
  * Step 1 prompt: AI reads the source and produces a structured analysis.
  * This is the "discussion" step — the AI reasons about the source before writing wiki pages.
  */
-export function buildAnalysisPrompt(purpose: string, index: string, sourceContent: string = ""): string {
+export function buildAnalysisPrompt(
+  purpose: string,
+  index: string,
+  sourceContent: string = "",
+  schema: string = "",
+  projectMode?: ProjectMode | null,
+): string {
+  const profile = resolveIngestPromptProfile(schema, projectMode)
+  const chemicalContractLines = [
+    ...buildChemicalPromptContractLines("catalytic_system"),
+    ...buildChemicalPromptContractLines("elementary_process"),
+    ...buildChemicalPromptContractLines("mechanistic_network"),
+    ...buildChemicalPromptContractLines("evidence_claim"),
+  ]
+  const sections = isChemicalPromptProfile(profile)
+    ? [
+        "This project uses a chemical extraction profile. Use the four-layer ontology as the primary analysis frame while preserving compatibility with existing source pages and any legacy pages already in the wiki.",
+        "Track missing chemical details explicitly. If the source does not specify a required field, record that gap as `unknown`, `not_specified`, or `[]` instead of silently omitting it.",
+        "",
+        "Your analysis should cover:",
+        "",
+        "## Catalytic Systems",
+        "List the catalytic systems, species, catalyst materials, active sites, frameworks, environments, and reaction conditions discussed. For each:",
+        "- Canonical name and system role",
+        "- Key descriptors such as framework, active site, environment, catalyst material, or conditions when available",
+        "- Do not collapse this into a loose species-only note; capture the system context that makes the page belong in the catalytic-system layer",
+        "- Whether it likely already exists in the wiki (check the index)",
+        "",
+        "## Elementary Processes",
+        "List the concrete chemical, transport, deactivation, or regeneration events discussed. For each:",
+        "- Process name and process type",
+        "- Main participants, location context, process scope, and mechanistic role when stated",
+        "- Treat this as an event page, not a species summary page",
+        "- Whether it likely already exists in the wiki",
+        "",
+        "## Mechanistic Networks",
+        "List pathways, cycles, competing routes, or network-level mechanism claims. For each:",
+        "- Mechanism or pathway name",
+        "- Which processes or species it connects",
+        "- The nodes, edges, competition pattern, and control step if stated",
+        "- Whether it is dominant, competing, tentative, or challenged",
+        "",
+        "## Evidence & Validation",
+        "List the evidence claims that support, challenge, or limit the system/process/mechanism interpretation. For each:",
+        "- Claim being evaluated",
+        "- Evidence type or method",
+        "- Whether it supports, partially supports, challenges, contradicts, or limits the claim",
+        "- Keep evidence claim-centered; do not output method-only notes without a target claim",
+        "",
+        "## Minimum Semantic Contract",
+        ...chemicalContractLines,
+        "",
+        "## Main Arguments & Findings",
+        "- What are the core claims or results?",
+        "- Which claims are strongest vs. most tentative?",
+        "- What cross-layer links matter most (system -> process -> mechanism -> evidence)?",
+      ]
+    : [
+        "Your analysis should cover:",
+        "",
+        "## Key Entities",
+        "List people, organizations, products, datasets, tools mentioned. For each:",
+        "- Name and type",
+        "- Role in the source (central vs. peripheral)",
+        "- Whether it likely already exists in the wiki (check the index)",
+        "",
+        "## Key Concepts",
+        "List theories, methods, techniques, phenomena. For each:",
+        "- Name and brief definition",
+        "- Why it matters in this source",
+        "- Whether it likely already exists in the wiki",
+        "",
+        "## Main Arguments & Findings",
+        "- What are the core claims or results?",
+        "- What evidence supports them?",
+        "- How strong is the evidence?",
+      ]
+
   return [
     "You are an expert research analyst. Read the source document and produce a structured analysis.",
     "Do not output chain-of-thought, hidden reasoning, or a thinking transcript. Reason internally and write only the concise final analysis.",
     "",
     languageRule(sourceContent),
     "",
-    "Your analysis should cover:",
-    "",
-    "## Key Entities",
-    "List people, organizations, products, datasets, tools mentioned. For each:",
-    "- Name and type",
-    "- Role in the source (central vs. peripheral)",
-    "- Whether it likely already exists in the wiki (check the index)",
-    "",
-    "## Key Concepts",
-    "List theories, methods, techniques, phenomena. For each:",
-    "- Name and brief definition",
-    "- Why it matters in this source",
-    "- Whether it likely already exists in the wiki",
-    "",
-    "## Main Arguments & Findings",
-    "- What are the core claims or results?",
-    "- What evidence supports them?",
-    "- How strong is the evidence?",
+    ...sections,
     "",
     "## Connections to Existing Wiki",
     "- What existing pages does this source relate to?",
@@ -1338,7 +1485,9 @@ export function buildAnalysisPrompt(purpose: string, index: string, sourceConten
     "- Are there internal tensions or caveats?",
     "",
     "## Recommendations",
-    "- What wiki pages should be created or updated?",
+    isChemicalPromptProfile(profile)
+      ? "- What catalytic system, elementary process, mechanistic network, evidence claim, source, or compatibility page should be created or updated?"
+      : "- What wiki pages should be created or updated?",
     "- What should be emphasized vs. de-emphasized?",
     "- Any open questions worth flagging for the user?",
     "",
@@ -1347,6 +1496,7 @@ export function buildAnalysisPrompt(purpose: string, index: string, sourceConten
     "If a folder context is provided, use it as a hint for categorization — the folder structure often reflects the user's organizational intent (e.g., 'papers/energy' suggests the file is an energy-related paper).",
     "",
     purpose ? `## Wiki Purpose (for context)\n${purpose}` : "",
+    schema ? `## Wiki Schema (routing context)\n${schema}` : "",
     index ? `## Current Wiki Index (for checking existing content)\n${index}` : "",
   ].filter(Boolean).join("\n")
 }
@@ -1362,10 +1512,42 @@ export function buildGenerationPrompt(
   overview?: string,
   sourceContent: string = "",
   sourceSummaryPath?: string,
+  projectMode?: ProjectMode | null,
 ): string {
   // Use original filename (without extension) as the source summary page name
   const sourceBaseName = sourceFileName.replace(/\.[^.]+$/, "")
   const summaryPath = sourceSummaryPath ?? `wiki/sources/${sourceBaseName}.md`
+  const profile = resolveIngestPromptProfile(schema, projectMode)
+  const knownTypes = promptVisibleWikiTypes(profile)
+  const catalyticSystem = chemicalCategoryDefinition("catalytic_system")
+  const elementaryProcess = chemicalCategoryDefinition("elementary_process")
+  const mechanisticNetwork = chemicalCategoryDefinition("mechanistic_network")
+  const evidenceClaim = chemicalCategoryDefinition("evidence_claim")
+  const exampleType = isChemicalPromptProfile(profile) ? catalyticSystem.id : "entity"
+  const exampleTitle = isChemicalPromptProfile(profile) ? "Example Catalytic System" : "Example Entity"
+  const chemicalContractLines = [
+    ...buildChemicalPromptContractLines("catalytic_system"),
+    ...buildChemicalPromptContractLines("elementary_process"),
+    ...buildChemicalPromptContractLines("mechanistic_network"),
+    ...buildChemicalPromptContractLines("evidence_claim"),
+  ]
+  const generationInstructions = isChemicalPromptProfile(profile)
+    ? [
+        `2. ${catalyticSystem.displayLabel} or schema-defined typed pages for catalytic systems, species, catalyst materials, active sites, frameworks, environments, and conditions. Prefer schema-defined directories when present; otherwise use ${catalyticSystem.directory}.`,
+        `3. ${elementaryProcess.displayLabel} or schema-defined typed pages for adsorption, desorption, protonation, cracking, diffusion, deactivation, regeneration, and other elementary or transport events. Prefer schema-defined directories when present; otherwise use ${elementaryProcess.directory}.`,
+        `4. ${mechanisticNetwork.displayLabel} or schema-defined typed pages for pathways, cycles, route competitions, network-level mechanism claims, and deactivation routes. Prefer schema-defined directories when present; otherwise use ${mechanisticNetwork.directory}.`,
+        `5. ${evidenceClaim.displayLabel} or schema-defined typed pages for supporting, challenging, limiting, or validating chemical claims. Prefer schema-defined directories when present; otherwise use ${evidenceClaim.directory}.`,
+        "6. An updated wiki/index.md — add new entries to existing categories, preserve all existing entries",
+        "7. A log entry for wiki/log.md (just the new entry to append, format: ## [YYYY-MM-DD] ingest | Title)",
+        "8. An updated wiki/overview.md — a high-level summary of what the entire wiki covers, updated to reflect the newly ingested source. This should be a comprehensive 2-5 paragraph overview of ALL topics in the wiki, not just the new source.",
+      ]
+    : [
+        "2. Entity or schema-defined typed pages for key named things identified in the analysis. Prefer schema-defined directories when present; otherwise use wiki/entities/.",
+        "3. Concept or schema-defined typed pages for key ideas, methods, techniques, and abstractions. Prefer schema-defined directories when present; otherwise use wiki/concepts/.",
+        "4. An updated wiki/index.md — add new entries to existing categories, preserve all existing entries",
+        "5. A log entry for wiki/log.md (just the new entry to append, format: ## [YYYY-MM-DD] ingest | Title)",
+        "6. An updated wiki/overview.md — a high-level summary of what the entire wiki covers, updated to reflect the newly ingested source. This should be a comprehensive 2-5 paragraph overview of ALL topics in the wiki, not just the new source.",
+      ]
 
   return [
     "You are a wiki maintainer. Based on the analysis provided, generate wiki files.",
@@ -1383,6 +1565,9 @@ export function buildGenerationPrompt(
           schema,
           "",
           "Use this schema as the primary routing rule for page types and directories.",
+          isChemicalPromptProfile(profile)
+            ? "This schema indicates the chemical extraction profile. Prefer the four-layer ontology categories as the primary routing frame: catalytic systems, elementary processes, mechanistic networks, and evidence claims."
+            : "",
           "If it defines custom folders or distinctions (for example people, technologies, organizations, methods, or cases), write pages into those schema-defined folders instead of forcing them into wiki/entities/ or wiki/concepts/.",
           "Use wiki/entities/ and wiki/concepts/ only when the schema does not provide a more specific destination.",
         ].join("\n")
@@ -1391,11 +1576,7 @@ export function buildGenerationPrompt(
     "## What to generate",
     "",
     `1. A source summary page at **${summaryPath}** (MUST use this exact path)`,
-    "2. Entity or schema-defined typed pages for key named things identified in the analysis. Prefer schema-defined directories when present; otherwise use wiki/entities/.",
-    "3. Concept or schema-defined typed pages for key ideas, methods, techniques, and abstractions. Prefer schema-defined directories when present; otherwise use wiki/concepts/.",
-    "4. An updated wiki/index.md — add new entries to existing categories, preserve all existing entries",
-    "5. A log entry for wiki/log.md (just the new entry to append, format: ## [YYYY-MM-DD] ingest | Title)",
-    "6. An updated wiki/overview.md — a high-level summary of what the entire wiki covers, updated to reflect the newly ingested source. This should be a comprehensive 2-5 paragraph overview of ALL topics in the wiki, not just the new source.",
+    ...generationInstructions,
     "",
     "## Frontmatter Rules (CRITICAL — parser is strict)",
     "",
@@ -1412,7 +1593,7 @@ export function buildGenerationPrompt(
     "   write `related: [a, b]` with bare slugs.",
     "",
     "Required fields and types:",
-    `  • type     — one of the known types (${GENERATION_WIKI_TYPES.join(" | ")}), or a custom type explicitly defined by the project schema`,
+    `  • type     — one of the known types (${knownTypes.join(" | ")}), or a custom type explicitly defined by the project schema`,
     "  • title    — string (quote it if it contains a colon, e.g. `title: \"Foo: Bar\"`)",
     "  • created  — date in YYYY-MM-DD form (no quotes)",
     "  • updated  — same as created",
@@ -1421,12 +1602,26 @@ export function buildGenerationPrompt(
     "               `wiki/`, `.md`, or `[[…]]` here — slugs only.",
     `  • sources  — array of source filenames; MUST include "${sourceFileName}".`,
     "",
+    ...(isChemicalPromptProfile(profile)
+      ? [
+          "## Chemical Semantic Contract (STRICT IN CHEMICAL MODE)",
+          "Every catalytic-system, elementary-process, mechanistic-network, and evidence-claim page must include its required semantic frontmatter fields.",
+          ...chemicalContractLines,
+          "Anti-misclassification rules:",
+          "- Catalytic System pages describe a system context, not a free-floating species-only note. Include catalyst, site, or condition context when known.",
+          "- Elementary Process pages describe one event or transport/deactivation/regeneration step, not a background concept or species page.",
+          "- Mechanistic Network pages must be network-structured. Do not emit prose-only mechanism pages without nodes, edges, competition, and a control-step field.",
+          "- Evidence Claim pages must be claim-centered and include a normalized `relation_type` plus a `target_layer` and `target_page`.",
+          "If a required chemical field is not available from the source, still emit the field and use the exact fallback placeholders `unknown`, `not_specified`, or `[]` as appropriate.",
+          "",
+        ]
+      : []),
     "Concrete example of a complete, parseable page (everything between the two `---` lines",
     "is the frontmatter; the heading and prose below are the body):",
     "",
     "    ---",
-    "    type: entity",
-    "    title: Example Entity",
+    `    type: ${exampleType}`,
+    `    title: ${exampleTitle}`,
     "    created: 2026-04-29",
     "    updated: 2026-04-29",
     "    tags: [example, demo]",
@@ -1434,7 +1629,7 @@ export function buildGenerationPrompt(
     `    sources: ["${sourceFileName}"]`,
     "    ---",
     "",
-    "    # Example Entity",
+    `    # ${exampleTitle}`,
     "",
     "    Body content goes here. Use [[wikilink]] syntax in the body for cross-references.",
     "",
@@ -1450,8 +1645,12 @@ export function buildGenerationPrompt(
     "After all FILE blocks, optionally emit REVIEW blocks for anything that needs human judgment:",
     "",
     "- contradiction: the analysis found conflicts with existing wiki content",
-    "- duplicate: an entity/concept might already exist under a different name in the index",
-    "- missing-page: an important concept is referenced but has no dedicated page",
+    isChemicalPromptProfile(profile)
+      ? "- duplicate: a catalytic system, elementary process, mechanistic network, evidence claim, or compatibility page might already exist under a different name in the index"
+      : "- duplicate: an entity/concept might already exist under a different name in the index",
+    isChemicalPromptProfile(profile)
+      ? "- missing-page: an important catalytic system, elementary process, mechanism, evidence claim, or related compatibility page is referenced but has no dedicated page"
+      : "- missing-page: an important concept is referenced but has no dedicated page",
     "- suggestion: ideas for further research, related sources to look for, or connections worth exploring",
     "",
     "Only create reviews for things that genuinely need human input. Don't create trivial reviews.",
@@ -1525,10 +1724,13 @@ function buildReviewSuggestionPrompt(
   sourceContext: string,
   generation: string,
   maxContextSize: number | undefined,
+  schema: string = "",
+  projectMode?: ProjectMode | null,
 ): string {
   const { maxCtx } = computeContextBudget(maxContextSize)
   const sectionCap = Math.max(4_000, Math.floor(maxCtx * 0.15))
   const indexCap = Math.max(3_000, Math.floor(sectionCap * 0.8))
+  const profile = resolveIngestPromptProfile(schema, projectMode)
   return [
     "You are identifying high-value follow-up research items for a personal wiki.",
     "Do not output chain-of-thought, hidden reasoning, or explanatory preamble.",
@@ -1539,7 +1741,9 @@ function buildReviewSuggestionPrompt(
     "Output only REVIEW blocks for unresolved knowledge gaps that deserve human attention or Deep Research.",
     "",
     "Create REVIEW blocks only for genuinely useful follow-up work:",
-    "- missing-page: an important entity/concept is referenced but still lacks a dedicated page",
+    isChemicalPromptProfile(profile)
+      ? "- missing-page: an important catalytic system, elementary process, mechanism, evidence claim, or related compatibility page is referenced but still lacks a dedicated page"
+      : "- missing-page: an important entity/concept is referenced but still lacks a dedicated page",
     "- suggestion: a research question, source type, or comparison that would materially improve the wiki",
     "- contradiction: a conflict or tension that requires user judgment",
     "- duplicate: likely duplicate pages/names that need user review",
@@ -1561,6 +1765,7 @@ function buildReviewSuggestionPrompt(
     "Return REVIEW blocks only. Do not output FILE blocks. Do not wrap the response in markdown fences.",
     "",
     purpose ? `## Wiki Purpose\n${purpose}` : "",
+    schema ? `## Wiki Schema\n${trimLongText(schema, indexCap)}` : "",
     index ? `## Current Wiki Index\n${trimLongText(index, indexCap)}` : "",
     "",
     `## Source\n${sourceIdentity}`,
@@ -1837,27 +2042,47 @@ function buildChunkAnalysisSystemPrompt(
   schema: string,
   index: string,
   sourceContent: string,
+  projectMode?: ProjectMode | null,
 ): string {
+  const profile = resolveIngestPromptProfile(schema, projectMode)
+  const chunkAnalysisBullets = isChemicalPromptProfile(profile)
+    ? [
+        "- Concise summary of the main chunk",
+        "- Catalytic systems, species, sites, environments, and conditions",
+        "- Elementary processes, transport steps, deactivation, and regeneration events",
+        "- Mechanistic networks, pathways, cycles, and route competitions",
+        "- Evidence claims, validation, contradictions, and open questions",
+      ]
+    : [
+        "- Concise summary of the main chunk",
+        "- New or updated entities",
+        "- New or updated concepts",
+        "- Claims, findings, evidence, contradictions",
+        "- Open questions or research gaps",
+      ]
+  const digestStructure = isChemicalPromptProfile(profile)
+    ? "Keep this digest structured under: Summary, Catalytic Systems, Elementary Processes, Mechanistic Networks, Evidence Claims, Contradictions, Open Questions, Cross-Chunk Relations."
+    : "Keep this digest structured under: Summary, Entities, Concepts, Claims, Evidence, Contradictions, Open Questions, Cross-Chunk Relations."
+
   return [
     "You are analyzing a long source document for a personal wiki.",
     "Do not output chain-of-thought, hidden reasoning, or a thinking transcript.",
     "Analyze only the current MAIN CHUNK. Use overlap and digest for context only.",
     "Keep stable names consistent with the existing wiki and prior digest.",
+    isChemicalPromptProfile(profile)
+      ? "This project uses the chemical extraction profile. Use the four-layer ontology as the primary analysis frame."
+      : "",
     "",
     languageRule(sourceContent),
     "",
     "Output exactly two markdown sections:",
     "",
     "## Chunk Analysis",
-    "- Concise summary of the main chunk",
-    "- New or updated entities",
-    "- New or updated concepts",
-    "- Claims, findings, evidence, contradictions",
-    "- Open questions or research gaps",
+    ...chunkAnalysisBullets,
     "",
     "## Updated Global Digest",
     "A compact document-level digest that incorporates this chunk and preserves prior cross-chunk context.",
-    "Keep this digest structured under: Summary, Entities, Concepts, Claims, Evidence, Contradictions, Open Questions, Cross-Chunk Relations.",
+    digestStructure,
     "",
     "Stable project context follows. It changes rarely and should be treated as background:",
     purpose ? `## Wiki Purpose\n${purpose}` : "",
@@ -1896,6 +2121,7 @@ async function analyzeLongSourceInChunks(
   purpose: string,
   schema: string,
   index: string,
+  projectMode: ProjectMode | null,
   sourceIdentity: string,
   sourceSummarySlug: string,
   folderContext: string | undefined,
@@ -1912,7 +2138,13 @@ async function analyzeLongSourceInChunks(
   }
 
   const activity = useActivityStore.getState()
-  const systemPrompt = buildChunkAnalysisSystemPrompt(purpose, schema, index, sourceContent)
+  const systemPrompt = buildChunkAnalysisSystemPrompt(
+    purpose,
+    schema,
+    index,
+    sourceContent,
+    projectMode,
+  )
   const sourceHash = hashTextHex(sourceContent)
   const checkpointPath = longSourceCheckpointPath(projectPath, sourceSummarySlug, sourceHash)
   const checkpointParams = {
@@ -2428,7 +2660,7 @@ export async function executeIngestWrites(
 
   for (const match of matches) {
     let relativePath = match[1].trim()
-    let content = match[2]
+    let content = sanitizeIngestedFileContent(match[2])
 
     if (!relativePath) continue
     if (
@@ -2438,12 +2670,12 @@ export async function executeIngestWrites(
       relativePath = activeSourceSummaryPath
     }
 
-    if (
-      activeSourceIdentity &&
-      !isLogPath(relativePath) &&
-      !isListingPath(relativePath)
-    ) {
-      content = canonicalizeSourcesField(content, activeSourceIdentity)
+    if (!isLogPath(relativePath) && !isListingPath(relativePath)) {
+      if (activeSourceIdentity) {
+        content = canonicalizeSourcesField(content, activeSourceIdentity)
+      }
+      content = canonicalizeRegisteredPageType(content, relativePath)
+      content = canonicalizeChemicalSemanticFields(content, relativePath)
     }
 
     const fullPath = `${pp}/${relativePath}`

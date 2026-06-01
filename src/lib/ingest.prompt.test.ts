@@ -39,12 +39,41 @@ describe("buildAnalysisPrompt language directive", () => {
     expect(prompt).toContain("MANDATORY OUTPUT LANGUAGE: English")
   })
 
-  it("contains structural analysis sections", () => {
+  it("keeps legacy structural analysis sections by default", () => {
     const prompt = buildAnalysisPrompt("", "", "")
     expect(prompt).toContain("## Key Entities")
     expect(prompt).toContain("## Key Concepts")
     expect(prompt).toContain("## Main Arguments & Findings")
     expect(prompt).toContain("## Recommendations")
+  })
+
+  it("switches to chemical ontology sections when the schema indicates chemical mode", () => {
+    const prompt = buildAnalysisPrompt(
+      "",
+      "",
+      "",
+      [
+        "# Wiki Schema",
+        "Category profile: chemical-default",
+        "Use wiki/catalytic-systems/ for catalytic systems.",
+        "Use wiki/elementary-processes/ for elementary processes.",
+      ].join("\n"),
+    )
+    expect(prompt).toContain("## Catalytic Systems")
+    expect(prompt).toContain("## Elementary Processes")
+    expect(prompt).toContain("## Mechanistic Networks")
+    expect(prompt).toContain("## Evidence & Validation")
+    expect(prompt).toContain("## Minimum Semantic Contract")
+    expect(prompt).toContain("system_type=unknown")
+    expect(prompt).toContain("relation_type=not_specified")
+    expect(prompt).toContain("unknown`, `not_specified`, or `[]`")
+    expect(prompt).not.toContain("## Key Entities")
+  })
+
+  it("prefers explicit project mode over schema text for analysis routing", () => {
+    const prompt = buildAnalysisPrompt("", "", "", "", "chemical")
+    expect(prompt).toContain("## Catalytic Systems")
+    expect(prompt).not.toContain("## Key Entities")
   })
 })
 
@@ -83,6 +112,42 @@ describe("buildGenerationPrompt language directive", () => {
     expect(prompt).toContain("write pages into those schema-defined folders")
     expect(prompt).toContain("otherwise use wiki/entities/")
     expect(prompt).not.toContain("Entity pages in wiki/entities/ for key entities")
+  })
+
+  it("switches generation guidance and known types for chemical schemas", () => {
+    const prompt = buildGenerationPrompt(
+      [
+        "# Wiki Schema",
+        "Category profile: chemical-default",
+        "Use wiki/catalytic-systems/ for catalytic systems.",
+        "Use wiki/elementary-processes/ for elementary processes.",
+        "Use wiki/mechanistic-networks/ for mechanisms.",
+        "Use wiki/evidence-claims/ for evidence claims.",
+      ].join("\n"),
+      "",
+      "",
+      "source.pdf",
+    )
+    expect(prompt).toContain("This schema indicates the chemical extraction profile.")
+    expect(prompt).toContain("wiki/catalytic-systems/")
+    expect(prompt).toContain("wiki/elementary-processes/")
+    expect(prompt).toContain("wiki/mechanistic-networks/")
+    expect(prompt).toContain("wiki/evidence-claims/")
+    expect(prompt).toContain("catalytic_system")
+    expect(prompt).toContain("elementary_process")
+    expect(prompt).toContain("## Chemical Semantic Contract (STRICT IN CHEMICAL MODE)")
+    expect(prompt).toContain("network_nodes=[]")
+    expect(prompt).toContain("target_layer=not_specified")
+    expect(prompt).toContain("relation_type")
+    expect(prompt).toContain("Anti-misclassification rules:")
+    expect(prompt).not.toContain("type: entity")
+  })
+
+  it("prefers explicit project mode over schema text for generation routing", () => {
+    const prompt = buildGenerationPrompt("", "", "", "source.pdf", undefined, "", undefined, "chemical")
+    expect(prompt).toContain("wiki/catalytic-systems/")
+    expect(prompt).toContain("catalytic_system")
+    expect(prompt).not.toContain("type: entity")
   })
 
   it("respects user setting regardless of source content language", () => {

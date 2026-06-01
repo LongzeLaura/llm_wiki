@@ -16,6 +16,7 @@ import { normalizePath } from "@/lib/path-utils"
 import { OUTPUT_LANGUAGE_OPTIONS } from "@/lib/output-language-options"
 import { useWikiStore, type OutputLanguage } from "@/stores/wiki-store"
 import { saveOutputLanguage } from "@/lib/project-store"
+import { type ProjectMode } from "@/lib/project-mode"
 
 interface CreateProjectDialogProps {
   open: boolean
@@ -28,6 +29,7 @@ export function CreateProjectDialog({ open: isOpen, onOpenChange, onCreated }: C
   const [name, setName] = useState("")
   const [path, setPath] = useState("")
   const [selectedTemplate, setSelectedTemplate] = useState("general")
+  const [projectMode, setProjectMode] = useState<ProjectMode | "">("")
   // Empty string = "user hasn't picked yet"; we validate this on
   // submit so a fresh project never starts in implicit auto-detect
   // mode. Once chosen, the value is one of OUTPUT_LANGUAGE_OPTIONS
@@ -58,13 +60,17 @@ export function CreateProjectDialog({ open: isOpen, onOpenChange, onCreated }: C
       setError(t("project.errorLanguageRequired"))
       return
     }
+    if (!projectMode) {
+      setError(t("project.errorModeRequired"))
+      return
+    }
     setCreating(true)
     setError("")
     try {
-      const project = await createProject(name.trim(), path.trim())
+      const project = await createProject(name.trim(), path.trim(), projectMode)
       const pp = normalizePath(project.path)
 
-      const template = getTemplate(selectedTemplate)
+      const template = getTemplate(selectedTemplate, projectMode)
       await writeFile(`${pp}/schema.md`, template.schema)
       await writeFile(`${pp}/purpose.md`, template.purpose)
       for (const dir of template.extraDirs) {
@@ -84,6 +90,7 @@ export function CreateProjectDialog({ open: isOpen, onOpenChange, onCreated }: C
       setName("")
       setPath("")
       setSelectedTemplate("general")
+      setProjectMode("")
       setLanguage("")
     } catch (err) {
       setError(String(err))
@@ -106,6 +113,43 @@ export function CreateProjectDialog({ open: isOpen, onOpenChange, onCreated }: C
           <div className="flex flex-col gap-2">
             <Label>{t("project.template")}</Label>
             <TemplatePicker selected={selectedTemplate} onSelect={setSelectedTemplate} />
+          </div>
+          <div className="flex flex-col gap-2">
+            <Label>
+              {t("project.mode")} <span className="text-destructive">{t("project.modeRequired")}</span>
+            </Label>
+            <div className="grid gap-2 sm:grid-cols-2">
+              {([
+                {
+                  value: "default",
+                  title: t("project.modeDefault"),
+                  description: t("project.modeDefaultDescription"),
+                },
+                {
+                  value: "chemical",
+                  title: t("project.modeChemical"),
+                  description: t("project.modeChemicalDescription"),
+                },
+              ] satisfies Array<{ value: ProjectMode; title: string; description: string }>).map((option) => (
+                <button
+                  key={option.value}
+                  type="button"
+                  onClick={() => setProjectMode(option.value)}
+                  className={[
+                    "flex flex-col gap-1 rounded-md border p-3 text-left transition-colors hover:bg-accent",
+                    projectMode === option.value
+                      ? "border-primary bg-accent ring-1 ring-primary"
+                      : "border-border bg-background",
+                  ].join(" ")}
+                >
+                  <span className="text-sm font-medium leading-tight">{option.title}</span>
+                  <span className="text-xs text-muted-foreground leading-tight">{option.description}</span>
+                </button>
+              ))}
+            </div>
+            <p className="text-xs text-muted-foreground">
+              {t("project.modeHint")}
+            </p>
           </div>
           <div className="flex flex-col gap-2">
             <Label htmlFor="language">

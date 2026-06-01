@@ -6,8 +6,7 @@ import rehypeKatex from "rehype-katex"
 import "katex/dist/katex.min.css"
 import {
   Bot, User, FileText, BookmarkPlus, ChevronDown, ChevronRight, RefreshCw, Copy, Check,
-  Users, Lightbulb, BookOpen, HelpCircle, GitMerge, BarChart3, Layout, Globe,
-  TrendingUp, Target, Image as ImageIcon, FileSearch,
+  Globe, Image as ImageIcon, FileSearch,
 } from "lucide-react"
 import { openUrl } from "@tauri-apps/plugin-opener"
 import { useWikiStore } from "@/stores/wiki-store"
@@ -17,7 +16,7 @@ import type { DisplayMessage, MessageReference } from "@/stores/chat-store"
 import type { FileNode } from "@/types/wiki"
 
 import { convertLatexToUnicode } from "@/lib/latex-to-unicode"
-import { normalizePath, getFileName } from "@/lib/path-utils"
+import { normalizePath } from "@/lib/path-utils"
 import { makeQueryFileName } from "@/lib/wiki-filename"
 import { hasUsableLlm } from "@/lib/has-usable-llm"
 import { resolveMarkdownImageSrc } from "@/lib/markdown-image-resolver"
@@ -25,7 +24,8 @@ import { findRawSourceForImage, imageUrlToAbsolute } from "@/lib/raw-source-reso
 import { detectLanguage } from "@/lib/detect-language"
 import { getHtmlLang, getTextDirection } from "@/lib/language-metadata"
 import { MermaidDiagram, unwrapMermaidPre } from "@/components/mermaid-diagram"
-import { inferWikiTypeFromPath } from "@/lib/wiki-page-types"
+import { buildWikiPageLookupCandidates, inferWikiTypeFromPath } from "@/lib/wiki-page-types"
+import { getWikiTypeStyle } from "@/lib/wiki-type-style"
 
 // Module-level cache of source file names
 let cachedSourceFiles: string[] = []
@@ -274,20 +274,10 @@ function SaveToWikiButton({ content, visible }: { content: string; visible: bool
 
 type CitedPage = MessageReference
 
-const REF_TYPE_CONFIG: Record<string, { icon: typeof FileText; color: string }> = {
-  entity: { icon: Users, color: "text-blue-500" },
-  concept: { icon: Lightbulb, color: "text-purple-500" },
-  source: { icon: BookOpen, color: "text-orange-500" },
-  query: { icon: HelpCircle, color: "text-green-500" },
-  synthesis: { icon: GitMerge, color: "text-red-500" },
-  comparison: { icon: BarChart3, color: "text-teal-500" },
-  finding: { icon: TrendingUp, color: "text-purple-500" },
-  thesis: { icon: Target, color: "text-rose-500" },
-  methodology: { icon: BookOpen, color: "text-teal-500" },
-  overview: { icon: Layout, color: "text-yellow-500" },
-  clip: { icon: Globe, color: "text-blue-400" },
-  external: { icon: Globe, color: "text-sky-500" },
-  anytxt: { icon: FileSearch, color: "text-emerald-500" },
+const SPECIAL_REF_TYPE_CONFIG: Record<string, { icon: typeof FileText; accentClass: string }> = {
+  clip: { icon: Globe, accentClass: "text-blue-400" },
+  external: { icon: Globe, accentClass: "text-sky-500" },
+  anytxt: { icon: FileSearch, accentClass: "text-emerald-500" },
 }
 
 function getRefType(path: string, page?: CitedPage): string {
@@ -313,6 +303,10 @@ function displayExternalPath(page: CitedPage): string {
     }
   }
   return raw
+}
+
+function getRefTypeStyle(refType: string): { icon: typeof FileText; accentClass: string } {
+  return SPECIAL_REF_TYPE_CONFIG[refType] ?? getWikiTypeStyle(refType)
 }
 
 /**
@@ -374,17 +368,7 @@ function CitedReferencesPanel({ content, savedReferences }: { content: string; s
         if (page.kind === "external") {
           return [page.path, { count: 0, firstUrl: null }] as const
         }
-        const id = getFileName(page.path.replace(/^wiki\//, "").replace(/\.md$/, ""))
-        const candidates = [
-          `${pp}/${page.path}`,
-          `${pp}/wiki/entities/${id}.md`,
-          `${pp}/wiki/concepts/${id}.md`,
-          `${pp}/wiki/sources/${id}.md`,
-          `${pp}/wiki/queries/${id}.md`,
-          `${pp}/wiki/synthesis/${id}.md`,
-          `${pp}/wiki/comparisons/${id}.md`,
-          `${pp}/wiki/${id}.md`,
-        ]
+        const candidates = buildWikiPageLookupCandidates(pp, page.path)
         for (const candidate of candidates) {
           try {
             const text = await readFile(candidate)
@@ -479,8 +463,8 @@ function CitedReferencesPanel({ content, savedReferences }: { content: string; s
       <div className="px-2 pb-1.5">
         {visiblePages.map((page, i) => {
           const refType = getRefType(page.path, page)
-          const config = REF_TYPE_CONFIG[refType] ?? REF_TYPE_CONFIG.source
-          const Icon = config.icon
+          const refStyle = getRefTypeStyle(refType)
+          const Icon = refStyle.icon
           const info = imageInfos[page.path]
           const hasImages = (info?.count ?? 0) > 0
           const openCitedPage = async () => {
@@ -519,17 +503,7 @@ function CitedReferencesPanel({ content, savedReferences }: { content: string; s
             }
             if (!project) return
             const pp = normalizePath(project.path)
-            const id = getFileName(page.path.replace(/^wiki\//, "").replace(/\.md$/, ""))
-            const candidates = [
-              `${pp}/${page.path}`,
-              `${pp}/wiki/entities/${id}.md`,
-              `${pp}/wiki/concepts/${id}.md`,
-              `${pp}/wiki/sources/${id}.md`,
-              `${pp}/wiki/queries/${id}.md`,
-              `${pp}/wiki/synthesis/${id}.md`,
-              `${pp}/wiki/comparisons/${id}.md`,
-              `${pp}/wiki/${id}.md`,
-            ]
+            const candidates = buildWikiPageLookupCandidates(pp, page.path)
             for (const candidate of candidates) {
               try {
                 await readFile(candidate)
@@ -582,7 +556,7 @@ function CitedReferencesPanel({ content, savedReferences }: { content: string; s
                 onClick={openCitedPage}
                 className="flex min-w-0 flex-1 items-center gap-1.5 rounded px-1 py-0.5 text-left hover:bg-accent/50 transition-colors"
               >
-                <Icon className={`h-3 w-3 shrink-0 ${config.color}`} />
+                <Icon className={`h-3 w-3 shrink-0 ${refStyle.accentClass}`} />
                 <span className="min-w-0 flex-1 truncate text-foreground/80">
                   {page.title}
                   {page.kind === "external" && page.source?.toLowerCase() === "anytxt" && (
@@ -649,8 +623,6 @@ function extractCitedPages(text: string): CitedPage[] {
   if (wikilinks) {
     const seen = new Set<string>()
     const pages: CitedPage[] = []
-    const WIKI_DIRS = ["entities", "concepts", "sources", "queries", "synthesis", "comparisons"]
-
     for (const link of wikilinks) {
       const nameMatch = link.match(/\[\[([^\]|]+?)(?:\|([^\]]+?))?\]\]/)
       if (nameMatch) {
@@ -667,14 +639,10 @@ function extractCitedPages(text: string): CitedPage[] {
           // Already has directory like "queries/my-query"
           resolvedPath = `wiki/${id}.md`
         } else {
-          // Search in common directories
-          for (const dir of WIKI_DIRS) {
-            resolvedPath = `wiki/${dir}/${id}.md`
-            // We can't do async file checking here, so try all known patterns
-            // The click handler will try multiple paths
-            break // Use first candidate, click handler resolves the rest
-          }
-          if (!resolvedPath) resolvedPath = `wiki/${id}.md`
+          // Keep the historical entity-first guess for plain wikilinks.
+          // The click handler resolves the rest through the shared
+          // registry-backed candidate list.
+          resolvedPath = `wiki/entities/${id}.md`
         }
 
         pages.push({ title: display, path: resolvedPath })
@@ -941,15 +909,10 @@ function WikiLink({ pageName, children }: { pageName: string; children: React.Re
   useEffect(() => {
     if (!project) return
     const pp = normalizePath(project.path)
-    const candidates = [
-      `${pp}/wiki/entities/${pageName}.md`,
-      `${pp}/wiki/concepts/${pageName}.md`,
-      `${pp}/wiki/sources/${pageName}.md`,
-      `${pp}/wiki/queries/${pageName}.md`,
-      `${pp}/wiki/comparisons/${pageName}.md`,
-      `${pp}/wiki/synthesis/${pageName}.md`,
-      `${pp}/wiki/${pageName}.md`,
-    ]
+    const preferredPath = pageName.includes("/")
+      ? `wiki/${pageName.replace(/^wiki\//, "").replace(/\.md$/i, "")}.md`
+      : `wiki/entities/${pageName}.md`
+    const candidates = buildWikiPageLookupCandidates(pp, preferredPath)
 
     let cancelled = false
     async function check() {

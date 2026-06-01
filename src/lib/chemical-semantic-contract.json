@@ -1,0 +1,83 @@
+{
+  "reportPath": "docs/chemical-semantic-validation-report.md",
+  "pageTypes": {
+    "catalytic_system": {
+      "displayLabel": "Catalytic System",
+      "directory": "wiki/catalytic-systems/",
+      "requiredFields": [
+        { "name": "system_type", "kind": "scalar", "placeholder": "unknown" },
+        { "name": "role", "kind": "scalar", "placeholder": "not_specified" },
+        { "name": "catalyst_material", "kind": "scalar", "placeholder": "unknown" },
+        { "name": "active_site_type", "kind": "scalar", "placeholder": "unknown" },
+        { "name": "reaction_conditions", "kind": "scalar", "placeholder": "not_specified" }
+      ]
+    },
+    "elementary_process": {
+      "displayLabel": "Elementary Process",
+      "directory": "wiki/elementary-processes/",
+      "requiredFields": [
+        { "name": "process_type", "kind": "scalar", "placeholder": "unknown" },
+        { "name": "participants", "kind": "array", "placeholder": [] },
+        { "name": "location_context", "kind": "scalar", "placeholder": "not_specified" },
+        {
+          "name": "process_scope",
+          "kind": "scalar",
+          "placeholder": "not_specified",
+          "allowedValues": [
+            "chemical_step",
+            "transport_step",
+            "deactivation_step",
+            "regeneration_step",
+            "not_specified"
+          ]
+        },
+        { "name": "role_in_mechanism", "kind": "scalar", "placeholder": "not_specified" }
+      ]
+    },
+    "mechanistic_network": {
+      "displayLabel": "Mechanistic Network",
+      "directory": "wiki/mechanistic-networks/",
+      "requiredFields": [
+        { "name": "mechanism_type", "kind": "scalar", "placeholder": "unknown" },
+        { "name": "network_nodes", "kind": "array", "placeholder": [] },
+        { "name": "network_edges", "kind": "array", "placeholder": [] },
+        { "name": "competing_pathways", "kind": "array", "placeholder": [] },
+        { "name": "control_step", "kind": "scalar", "placeholder": "not_specified" }
+      ]
+    },
+    "evidence_claim": {
+      "displayLabel": "Evidence Claim",
+      "directory": "wiki/evidence-claims/",
+      "requiredFields": [
+        { "name": "claim", "kind": "scalar", "placeholder": "unknown" },
+        { "name": "evidence_type", "kind": "scalar", "placeholder": "unknown" },
+        {
+          "name": "relation_type",
+          "kind": "scalar",
+          "placeholder": "not_specified",
+          "allowedValues": [
+            "supports",
+            "partially_supports",
+            "challenges",
+            "contradicts",
+            "limits",
+            "not_specified"
+          ]
+        },
+        {
+          "name": "target_layer",
+          "kind": "scalar",
+          "placeholder": "not_specified",
+          "allowedValues": [
+            "catalytic_system",
+            "elementary_process",
+            "mechanistic_network",
+            "not_specified"
+          ]
+        },
+        { "name": "target_page", "kind": "scalar", "placeholder": "unknown" },
+        { "name": "evidence_summary", "kind": "scalar", "placeholder": "not_specified" }
+      ]
+    }
+  }
+}

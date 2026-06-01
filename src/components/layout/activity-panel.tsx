@@ -1,8 +1,8 @@
 import { useState, useEffect, useRef, useCallback } from "react"
 import {
   ChevronUp, ChevronDown, Loader2, CheckCircle2, AlertCircle,
-  FileText, Users, Lightbulb, BookOpen, GitMerge, BarChart3, HelpCircle, Layout,
-  RotateCcw, X, Clock, TrendingUp, Target,
+  FileText,
+  RotateCcw, X, Clock,
 } from "lucide-react"
 import { useActivityStore, type ActivityItem } from "@/stores/activity-store"
 import { useWikiStore } from "@/stores/wiki-store"
@@ -23,46 +23,16 @@ import {
   retryFileChangeTask,
   type FileChangeTask,
 } from "@/commands/file-sync"
-import { inferWikiTypeFromPath, wikiTypeLabel } from "@/lib/wiki-page-types"
-
-const FILE_TYPE_ICONS: Record<string, typeof FileText> = {
-  sources: BookOpen,
-  entities: Users,
-  concepts: Lightbulb,
-  queries: HelpCircle,
-  synthesis: GitMerge,
-  comparisons: BarChart3,
-  findings: TrendingUp,
-  thesis: Target,
-  methodology: BookOpen,
-  overview: Layout,
-}
-
-const WIKI_TYPE_ICON_KEYS: Record<string, keyof typeof FILE_TYPE_ICONS> = {
-  entity: "entities",
-  concept: "concepts",
-  source: "sources",
-  query: "queries",
-  synthesis: "synthesis",
-  comparison: "comparisons",
-  finding: "findings",
-  thesis: "thesis",
-  methodology: "methodology",
-  overview: "overview",
-}
+import { inferWikiTypeFromPath } from "@/lib/wiki-page-types"
+import { getWikiTypeStyle } from "@/lib/wiki-type-style"
 
 function getFileTypeInfo(path: string): { icon: typeof FileText; type: string } {
   const inferred = inferWikiTypeFromPath(path)
   if (inferred) {
-    const directoryIcon = FILE_TYPE_ICONS[WIKI_TYPE_ICON_KEYS[inferred]]
-    return { icon: directoryIcon ?? FileText, type: wikiTypeLabel(inferred) }
+    const style = getWikiTypeStyle(inferred)
+    return { icon: style.icon, type: style.label }
   }
-  for (const [dir, icon] of Object.entries(FILE_TYPE_ICONS)) {
-    if (path.includes(`/${dir}/`) || path.startsWith(`wiki/${dir}/`)) {
-      return { icon, type: dir.charAt(0).toUpperCase() + dir.slice(1, -1) }
-    }
-  }
-  if (path.includes("index.md")) return { icon: Layout, type: "Index" }
+  if (path.includes("index.md")) return { icon: getWikiTypeStyle("overview").icon, type: "Index" }
   if (path.includes("log.md")) return { icon: FileText, type: "Log" }
   return { icon: FileText, type: "File" }
 }

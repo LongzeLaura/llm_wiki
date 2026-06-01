@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from "react"
 import {
-  FileText, Users, Lightbulb, BookOpen, HelpCircle, GitMerge, BarChart3, TrendingUp, Target, ChevronRight, ChevronDown, Layout, Globe, Trash2,
+  FileText, BookOpen, ChevronRight, ChevronDown, Globe, Trash2,
 } from "lucide-react"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { Button } from "@/components/ui/button"
@@ -9,7 +9,9 @@ import { readFile, listDirectory } from "@/commands/fs"
 import type { FileNode } from "@/types/wiki"
 import { normalizePath } from "@/lib/path-utils"
 import { cascadeDeleteWikiPagesWithRefs } from "@/lib/wiki-page-delete"
-import { inferWikiTypeFromPath, wikiTypeLabel } from "@/lib/wiki-page-types"
+import { inferWikiTypeFromPath } from "@/lib/wiki-page-types"
+import { getAllCategoryDefinitions } from "@/lib/category-registry"
+import { compareWikiTypeOrder, getWikiTypeStyle } from "@/lib/wiki-type-style"
 
 interface WikiPageInfo {
   path: string
@@ -19,21 +21,17 @@ interface WikiPageInfo {
   origin?: string
 }
 
-const TYPE_CONFIG: Record<string, { icon: typeof FileText; label: string; color: string; order: number }> = {
-  overview:    { icon: Layout,      label: "Overview",     color: "text-yellow-500", order: 0 },
-  entity:      { icon: Users,       label: "Entities",     color: "text-blue-500",   order: 1 },
-  concept:     { icon: Lightbulb,   label: "Concepts",     color: "text-purple-500", order: 2 },
-  source:      { icon: BookOpen,    label: "Sources",      color: "text-orange-500", order: 3 },
-  synthesis:   { icon: GitMerge,    label: "Synthesis",    color: "text-red-500",    order: 4 },
-  finding:     { icon: TrendingUp,  label: "Findings",     color: "text-purple-500", order: 5 },
-  thesis:      { icon: Target,      label: "Theses",       color: "text-rose-500",   order: 6 },
-  methodology: { icon: BookOpen,    label: "Methodologies",color: "text-teal-500",   order: 7 },
-  comparison:  { icon: BarChart3,   label: "Comparisons",  color: "text-emerald-500",order: 8 },
-  query:       { icon: HelpCircle,  label: "Queries",      color: "text-green-500",  order: 9 },
-}
+const DEFAULT_EXPANDED_TYPE_IDS = getAllCategoryDefinitions()
+  .filter((definition) => definition.id === "overview" || definition.kind === "legacy_core" || definition.kind === "chemical_core")
+  .map((definition) => definition.id)
 
-function typeConfig(type: string): { icon: typeof FileText; label: string; color: string; order: number } {
-  return TYPE_CONFIG[type] ?? { icon: FileText, label: wikiTypeLabel(type), color: "text-muted-foreground", order: 99 }
+function typeConfig(type: string): { icon: typeof FileText; label: string; color: string } {
+  const style = getWikiTypeStyle(type)
+  return {
+    icon: style.icon,
+    label: style.pluralLabel,
+    color: style.accentClass,
+  }
 }
 
 export function KnowledgeTree() {
@@ -44,7 +42,7 @@ export function KnowledgeTree() {
   const setFileTree = useWikiStore((s) => s.setFileTree)
   const bumpDataVersion = useWikiStore((s) => s.bumpDataVersion)
   const [pages, setPages] = useState<WikiPageInfo[]>([])
-  const [expandedTypes, setExpandedTypes] = useState<Set<string>>(new Set(["overview", "entity", "concept", "source"]))
+  const [expandedTypes, setExpandedTypes] = useState<Set<string>>(() => new Set(DEFAULT_EXPANDED_TYPE_IDS))
   // Two-stage delete: first click arms the row, second click executes.
   // Only one row armed at a time (clicking another row replaces).
   const [armedPath, setArmedPath] = useState<string | null>(null)
@@ -136,12 +134,7 @@ export function KnowledgeTree() {
   }
 
   // Sort groups by configured order
-  const sortedGroups = [...grouped.entries()].sort((a, b) => {
-    const orderA = typeConfig(a[0]).order
-    const orderB = typeConfig(b[0]).order
-    if (orderA === orderB) return wikiTypeLabel(a[0]).localeCompare(wikiTypeLabel(b[0]))
-    return orderA - orderB
-  })
+  const sortedGroups = [...grouped.entries()].sort((a, b) => compareWikiTypeOrder(a[0], b[0]))
 
   function toggleType(type: string) {
     setExpandedTypes((prev) => {

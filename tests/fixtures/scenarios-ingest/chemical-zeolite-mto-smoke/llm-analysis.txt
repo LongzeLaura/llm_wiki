@@ -1,0 +1,17 @@
+## Catalytic Systems
+- H-ZSM-5 under methanol-to-olefins conditions; MFI framework; Bronsted acid sites in straight channels.
+
+## Elementary Processes
+- Surface methoxy formation by methanol dehydration on Bronsted acid sites.
+- Methylation in straight channels.
+
+## Mechanistic Networks
+- Dual-cycle methanol-to-olefins mechanism with olefin-cycle dominance at short contact times.
+
+## Evidence & Validation
+- 13C isotope labeling supports retained hydrocarbon participation in light-olefin formation.
+- DFT methylation barriers support channel-dependent pathway preference.
+
+## Recommendations
+- Create chemical pages in catalytic-systems, elementary-processes, mechanistic-networks, and evidence-claims.
+- Create a source summary and update index/log/overview.

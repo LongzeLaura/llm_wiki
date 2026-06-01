@@ -67,7 +67,15 @@
     "aiOutputLanguage": "AI Output Language",
     "aiOutputLanguageRequired": "*",
     "aiOutputLanguageHint": "All AI-generated content (wiki pages, chat replies, research output) will use this language. You can change it later in Settings → Output.",
-    "pickLanguage": "Pick a language…"
+    "pickLanguage": "Pick a language…",
+    "errorModeRequired": "Please pick a knowledge base mode",
+    "mode": "Knowledge Base Mode",
+    "modeRequired": "*",
+    "modeHint": "This is the project's formal extraction mode. New projects save it in `.llm-wiki/project.json`, and later ingest/prompt routing reads that metadata first instead of guessing from `schema.md`.",
+    "modeDefault": "Default Mode",
+    "modeDefaultDescription": "Original llm_wiki behavior with legacy entity/concept/source routing.",
+    "modeChemical": "Chemical Knowledge Base",
+    "modeChemicalDescription": "Chemical extraction profile with catalytic-system, process, mechanism, and evidence categories."
   },
   "templates": {
     "research": {

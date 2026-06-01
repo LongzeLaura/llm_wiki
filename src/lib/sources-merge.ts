@@ -65,6 +65,21 @@ export function parseFrontmatterArray(content: string, fieldName: string): strin
     .filter((s) => s.length > 0)
 }
 
+export function parseFrontmatterScalar(
+  content: string,
+  fieldName: string,
+): string | null {
+  const fmMatch = content.match(/^---\n([\s\S]*?)\n---/)
+  if (!fmMatch) return null
+  const escapedName = fieldName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
+  const lineRe = new RegExp(`^${escapedName}:\\s*(?!\\[)([^\\n]*)`, "m")
+  const match = fmMatch[1].match(lineRe)
+  if (!match) return null
+  const rawValue = match[1]?.trim() ?? ""
+  if (!rawValue) return ""
+  return rawValue.replace(/^["']|["']$/g, "").trim()
+}
+
 /**
  * Rewrite (or insert) a frontmatter array field. Preserves all other
  * frontmatter lines and order. Returns content unchanged if the
@@ -107,6 +122,27 @@ export function writeFrontmatterArray(
   }
 
   // Field absent — append at end of frontmatter.
+  const rewritten = `${fmBody}\n${newLine}`
+  return `${openDelim}${rewritten}${closeDelim}${content.slice(fmMatch[0].length)}`
+}
+
+export function writeFrontmatterScalar(
+  content: string,
+  fieldName: string,
+  value: string,
+): string {
+  const fmMatch = content.match(/^(---\n)([\s\S]*?)(\n---)/)
+  if (!fmMatch) return content
+
+  const [, openDelim, fmBody, closeDelim] = fmMatch
+  const escapedName = fieldName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
+  const newLine = `${fieldName}: ${value}`
+  const lineRe = new RegExp(`^${escapedName}:\\s*(?!\\[)([^\\n]*)`, "m")
+  if (lineRe.test(fmBody)) {
+    const rewritten = fmBody.replace(lineRe, newLine)
+    return `${openDelim}${rewritten}${closeDelim}${content.slice(fmMatch[0].length)}`
+  }
+
   const rewritten = `${fmBody}\n${newLine}`
   return `${openDelim}${rewritten}${closeDelim}${content.slice(fmMatch[0].length)}`
 }

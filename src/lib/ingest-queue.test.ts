@@ -10,6 +10,7 @@ vi.mock("./ingest", () => ({
 vi.mock("@/commands/fs", () => ({
   readFile: vi.fn(),
   writeFile: vi.fn(),
+  writeFileAtomic: vi.fn(),
   listDirectory: vi.fn(),
   deleteFile: vi.fn(),
 }))
@@ -65,13 +66,13 @@ import {
   restoreQueue,
 } from "./ingest-queue"
 import { autoIngest } from "./ingest"
-import { readFile, writeFile } from "@/commands/fs"
+import { readFile, writeFileAtomic } from "@/commands/fs"
 import { sweepResolvedReviews } from "./sweep-reviews"
 import { useWikiStore } from "@/stores/wiki-store"
 
 const mockAutoIngest = vi.mocked(autoIngest)
 const mockReadFile = vi.mocked(readFile)
-const mockWriteFile = vi.mocked(writeFile)
+const mockWriteFileAtomic = vi.mocked(writeFileAtomic)
 const mockSweep = vi.mocked(sweepResolvedReviews)
 
 /** Simulate the app having opened `TEST_ID` at `TEST_PATH` so the queue
@@ -86,14 +87,14 @@ beforeEach(async () => {
   clearQueueState()
   mockAutoIngest.mockReset()
   mockReadFile.mockReset()
-  mockWriteFile.mockReset()
+  mockWriteFileAtomic.mockReset()
   mockSweep.mockReset()
   mockSweep.mockResolvedValue(0)
   removePageEmbeddingMock.mockReset()
 
   // Default: persisted queue file doesn't exist
   mockReadFile.mockRejectedValue(new Error("ENOENT"))
-  mockWriteFile.mockResolvedValue(undefined as unknown as void)
+  mockWriteFileAtomic.mockResolvedValue(undefined as unknown as void)
 
   // Default: a valid LLM config so processNext doesn't reject.
   useWikiStore.getState().setLlmConfig({
@@ -130,7 +131,7 @@ describe("ingest-queue — enqueue & basic processing", () => {
     await flushMicrotasks(2)
 
     // writeFile should have been called to save the queue
-    const calls = mockWriteFile.mock.calls
+    const calls = mockWriteFileAtomic.mock.calls
     expect(calls.length).toBeGreaterThan(0)
     const queuePath = calls[0][0]
     expect(queuePath).toContain(".llm-wiki/ingest-queue.json")
@@ -241,7 +242,7 @@ describe("ingest-queue — retry & failure", () => {
     mockAutoIngest.mockImplementation(() => new Promise(() => {}))
 
     await restoreQueue(TEST_ID, TEST_PATH)
-    mockWriteFile.mockClear()
+    mockWriteFileAtomic.mockClear()
 
     const requeued = await retryAllFailedTasks()
     await flushMicrotasks(2)
@@ -251,7 +252,7 @@ describe("ingest-queue — retry & failure", () => {
     expect(getQueue().map((task) => task.error)).toEqual([null, null])
     expect(getQueue().map((task) => task.retryCount)).toEqual([0, 0])
     expect(getQueue().map((task) => task.status)).toEqual(["processing", "pending"])
-    expect(mockWriteFile).toHaveBeenCalled()
+    expect(mockWriteFileAtomic).toHaveBeenCalled()
   })
 
   it("retryAllFailedTasks returns 0 when there are no failed tasks", async () => {
@@ -525,13 +526,13 @@ describe("ingest-queue — pauseQueue & switch-project survival", () => {
       { sourcePath: "b.md", folderContext: "" },
     ])
     await flushMicrotasks(2)
-    mockWriteFile.mockClear()
+    mockWriteFileAtomic.mockClear()
 
     await pauseQueue()
 
     // The last write call should contain BOTH tasks, with the processing
     // one demoted back to pending for resume-on-return.
-    const writes = mockWriteFile.mock.calls
+    const writes = mockWriteFileAtomic.mock.calls
     expect(writes.length).toBeGreaterThan(0)
     const [pathArg, contentArg] = writes[writes.length - 1]
     expect(String(pathArg)).toContain("/project/.llm-wiki/ingest-queue.json")
@@ -547,7 +548,7 @@ describe("ingest-queue — pauseQueue & switch-project survival", () => {
 
     // Capture what pauseQueue writes so restore can read it back.
     let lastWrittenContent = ""
-    mockWriteFile.mockImplementation(async (_path: string, content: string) => {
+    mockWriteFileAtomic.mockImplementation(async (_path: string, content: string) => {
       lastWrittenContent = content
     })
     await pauseQueue()
@@ -575,7 +576,7 @@ describe("ingest-queue — pauseQueue & switch-project survival", () => {
     expect(getQueue().find((t) => t.status === "processing")).toBeTruthy()
 
     // Switch projects: pause then restore a different one.
-    mockWriteFile.mockClear()
+    mockWriteFileAtomic.mockClear()
     await pauseQueue()
     await restoreQueue(TEST_ID_B, TEST_PATH_B)
 
@@ -586,7 +587,7 @@ describe("ingest-queue — pauseQueue & switch-project survival", () => {
     // The orphan must not have written to the ACTIVE (B) project's file.
     // Inspect every post-pause write — the path should never contain the
     // project-B queue file getting mutated by the orphan's filter result.
-    const writes = mockWriteFile.mock.calls
+    const writes = mockWriteFileAtomic.mock.calls
     // Confirm no write touched project B's queue from orphan completion.
     // (The only writes should be pauseQueue's flush to /project and
     // restoreQueue's initial save of B's empty queue.)

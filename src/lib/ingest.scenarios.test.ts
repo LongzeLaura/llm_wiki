@@ -12,6 +12,7 @@
 import { describe, it, expect, beforeAll, beforeEach, afterEach, vi } from "vitest"
 import path from "node:path"
 import fs from "node:fs/promises"
+import { execFileSync } from "node:child_process"
 import { realFs, createTempProject, readFileRaw, writeFileRaw, fileExists } from "@/test-helpers/fs-temp"
 import { materializeScenario, copyDir } from "@/test-helpers/scenarios/materialize"
 import { ingestScenarios } from "@/test-helpers/scenarios/ingest-scenarios"
@@ -177,6 +178,19 @@ async function assertOutcome(
   }
 }
 
+function runChemicalValidator(projectPath: string, extraArgs: string[] = []) {
+  const validatorPath = path.join(process.cwd(), "scripts", "chemical-semantic-validator.mjs")
+  const output = execFileSync(
+    process.execPath,
+    [validatorPath, "--project", projectPath, "--json", ...extraArgs],
+    { encoding: "utf-8" },
+  )
+  return JSON.parse(output) as {
+    issueCount: number
+    reportPath: string
+  }
+}
+
 // ── Tests ───────────────────────────────────────────────────────────────────
 
 describe("ingest scenarios (fixture-driven)", () => {
@@ -282,5 +296,24 @@ describe("ingest scenarios (fixture-driven)", () => {
     expect(projectA).toContain("analysis for project A")
     expect(projectB).toContain('sources: ["project-b/config.yaml"]')
     expect(projectB).toContain("analysis for project B")
+  })
+
+  it("validates the chemical smoke scenario for semantic completeness", async () => {
+    const scenario = ingestScenarios.find((item) => item.name === "chemical-zeolite-mto-smoke")
+    expect(scenario).toBeTruthy()
+    ctx = await setup(scenario!)
+
+    const sourceFullPath = path.join(ctx.tmp.path, scenario!.source.path)
+    await autoIngest(
+      ctx.tmp.path,
+      sourceFullPath,
+      useWikiStore.getState().llmConfig,
+    )
+
+    await assertOutcome(scenario!, ctx.tmp.path)
+
+    const summary = runChemicalValidator(ctx.tmp.path)
+    expect(summary.issueCount).toBe(0)
+    expect(await fileExists(summary.reportPath)).toBe(true)
   })
 })

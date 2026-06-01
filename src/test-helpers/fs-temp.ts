@@ -56,6 +56,12 @@ export const realFs = {
     await fs.mkdir(path.dirname(p), { recursive: true })
     await fs.writeFile(p, contents, "utf-8")
   },
+  writeFileAtomic: async (p: string, contents: string): Promise<void> => {
+    await fs.mkdir(path.dirname(p), { recursive: true })
+    const tempPath = `${p}.tmp-${process.pid}-${Date.now()}-${Math.random().toString(16).slice(2)}`
+    await fs.writeFile(tempPath, contents, "utf-8")
+    await fs.rename(tempPath, p)
+  },
   listDirectory: async (p: string): Promise<FileNode[]> => {
     return buildTree(p)
   },

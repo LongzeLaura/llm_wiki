@@ -1,45 +1,73 @@
-export const GENERATION_WIKI_TYPES = [
-  "source",
-  "entity",
-  "concept",
-  "comparison",
-  "query",
-  "synthesis",
-  "thesis",
-  "methodology",
-  "finding",
-] as const
+import {
+  categoryDirectorySegment,
+  getCategoryDefinition,
+  getAllCategoryDefinitions,
+  getGenerationCategoryIds,
+  inferRegisteredCategoryFromPath,
+} from "@/lib/category-registry"
 
-const WIKI_TYPE_DIRS: Array<{ dir: string; type: string }> = [
-  { dir: "entities", type: "entity" },
-  { dir: "concepts", type: "concept" },
-  { dir: "sources", type: "source" },
-  { dir: "queries", type: "query" },
-  { dir: "comparisons", type: "comparison" },
-  { dir: "synthesis", type: "synthesis" },
-  { dir: "findings", type: "finding" },
-  { dir: "thesis", type: "thesis" },
-  { dir: "methodology", type: "methodology" },
-]
+// Keep the default prompt-visible type list aligned with the legacy profile
+// until phase 4 explicitly adapts prompt construction by profile.
+export const GENERATION_WIKI_TYPES = getGenerationCategoryIds() as readonly string[]
+
+const REGISTERED_WIKI_LOOKUP_DIRS = getAllCategoryDefinitions()
+  .map((definition) => categoryDirectorySegment(definition.directory))
+  .filter((directory): directory is string => Boolean(directory))
 
 export function inferWikiTypeFromPath(path: string, fileName?: string): string | null {
   const normalized = path.replace(/\\/g, "/").toLowerCase()
-  for (const { dir, type } of WIKI_TYPE_DIRS) {
-    if (normalized.includes(`/wiki/${dir}/`) || normalized.includes(`/${dir}/`) || normalized.startsWith(`wiki/${dir}/`)) {
-      return type
-    }
-  }
   const name = (fileName ?? normalized.split("/").pop() ?? "").toLowerCase()
   if (name === "overview.md" || normalized.includes("/overview.md")) return "overview"
+  const registered = inferRegisteredCategoryFromPath(normalized)
+  if (registered) return registered.id
   const customDir = normalized.match(/(?:^|\/)wiki\/([^/.][^/]*)\/[^/]+\.md$/)?.[1]
   if (customDir) return customDir
   return null
 }
 
+export function resolveRegisteredWikiPageType(
+  type: string | null | undefined,
+  path?: string,
+): string | null {
+  const registered = getCategoryDefinition(type)
+  if (registered) return registered.id
+  if (type?.trim()) return null
+  const inferred = path ? inferRegisteredCategoryFromPath(path) : undefined
+  return inferred?.id ?? null
+}
+
+export function buildWikiPageLookupCandidates(
+  projectPath: string,
+  wikiPathOrSlug: string,
+): string[] {
+  const normalizedProjectPath = projectPath.replace(/\\/g, "/").replace(/\/+$/g, "")
+  const normalizedInput = wikiPathOrSlug.trim().replace(/\\/g, "/").replace(/^\/+/g, "")
+  const slug = normalizedInput
+    .replace(/^wiki\//, "")
+    .replace(/\.md$/i, "")
+    .split("/")
+    .pop()
+
+  if (!slug) return []
+
+  const candidates = new Set<string>()
+
+  if (normalizedInput.startsWith("wiki/")) {
+    const relativePath = normalizedInput.endsWith(".md") ? normalizedInput : `${normalizedInput}.md`
+    candidates.add(`${normalizedProjectPath}/${relativePath}`)
+  }
+
+  for (const directory of REGISTERED_WIKI_LOOKUP_DIRS) {
+    candidates.add(`${normalizedProjectPath}/wiki/${directory}/${slug}.md`)
+  }
+
+  candidates.add(`${normalizedProjectPath}/wiki/${slug}.md`)
+  return [...candidates]
+}
+
 export function wikiTypeLabel(type: string): string {
-  if (type === "thesis") return "Thesis"
-  if (type === "methodology") return "Methodology"
-  if (type === "finding") return "Finding"
+  const definition = getCategoryDefinition(type)
+  if (definition) return definition.displayLabel
   return type
     .split(/[-_\s]+/)
     .filter(Boolean)
