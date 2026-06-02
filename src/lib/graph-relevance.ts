@@ -40,6 +40,16 @@ const TYPE_AFFINITY: Record<string, Record<string, number>> = {
   source: { entity: 1.0, concept: 1.0, source: 0.5, query: 0.8, synthesis: 1.0 },
   query: { concept: 1.0, entity: 0.8, synthesis: 1.0, source: 0.8, query: 0.5 },
   synthesis: { concept: 1.2, entity: 1.0, source: 1.0, query: 1.0, synthesis: 0.8 },
+  world: { characters: 1.0, locations: 1.0, factions: 1.0, items: 0.8, "plot-arcs": 0.9, events: 0.8 },
+  characters: { player: 1.1, relationships: 1.3, events: 1.1, "current-scene": 1.2, locations: 0.9, factions: 0.9, items: 0.8, "plot-arcs": 1.0 },
+  player: { characters: 1.1, relationships: 1.2, events: 1.0, "current-scene": 1.3, items: 1.0, locations: 0.9, "plot-arcs": 1.0 },
+  locations: { "current-scene": 1.1, events: 1.0, characters: 0.9, player: 0.9, factions: 0.8, items: 0.9, "plot-arcs": 0.8, world: 1.0 },
+  factions: { characters: 0.9, player: 0.8, events: 0.9, locations: 0.8, world: 1.0, relationships: 0.9, "plot-arcs": 0.9 },
+  items: { player: 1.0, characters: 0.8, events: 0.9, locations: 0.9, "current-scene": 0.9, "plot-arcs": 0.8 },
+  "plot-arcs": { events: 1.2, "current-scene": 1.0, characters: 1.0, player: 1.0, relationships: 1.1, world: 0.9, factions: 0.9, items: 0.8 },
+  events: { "current-scene": 1.2, "plot-arcs": 1.2, characters: 1.1, player: 1.0, relationships: 1.0, locations: 1.0, factions: 0.9, items: 0.9, world: 0.8 },
+  "current-scene": { player: 1.3, characters: 1.2, events: 1.2, relationships: 1.1, locations: 1.1, items: 0.9, "plot-arcs": 1.0 },
+  relationships: { characters: 1.3, player: 1.2, events: 1.0, "current-scene": 1.1, "plot-arcs": 1.1, factions: 0.9 },
 }
 
 // ---------------------------------------------------------------------------

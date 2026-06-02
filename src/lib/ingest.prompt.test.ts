@@ -46,6 +46,18 @@ describe("buildAnalysisPrompt language directive", () => {
     expect(prompt).toContain("## Main Arguments & Findings")
     expect(prompt).toContain("## Recommendations")
   })
+
+  it("keeps default-mode analysis prompt free of RPG-only routing guidance", () => {
+    const prompt = buildAnalysisPrompt("", "", "")
+    expect(prompt).not.toContain("## RPG Wiki Extraction Guidance")
+  })
+
+  it("includes RPG extraction analysis guidance in RPG mode", () => {
+    const prompt = buildAnalysisPrompt("", "", "", "llmwikirpg")
+    expect(prompt).toContain("## RPG Wiki Extraction Guidance")
+    expect(prompt).toContain("current state from historical events")
+    expect(prompt).toContain("foreshadowing from already-happened events")
+  })
 })
 
 describe("buildGenerationPrompt language directive", () => {
@@ -90,6 +102,25 @@ describe("buildGenerationPrompt language directive", () => {
     const prompt = buildGenerationPrompt("", "", "", "x.pdf", undefined, "私は日本語の文章を書きます")
     expect(prompt).toContain("MANDATORY OUTPUT LANGUAGE: English")
     expect(prompt).not.toContain("OUTPUT LANGUAGE: Japanese")
+  })
+
+  it("keeps default-mode generation prompt on legacy/custom schema routing only", () => {
+    const prompt = buildGenerationPrompt("", "", "", "source.md")
+    expect(prompt).not.toContain("## RPG Wiki Directory Routing")
+  })
+
+  it("includes RPG directory routing and dynamic-state rules in RPG mode", () => {
+    const prompt = buildGenerationPrompt("", "", "", "rpg-session.md", undefined, "", undefined, "llmwikirpg")
+    expect(prompt).toContain("## RPG Wiki Directory Routing")
+    expect(prompt).toContain("wiki/current-scene/")
+    expect(prompt).toContain("exact file wiki/current-scene/scene_state.md")
+    expect(prompt).toContain("latest-state snapshot")
+    expect(prompt).toContain("wiki/events/ is for confirmed, already-happened events")
+    expect(prompt).toContain("must not contain sections like Next Steps")
+    expect(prompt).toContain("wiki/plot-arcs/ is for story structure")
+    expect(prompt).toContain("wiki/player/ is only for the player character")
+    expect(prompt).toContain("fully rewrite current-state sections")
+    expect(prompt).toContain("Prefer one best directory for each fact")
   })
 })
 

@@ -26,6 +26,9 @@ import { captionMarkdownImages, loadCaptionCache } from "@/lib/image-caption-pip
 import type { MultimodalConfig } from "@/stores/wiki-store"
 import { GENERATION_WIKI_TYPES } from "@/lib/wiki-page-types"
 import { computeContextBudget } from "@/lib/context-budget"
+import { RPG_WIKI_SCHEMA, getRpgWikiSchemaEntry, type RpgWikiUpdateStrategy } from "@/lib/rpg-wiki-schema"
+import { prepareExistingContentForRpgDynamicMerge, validateRpgDynamicWrite } from "@/lib/rpg-dynamic-update"
+import { detectWikiMode, type WikiMode } from "@/lib/wiki-mode"
 
 const LONG_SOURCE_MIN_BUDGET = 8_000
 const LONG_SOURCE_MAX_SINGLE_PASS_BUDGET = 300_000
@@ -407,6 +410,15 @@ async function autoIngestImpl(
     tryReadFile(`${pp}/wiki/index.md`),
     tryReadFile(`${pp}/wiki/overview.md`),
   ])
+  const projectMeta = await tryReadFile(`${pp}/.llm-wiki/project.json`)
+  const wikiTree = await listDirectory(`${pp}/wiki`).catch(() => [] as FileNode[])
+  const wikiMode = detectWikiMode({
+    projectMeta,
+    schema,
+    purpose,
+    index,
+    paths: wikiTree.map((node) => node.path),
+  })
 
   // ── Cache check: skip re-ingest if source content hasn't changed ──
   //
@@ -662,7 +674,7 @@ async function autoIngestImpl(
     await streamChat(
       llmConfig,
       [
-        { role: "system", content: buildAnalysisPrompt(purpose, index, sourceContext) },
+        { role: "system", content: buildAnalysisPrompt(purpose, index, sourceContext, wikiMode) },
         { role: "user", content: `Analyze this source document:\n\n**File:** ${sourceIdentity}${folderContext ? `\n**Folder context:** ${folderContext}` : ""}\n\n---\n\n${sourceContext}` },
       ],
       {
@@ -694,7 +706,7 @@ async function autoIngestImpl(
   await streamChat(
     llmConfig,
     [
-      { role: "system", content: buildGenerationPrompt(schema, purpose, index, sourceIdentity, overview, sourceContext, sourceSummaryPath) },
+      { role: "system", content: buildGenerationPrompt(schema, purpose, index, sourceIdentity, overview, sourceContext, sourceSummaryPath, wikiMode) },
       {
         role: "user",
         content: [
@@ -976,6 +988,49 @@ function isListingPath(relativePath: string): boolean {
   )
 }
 
+interface WikiStorageStrategy {
+  path: string
+  updateStrategy: RpgWikiUpdateStrategy | "legacy-log" | "listing" | "legacy-merge"
+}
+
+function getRpgCategoryIdFromPath(relativePath: string): string | null {
+  const normalized = normalizePath(relativePath).replace(/^\/+/, "")
+  const match = normalized.match(/^wiki\/([^/]+)(?:\/|$)/)
+  return match?.[1] ?? null
+}
+
+function isRpgWikiPath(relativePath: string): boolean {
+  const categoryId = getRpgCategoryIdFromPath(relativePath)
+  return categoryId ? Boolean(getRpgWikiSchemaEntry(categoryId)) : false
+}
+
+function wikiStorageStrategyForPath(relativePath: string): WikiStorageStrategy {
+  if (isLogPath(relativePath)) return { path: relativePath, updateStrategy: "legacy-log" }
+  if (isListingPath(relativePath)) return { path: relativePath, updateStrategy: "listing" }
+
+  const categoryId = getRpgCategoryIdFromPath(relativePath)
+  const schemaEntry = categoryId ? getRpgWikiSchemaEntry(categoryId) : undefined
+  if (!schemaEntry) return { path: relativePath, updateStrategy: "legacy-merge" }
+
+  if (schemaEntry.categoryId === "current-scene") {
+    return { path: "wiki/current-scene/scene_state.md", updateStrategy: schemaEntry.updateStrategy }
+  }
+
+  return { path: relativePath, updateStrategy: schemaEntry.updateStrategy }
+}
+
+function stripFrontmatterForAppend(content: string): string {
+  const match = content.match(/^---\n[\s\S]*?\n---\s*\n?/)
+  return (match ? content.slice(match[0].length) : content).trim()
+}
+
+function appendMarkdownContent(existing: string | null, incoming: string): string {
+  const next = existing ? stripFrontmatterForAppend(incoming) : incoming.trim()
+  if (!existing) return next
+  if (!next) return existing
+  return `${existing.trimEnd()}\n\n${next}`
+}
+
 function canonicalizeSourcesField(content: string, sourceIdentity: string): string {
   if (!/^---\n/.test(content)) return content
 
@@ -1127,6 +1182,8 @@ async function writeFileBlocks(
     if (sourceSummaryPath && relativePath.startsWith("wiki/sources/")) {
       relativePath = sourceSummaryPath
     }
+    const storageStrategy = wikiStorageStrategyForPath(relativePath)
+    relativePath = storageStrategy.path
 
     // Sanitize at the boundary — strip stray code-fence wrappers,
     // `frontmatter:` prefixes, and repair invalid wikilink-list
@@ -1154,7 +1211,8 @@ async function writeFileBlocks(
       relativePath.startsWith("wiki/entities/") ||
       relativePath.includes("/entities/") ||
       relativePath.startsWith("wiki/sources/") ||
-      relativePath.includes("/sources/")
+      relativePath.includes("/sources/") ||
+      isRpgWikiPath(relativePath)
     if (
       targetLang &&
       targetLang !== "auto" &&
@@ -1168,25 +1226,36 @@ async function writeFileBlocks(
       continue
     }
 
+    const dynamicValidation = validateRpgDynamicWrite(relativePath, content)
+    if (!dynamicValidation.allowWrite) {
+      warnings.push(...dynamicValidation.warnings)
+      continue
+    }
+
     const fullPath = `${projectPath}/${relativePath}`
     try {
-      if (isLogPath(relativePath)) {
+      if (storageStrategy.updateStrategy === "legacy-log") {
         const existing = await tryReadFile(fullPath)
         const appended = existing ? `${existing}\n\n${content.trim()}` : content.trim()
         await writeFile(fullPath, appended)
       } else if (
-        isListingPath(relativePath)
+        storageStrategy.updateStrategy === "listing"
       ) {
         // Listing pages (index / overview) are always overwritten
         // wholesale — their sources field is incidental and merging
         // wouldn't make semantic sense (they aren't source-derived
         // content pages).
         await writeFile(fullPath, content)
+      } else if (storageStrategy.updateStrategy === "append") {
+        const existing = await tryReadFile(fullPath)
+        await writeFile(fullPath, appendMarkdownContent(existing, content))
+      } else if (storageStrategy.updateStrategy === "overwrite") {
+        await writeFile(fullPath, content)
       } else {
-        // Content pages (entities / concepts / queries / synthesis /
-        // comparisons / sources summaries): if a page with this
-        // path already exists on disk, merge old + new instead of
-        // clobbering. The merge has three layers:
+        // Content pages (legacy entities / concepts / queries / synthesis /
+        // comparisons / source summaries, plus RPG merge/cautious-merge
+        // directories): if a page with this path already exists on disk,
+        // merge old + new instead of clobbering. The merge has three layers:
         //   1. Frontmatter array fields (sources, tags, related)
         //      are union-merged at the application layer.
         //   2. If body content differs, an LLM call produces a
@@ -1198,7 +1267,10 @@ async function writeFileBlocks(
         // LLM failure / sanity rejection falls back to "incoming
         // body + array-field union" with a best-effort backup.
         // See page-merge.ts.
-        const existing = await tryReadFile(fullPath)
+        const existing = prepareExistingContentForRpgDynamicMerge(
+          relativePath,
+          await tryReadFile(fullPath),
+        )
         const toWrite = await mergePageContent(
           content,
           existing || null,
@@ -1303,7 +1375,12 @@ function shouldRunDedicatedReviewStage(generation: string): boolean {
  * Step 1 prompt: AI reads the source and produces a structured analysis.
  * This is the "discussion" step — the AI reasons about the source before writing wiki pages.
  */
-export function buildAnalysisPrompt(purpose: string, index: string, sourceContent: string = ""): string {
+export function buildAnalysisPrompt(
+  purpose: string,
+  index: string,
+  sourceContent: string = "",
+  wikiMode: WikiMode = "default",
+): string {
   return [
     "You are an expert research analyst. Read the source document and produce a structured analysis.",
     "Do not output chain-of-thought, hidden reasoning, or a thinking transcript. Reason internally and write only the concise final analysis.",
@@ -1342,6 +1419,8 @@ export function buildAnalysisPrompt(purpose: string, index: string, sourceConten
     "- What should be emphasized vs. de-emphasized?",
     "- Any open questions worth flagging for the user?",
     "",
+    wikiMode === "llmwikirpg" ? buildRpgExtractionAnalysisGuidance() : "",
+    "",
     "Be thorough but concise. Focus on what's genuinely important.",
     "",
     "If a folder context is provided, use it as a hint for categorization — the folder structure often reflects the user's organizational intent (e.g., 'papers/energy' suggests the file is an energy-related paper).",
@@ -1349,6 +1428,56 @@ export function buildAnalysisPrompt(purpose: string, index: string, sourceConten
     purpose ? `## Wiki Purpose (for context)\n${purpose}` : "",
     index ? `## Current Wiki Index (for checking existing content)\n${index}` : "",
   ].filter(Boolean).join("\n")
+}
+
+function buildRpgExtractionAnalysisGuidance(): string {
+  return [
+    "## RPG Wiki Extraction Guidance",
+    "If the source contains RPG, tabletop, roleplay, game-session, interactive narrative, character-card, worldbook, or story-state material, explicitly analyze how it maps to the RPG wiki directories below.",
+    "Distinguish confirmed facts from speculation, current state from historical events, player state from NPC state, relationship changes from character profiles, and foreshadowing from already-happened events.",
+    "Do not duplicate the same information into multiple directories unless each copy has a distinct purpose.",
+    "",
+    "Cover these RPG-specific sections when relevant:",
+    "- Current scene: the latest immediate snapshot only; not accumulated history.",
+    "- Historical events: confirmed things that already happened and their consequences.",
+    "- Player state: player character identity, abilities, inventory, goals, knowledge, and accepted state changes.",
+    "- Character and relationship state: NPC profiles, meaningful current state, trust, conflict, tension, and relationship changes.",
+    "- Plot arcs and foreshadowing: unresolved questions, conflicts, hooks, constraints, and possible developments; never write them as if they already happened.",
+  ].join("\n")
+}
+
+function buildRpgWikiDirectoryGuidance(): string {
+  const lines = RPG_WIKI_SCHEMA.map((entry) => {
+    const fields = entry.fields.map((field) => field.name).join(", ")
+    const exclusions = entry.exclude.join("; ")
+    return [
+      `- ${entry.path}/ (${entry.label}, update: ${entry.updateStrategy}): ${entry.extractionGoal}`,
+      `  Fields: ${fields}.`,
+      `  Do not put here: ${exclusions}.`,
+      `  Granularity: ${entry.recommendedGranularity}`,
+    ].join("\n")
+  })
+
+  return [
+    "## RPG Wiki Directory Routing",
+    "When the project or source is RPG-oriented, prefer these first-version RPG directories over generic wiki/entities/ and wiki/concepts/.",
+    "Use the project schema above as authoritative if it gives a different explicit route, but do not ignore these RPG semantics when RPG material is present.",
+    "For first-version RPG projects, use the exact file wiki/current-scene/scene_state.md for the current scene snapshot unless the project schema explicitly overrides that file path.",
+    "",
+    ...lines,
+    "",
+    "RPG dynamic-state rules:",
+    "- wiki/current-scene/ is a latest-state snapshot. Generate only the current scene state needed for the next turn, and use the exact file wiki/current-scene/scene_state.md unless the schema explicitly says otherwise; do not accumulate previous scenes there.",
+    "- wiki/events/ is for confirmed, already-happened events. Do not write future plans, speculation, or possible developments as events.",
+    "- wiki/events/ pages must not contain sections like Next Steps, Possible Directions, or Future Development. Put that material in wiki/plot-arcs/ instead.",
+    "- wiki/plot-arcs/ is for story structure, unresolved questions, foreshadowing, conflicts, constraints, and possible directions; do not pretend these already happened.",
+    "- wiki/player/ is only for the player character and accepted player-state changes; ordinary NPCs belong in wiki/characters/.",
+    "- wiki/characters/ may include long-term profile and meaningful current state, but not every short-term action or full event transcript.",
+    "- wiki/relationships/ records relationship state and changes, not duplicate full character introductions.",
+    "- wiki/sources/ records provenance and source summaries, not canonical character, scene, location, or event state.",
+    "- When updating wiki/player/, wiki/characters/, wiki/relationships/, or wiki/plot-arcs/, fully rewrite current-state sections so stale status from earlier turns does not survive by accident.",
+    "- Prefer one best directory for each fact. Add cross-links instead of repeating the same fact in every related page.",
+  ].join("\n")
 }
 
 /**
@@ -1362,6 +1491,7 @@ export function buildGenerationPrompt(
   overview?: string,
   sourceContent: string = "",
   sourceSummaryPath?: string,
+  wikiMode: WikiMode = "default",
 ): string {
   // Use original filename (without extension) as the source summary page name
   const sourceBaseName = sourceFileName.replace(/\.[^.]+$/, "")
@@ -1396,6 +1526,8 @@ export function buildGenerationPrompt(
     "4. An updated wiki/index.md — add new entries to existing categories, preserve all existing entries",
     "5. A log entry for wiki/log.md (just the new entry to append, format: ## [YYYY-MM-DD] ingest | Title)",
     "6. An updated wiki/overview.md — a high-level summary of what the entire wiki covers, updated to reflect the newly ingested source. This should be a comprehensive 2-5 paragraph overview of ALL topics in the wiki, not just the new source.",
+    "",
+    wikiMode === "llmwikirpg" ? buildRpgWikiDirectoryGuidance() : "",
     "",
     "## Frontmatter Rules (CRITICAL — parser is strict)",
     "",
@@ -2267,8 +2399,8 @@ export async function startIngest(
 
   const [sourceContent, schema, purpose, index] = await Promise.all([
     tryReadFile(sp),
-    tryReadFile(`${pp}/wiki/schema.md`),
-    tryReadFile(`${pp}/wiki/purpose.md`),
+    tryReadFile(`${pp}/schema.md`),
+    tryReadFile(`${pp}/purpose.md`),
     tryReadFile(`${pp}/wiki/index.md`),
   ])
 
@@ -2343,7 +2475,7 @@ export async function executeIngestWrites(
     : null
 
   const [schema, index] = await Promise.all([
-    tryReadFile(`${pp}/wiki/schema.md`),
+    tryReadFile(`${pp}/schema.md`),
     tryReadFile(`${pp}/wiki/index.md`),
   ])
 

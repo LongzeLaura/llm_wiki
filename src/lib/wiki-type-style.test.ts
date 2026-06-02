@@ -39,6 +39,8 @@ describe("getWikiTypeStyle", () => {
     const expected = [
       "entity", "concept", "query", "source",
       "thesis", "finding", "methodology", "event", "overview",
+      "world", "characters", "player", "locations", "factions",
+      "items", "plot-arcs", "events", "current-scene", "relationships",
     ]
     for (const t of expected) {
       const style = getWikiTypeStyle(t)

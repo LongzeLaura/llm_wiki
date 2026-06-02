@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from "react"
 import {
-  FileText, Users, Lightbulb, BookOpen, HelpCircle, GitMerge, BarChart3, TrendingUp, Target, ChevronRight, ChevronDown, Layout, Globe, Trash2,
+  FileText, Users, User, Lightbulb, BookOpen, HelpCircle, GitMerge, BarChart3, TrendingUp, Target, ChevronRight, ChevronDown, Layout, Globe, Trash2, MapPinned, Shield, Package, Calendar, Eye, Link2,
 } from "lucide-react"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { Button } from "@/components/ui/button"
@@ -21,15 +21,25 @@ interface WikiPageInfo {
 
 const TYPE_CONFIG: Record<string, { icon: typeof FileText; label: string; color: string; order: number }> = {
   overview:    { icon: Layout,      label: "Overview",     color: "text-yellow-500", order: 0 },
-  entity:      { icon: Users,       label: "Entities",     color: "text-blue-500",   order: 1 },
-  concept:     { icon: Lightbulb,   label: "Concepts",     color: "text-purple-500", order: 2 },
-  source:      { icon: BookOpen,    label: "Sources",      color: "text-orange-500", order: 3 },
-  synthesis:   { icon: GitMerge,    label: "Synthesis",    color: "text-red-500",    order: 4 },
-  finding:     { icon: TrendingUp,  label: "Findings",     color: "text-purple-500", order: 5 },
-  thesis:      { icon: Target,      label: "Theses",       color: "text-rose-500",   order: 6 },
-  methodology: { icon: BookOpen,    label: "Methodologies",color: "text-teal-500",   order: 7 },
-  comparison:  { icon: BarChart3,   label: "Comparisons",  color: "text-emerald-500",order: 8 },
-  query:       { icon: HelpCircle,  label: "Queries",      color: "text-green-500",  order: 9 },
+  "current-scene": { icon: Eye,       label: "Current Scene", color: "text-rose-500",   order: 1 },
+  player:      { icon: User,        label: "Player",       color: "text-cyan-500",   order: 2 },
+  characters:  { icon: Users,       label: "Characters",   color: "text-blue-500",   order: 3 },
+  relationships:{ icon: Link2,      label: "Relationships",color: "text-pink-500",   order: 4 },
+  events:      { icon: Calendar,    label: "Events",       color: "text-amber-500",  order: 5 },
+  "plot-arcs": { icon: GitMerge,    label: "Plot Arcs",    color: "text-violet-500", order: 6 },
+  world:       { icon: Globe,       label: "World",        color: "text-emerald-500",order: 7 },
+  locations:   { icon: MapPinned,   label: "Locations",    color: "text-lime-500",   order: 8 },
+  factions:    { icon: Shield,      label: "Factions",     color: "text-sky-500",    order: 9 },
+  items:       { icon: Package,     label: "Items",        color: "text-orange-500", order: 10 },
+  source:      { icon: BookOpen,    label: "Sources",      color: "text-orange-500", order: 11 },
+  entity:      { icon: Users,       label: "Entities",     color: "text-blue-500",   order: 20 },
+  concept:     { icon: Lightbulb,   label: "Concepts",     color: "text-purple-500", order: 21 },
+  synthesis:   { icon: GitMerge,    label: "Synthesis",    color: "text-red-500",    order: 22 },
+  finding:     { icon: TrendingUp,  label: "Findings",     color: "text-purple-500", order: 23 },
+  thesis:      { icon: Target,      label: "Theses",       color: "text-rose-500",   order: 24 },
+  methodology: { icon: BookOpen,    label: "Methodologies",color: "text-teal-500",   order: 25 },
+  comparison:  { icon: BarChart3,   label: "Comparisons",  color: "text-emerald-500",order: 26 },
+  query:       { icon: HelpCircle,  label: "Queries",      color: "text-green-500",  order: 27 },
 }
 
 function typeConfig(type: string): { icon: typeof FileText; label: string; color: string; order: number } {
@@ -44,7 +54,9 @@ export function KnowledgeTree() {
   const setFileTree = useWikiStore((s) => s.setFileTree)
   const bumpDataVersion = useWikiStore((s) => s.bumpDataVersion)
   const [pages, setPages] = useState<WikiPageInfo[]>([])
-  const [expandedTypes, setExpandedTypes] = useState<Set<string>>(new Set(["overview", "entity", "concept", "source"]))
+  const [expandedTypes, setExpandedTypes] = useState<Set<string>>(
+    new Set(["overview", "current-scene", "player", "characters", "events", "world", "source"]),
+  )
   // Two-stage delete: first click arms the row, second click executes.
   // Only one row armed at a time (clicking another row replaces).
   const [armedPath, setArmedPath] = useState<string | null>(null)

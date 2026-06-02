@@ -283,4 +283,171 @@ describe("ingest scenarios (fixture-driven)", () => {
     expect(projectB).toContain('sources: ["project-b/config.yaml"]')
     expect(projectB).toContain("analysis for project B")
   })
+
+  it("overwrites current-scene snapshots into a single RPG state file", async () => {
+    ctx = { tmp: await createTempProject("ingest-rpg-current-scene") }
+    const projectPath = ctx.tmp.path
+
+    await writeFileRaw(`${projectPath}/schema.md`, "")
+    await writeFileRaw(`${projectPath}/purpose.md`, "")
+    await writeFileRaw(`${projectPath}/wiki/index.md`, "# Index\n")
+    await writeFileRaw(`${projectPath}/raw/sources/turn-1.md`, "turn one")
+    await writeFileRaw(`${projectPath}/raw/sources/turn-2.md`, "turn two")
+
+    useWikiStore.setState({
+      project: {
+        name: "t",
+        path: projectPath,
+        createdAt: 0,
+        purposeText: "",
+        fileTree: [],
+      } as unknown as ReturnType<typeof useWikiStore.getState>["project"],
+    })
+
+    const cfg = useWikiStore.getState().llmConfig
+    pendingResponses = [
+      "analysis one",
+      [
+        "---FILE: wiki/current-scene/state.md---",
+        "---",
+        'type: "current-scene"',
+        'title: "Current Scene"',
+        'sources: ["turn-1.md"]',
+        "---",
+        "",
+        "# Current Scene",
+        "First scene only.",
+        "---END FILE---",
+      ].join("\n"),
+      "analysis two",
+      [
+        "---FILE: wiki/current-scene/scene_state.md---",
+        "---",
+        'type: "current-scene"',
+        'title: "Current Scene"',
+        'sources: ["turn-2.md"]',
+        "---",
+        "",
+        "# Current Scene",
+        "Second scene replaces the first.",
+        "---END FILE---",
+      ].join("\n"),
+    ]
+
+    const firstWritten = await autoIngest(projectPath, `${projectPath}/raw/sources/turn-1.md`, cfg)
+    const secondWritten = await autoIngest(projectPath, `${projectPath}/raw/sources/turn-2.md`, cfg)
+
+    expect(firstWritten).toContain("wiki/current-scene/scene_state.md")
+    expect(secondWritten).toContain("wiki/current-scene/scene_state.md")
+    expect(await fileExists(`${projectPath}/wiki/current-scene/state.md`)).toBe(false)
+
+    const scene = await readFileRaw(`${projectPath}/wiki/current-scene/scene_state.md`)
+    expect(scene).toContain("Second scene replaces the first.")
+    expect(scene).not.toContain("First scene only.")
+  })
+
+  it("appends RPG events without invoking page merge", async () => {
+    ctx = { tmp: await createTempProject("ingest-rpg-events") }
+    const projectPath = ctx.tmp.path
+
+    await writeFileRaw(`${projectPath}/schema.md`, "")
+    await writeFileRaw(`${projectPath}/purpose.md`, "")
+    await writeFileRaw(`${projectPath}/wiki/index.md`, "# Index\n")
+    await writeFileRaw(`${projectPath}/raw/sources/turn-1.md`, "turn one")
+    await writeFileRaw(`${projectPath}/raw/sources/turn-2.md`, "turn two")
+
+    useWikiStore.setState({
+      project: {
+        name: "t",
+        path: projectPath,
+        createdAt: 0,
+        purposeText: "",
+        fileTree: [],
+      } as unknown as ReturnType<typeof useWikiStore.getState>["project"],
+    })
+
+    const cfg = useWikiStore.getState().llmConfig
+    pendingResponses = [
+      "analysis one",
+      [
+        "---FILE: wiki/events/timeline.md---",
+        "---",
+        'type: "events"',
+        'title: "Timeline"',
+        'sources: ["turn-1.md"]',
+        "---",
+        "",
+        "# Timeline",
+        "- Event one happened.",
+        "---END FILE---",
+      ].join("\n"),
+      "analysis two",
+      [
+        "---FILE: wiki/events/timeline.md---",
+        "---",
+        'type: "events"',
+        'title: "Timeline"',
+        'sources: ["turn-2.md"]',
+        "---",
+        "",
+        "# Timeline Update",
+        "- Event two happened.",
+        "---END FILE---",
+      ].join("\n"),
+    ]
+
+    await autoIngest(projectPath, `${projectPath}/raw/sources/turn-1.md`, cfg)
+    await autoIngest(projectPath, `${projectPath}/raw/sources/turn-2.md`, cfg)
+
+    const timeline = await readFileRaw(`${projectPath}/wiki/events/timeline.md`)
+    expect(timeline).toContain("Event one happened.")
+    expect(timeline).toContain("Event two happened.")
+    expect(timeline.match(/^---$/gm)).toHaveLength(2)
+  })
+
+  it("drops RPG event pages that contain future-planning sections", async () => {
+    ctx = { tmp: await createTempProject("ingest-rpg-event-pollution-guard") }
+    const projectPath = ctx.tmp.path
+
+    await writeFileRaw(`${projectPath}/schema.md`, "")
+    await writeFileRaw(`${projectPath}/purpose.md`, "")
+    await writeFileRaw(`${projectPath}/wiki/index.md`, "# Index\n")
+    await writeFileRaw(`${projectPath}/raw/sources/turn-1.md`, "turn one")
+
+    useWikiStore.setState({
+      project: {
+        name: "t",
+        path: projectPath,
+        createdAt: 0,
+        purposeText: "",
+        fileTree: [],
+      } as unknown as ReturnType<typeof useWikiStore.getState>["project"],
+    })
+
+    const cfg = useWikiStore.getState().llmConfig
+    pendingResponses = [
+      "analysis one",
+      [
+        "---FILE: wiki/events/timeline.md---",
+        "---",
+        'type: "events"',
+        'title: "Timeline"',
+        'sources: ["turn-1.md"]',
+        "---",
+        "",
+        "# Timeline",
+        "",
+        "## Summary",
+        "The player escaped the warehouse.",
+        "",
+        "## Next Steps",
+        "The player may investigate the mayor next.",
+        "---END FILE---",
+      ].join("\n"),
+    ]
+
+    await autoIngest(projectPath, `${projectPath}/raw/sources/turn-1.md`, cfg)
+
+    expect(await fileExists(`${projectPath}/wiki/events/timeline.md`)).toBe(false)
+  })
 })

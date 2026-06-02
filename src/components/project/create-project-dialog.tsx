@@ -16,6 +16,11 @@ import { normalizePath } from "@/lib/path-utils"
 import { OUTPUT_LANGUAGE_OPTIONS } from "@/lib/output-language-options"
 import { useWikiStore, type OutputLanguage } from "@/stores/wiki-store"
 import { saveOutputLanguage } from "@/lib/project-store"
+import {
+  PROJECT_MODE_OPTIONS,
+  getProjectModeBootstrap,
+  type ProjectMode,
+} from "@/lib/project-mode"
 
 interface CreateProjectDialogProps {
   open: boolean
@@ -28,6 +33,7 @@ export function CreateProjectDialog({ open: isOpen, onOpenChange, onCreated }: C
   const [name, setName] = useState("")
   const [path, setPath] = useState("")
   const [selectedTemplate, setSelectedTemplate] = useState("general")
+  const [selectedMode, setSelectedMode] = useState<ProjectMode>("default")
   // Empty string = "user hasn't picked yet"; we validate this on
   // submit so a fresh project never starts in implicit auto-detect
   // mode. Once chosen, the value is one of OUTPUT_LANGUAGE_OPTIONS
@@ -61,14 +67,26 @@ export function CreateProjectDialog({ open: isOpen, onOpenChange, onCreated }: C
     setCreating(true)
     setError("")
     try {
-      const project = await createProject(name.trim(), path.trim())
+      const project = await createProject(name.trim(), path.trim(), selectedMode)
       const pp = normalizePath(project.path)
 
-      const template = getTemplate(selectedTemplate)
-      await writeFile(`${pp}/schema.md`, template.schema)
-      await writeFile(`${pp}/purpose.md`, template.purpose)
-      for (const dir of template.extraDirs) {
-        await createDirectory(`${pp}/${dir}`)
+      const modeBootstrap = getProjectModeBootstrap(selectedMode)
+      if (modeBootstrap) {
+        await writeFile(`${pp}/schema.md`, modeBootstrap.schema)
+        await writeFile(`${pp}/purpose.md`, modeBootstrap.purpose)
+        await writeFile(`${pp}/wiki/index.md`, modeBootstrap.index)
+        await writeFile(`${pp}/wiki/overview.md`, modeBootstrap.overview)
+        await writeFile(`${pp}/wiki/log.md`, modeBootstrap.log)
+        for (const dir of modeBootstrap.extraDirs) {
+          await createDirectory(`${pp}/${dir}`)
+        }
+      } else {
+        const template = getTemplate(selectedTemplate)
+        await writeFile(`${pp}/schema.md`, template.schema)
+        await writeFile(`${pp}/purpose.md`, template.purpose)
+        for (const dir of template.extraDirs) {
+          await createDirectory(`${pp}/${dir}`)
+        }
       }
 
       // Persist the user's language choice. The store / disk
@@ -84,6 +102,7 @@ export function CreateProjectDialog({ open: isOpen, onOpenChange, onCreated }: C
       setName("")
       setPath("")
       setSelectedTemplate("general")
+      setSelectedMode("default")
       setLanguage("")
     } catch (err) {
       setError(String(err))
@@ -104,8 +123,32 @@ export function CreateProjectDialog({ open: isOpen, onOpenChange, onCreated }: C
             <Input id="name" value={name} onChange={(e) => setName(e.target.value)} placeholder={t("project.namePlaceholder")} />
           </div>
           <div className="flex flex-col gap-2">
+            <Label htmlFor="mode">Mode</Label>
+            <select
+              id="mode"
+              value={selectedMode}
+              onChange={(e) => setSelectedMode(e.target.value as ProjectMode)}
+              className="w-full rounded-md border bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
+            >
+              {PROJECT_MODE_OPTIONS.map((mode) => (
+                <option key={mode.id} value={mode.id}>
+                  {mode.label}
+                </option>
+              ))}
+            </select>
+            <p className="text-xs text-muted-foreground">
+              {PROJECT_MODE_OPTIONS.find((mode) => mode.id === selectedMode)?.description}
+            </p>
+          </div>
+          <div className="flex flex-col gap-2">
             <Label>{t("project.template")}</Label>
-            <TemplatePicker selected={selectedTemplate} onSelect={setSelectedTemplate} />
+            {selectedMode === "llmwikirpg" ? (
+              <p className="text-sm text-muted-foreground">
+                llmWikiRPG mode uses its own RPG schema, index, and bootstrap directories.
+              </p>
+            ) : (
+              <TemplatePicker selected={selectedTemplate} onSelect={setSelectedTemplate} />
+            )}
           </div>
           <div className="flex flex-col gap-2">
             <Label htmlFor="language">

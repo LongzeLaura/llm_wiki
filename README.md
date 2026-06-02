@@ -466,6 +466,125 @@ my-wiki/
  </picture>
 </a>
 
+## llmWikiRPG — Version History
+
+> **Current RPG version: v0.1** (2026-06-02)
+>
+> The RPG feature version tracks the llmWikiRPG adaptation layer built on top of the LLM Wiki core (v0.4.16). The core app version and the RPG feature version are independent.
+
+### v0.1 — First-version RPG Knowledge Management (2026-06-02)
+
+**Summary:** Complete Stage 00–12 implementation of the bounded llmWikiRPG adaptation — an RPG-oriented wiki mode that extends category recognition, schema guidance, prompt construction, storage behavior, frontend grouping, dynamic-state updates, and compatibility gates without removing the legacy entity/concept/query knowledge-base path.
+
+#### Architecture & Planning (docs, no code changes)
+
+| File | Purpose |
+|------|---------|
+| [docs/LLMWIKIRPG_ARCHITECTURE_PLAN.md](docs/LLMWIKIRPG_ARCHITECTURE_PLAN.md) | First-phase architecture analysis: maps the existing codebase structure, identifies all touch points (project creation, ingest, chat, search, graph), and defines the minimal closed loop for RPG context management |
+| [docs/LLMWIKIRPG_IMPLEMENTATION_PHASE_PLAN.md](docs/LLMWIKIRPG_IMPLEMENTATION_PHASE_PLAN.md) | 12-stage implementation plan (Stage 00–12) with per-stage code-change expectations, deliverables, and context-management rules |
+| [docs/RPG_CATEGORY_SYSTEM_ANALYSIS.md](docs/RPG_CATEGORY_SYSTEM_ANALYSIS.md) | Legacy category analysis: locates every place in the codebase where category assumptions live (Rust backend, TypeScript frontend, prompt builders, type inference, tree UI, search, graph, tests) |
+| [docs/RPG_CATEGORY_MAPPING.md](docs/RPG_CATEGORY_MAPPING.md) | Maps legacy `entities`/`concepts`/`sources`/`queries` to the 11 first-version RPG directories, explicitly scoping `style`/`rules`/`runtime` as deferred extensions |
+| [docs/RPG_WIKI_SCHEMA.md](docs/RPG_WIKI_SCHEMA.md) | Complete RPG wiki schema specification: per-category extraction goals, field definitions, exclusions, update strategies, and recommended granularity |
+| [docs/RPG_DYNAMIC_UPDATE_STRATEGY.md](docs/RPG_DYNAMIC_UPDATE_STRATEGY.md) | Strategy for dynamic RPG state reconciliation: overwrite (`current-scene`), append (`events`), merge-with-stale-cleanup (`player`, `characters`, `relationships`, `plot-arcs`) |
+| [docs/LLMWIKIRPG_MODE_SWITCH_ANALYSIS.md](docs/LLMWIKIRPG_MODE_SWITCH_ANALYSIS.md) | Pre-change diagnosis of the mode-switch gap: confirms RPG runtime support existed but lacked first-class project mode selection |
+| [docs/LLMWIKIRPG_MODE_SWITCH_REPORT.md](docs/LLMWIKIRPG_MODE_SWITCH_REPORT.md) | How to switch modes, what changed, and remaining incompleteness after mode-switch closure |
+
+#### New Core Libraries
+
+| File | Lines | Purpose |
+|------|-------|---------|
+| [src/lib/project-mode.ts](src/lib/project-mode.ts) | 220 | Project mode system: defines `default` and `llmwikirpg` modes; provides RPG bootstrap content (schema, purpose, index, overview, log) and extra directory creation (`style`, `rules`, `quests`, `memory`); persists mode in `.llm-wiki/project.json` |
+| [src/lib/rpg-categories.ts](src/lib/rpg-categories.ts) | 122 | RPG category registry: 11 typed categories (`sources`, `world`, `characters`, `player`, `locations`, `factions`, `items`, `plot-arcs`, `events`, `current-scene`, `relationships`) with id/label/path/dynamic/multipleFiles/requireSource metadata and lookup helpers |
+| [src/lib/rpg-wiki-schema.ts](src/lib/rpg-wiki-schema.ts) | 195 | Code-readable RPG schema: derives labels/paths from the category registry; defines per-category extraction goals, field definitions, exclusion lists, update strategies (`overwrite`/`append`/`merge`/`cautious-merge`), and granularity recommendations for use in prompt construction |
+| [src/lib/rpg-dynamic-update.ts](src/lib/rpg-dynamic-update.ts) | 231 | Dynamic update engine: heading-based stale-section stripping for merge-oriented categories; future-planning detection for `events` append; writer-boundary reconciliation layer |
+| [src/lib/rpg-query-priority.ts](src/lib/rpg-query-priority.ts) | 51 | Chat retrieval priority: numeric priority map for RPG page types (current-scene:100, player:90, characters:80, etc.); `prioritizeChatSearchResults()` sort function; mandatory RPG context directory list for guaranteed context inclusion |
+| [src/lib/wiki-mode.ts](src/lib/wiki-mode.ts) | 91 | Lightweight mode detection: prefers persisted `.llm-wiki/project.json` metadata; falls back to `wikiMode: rpg` text markers; uses directory-shape heuristics (≥3 distinctive RPG dirs) as final fallback for compatibility |
+
+#### Pipeline Modifications
+
+| File | Change | Detail |
+|------|--------|--------|
+| [src/lib/ingest.ts](src/lib/ingest.ts) | +160 lines | RPG-aware prompt construction: `buildAnalysisPrompt()` calls out RPG semantic distinctions; `buildGenerationPrompt()` injects RPG schema directory guidance and dynamic-state rules; write handler routes RPG pages via explicit storage strategies (`current-scene` overwrite, `events` append, merge categories through existing page-merge behavior); fixes manual-ingest chat path to read `schema.md`/`purpose.md` from project root |
+| [src/lib/ingest.prompt.test.ts](src/lib/ingest.prompt.test.ts) | +31 lines | Updated prompt tests for RPG mode awareness |
+| [src/lib/ingest.scenarios.test.ts](src/lib/ingest.scenarios.test.ts) | +167 lines | New RPG ingestion scenario tests covering category routing and update semantics |
+| [src/lib/wiki-page-types.ts](src/lib/wiki-page-types.ts) | +9 lines | Wired RPG directories into `inferWikiTypeFromPath()` so RPG paths are recognized as first-class wiki types |
+| [src/lib/wiki-type-style.ts](src/lib/wiki-type-style.ts) | +68 lines | Added explicit icon/color styling for all 11 RPG page types |
+
+#### Frontend UI Changes
+
+| File | Change | Detail |
+|------|--------|--------|
+| [src/components/project/create-project-dialog.tsx](src/components/project/create-project-dialog.tsx) | +57 lines | Added `llmWikiRPG` mode option in project creation flow; RPG-mode selection triggers RPG bootstrap (schema/purpose/index/overview/log content + RPG directories including `style`, `rules`, `quests`, `memory`) after backend project creation |
+| [src/components/layout/knowledge-tree.tsx](src/components/layout/knowledge-tree.tsx) | +34 lines | RPG directories grouped as first-class UI sections in the knowledge tree sidebar |
+| [src/components/chat/chat-message.tsx](src/components/chat/chat-message.tsx) | +96/-31 lines | Expanded wiki path resolution to include all RPG directories (16 known dirs); added RPG type icons/colors (`world`:emerald, `characters`:blue, `player`:cyan, `current-scene`:rose, `events`:amber, `plot-arcs`:violet, etc.); centralized path-candidate builder replacing hardcoded legacy lists |
+| [src/components/chat/chat-panel.tsx](src/components/chat/chat-panel.tsx) | +83 lines | Chat retrieval now detects RPG mode and: (1) prioritizes search results by RPG type priority, (2) always includes mandatory RPG context pages (`current-scene`, `player`, `events`, `plot-arcs`) as P-1 priority, (3) adds RPG-specific system prompt instruction when live RPG context is present |
+| [src/lib/graph-relevance.ts](src/lib/graph-relevance.ts) | +10 lines | RPG type affinity added to the 4-signal relevance model |
+
+#### Backend
+
+| File | Change | Detail |
+|------|--------|--------|
+| [src/commands/fs.ts](src/commands/fs.ts) | +3 lines | Extended project creation to persist mode metadata in `.llm-wiki/project.json` |
+| [src-tauri/Cargo.toml](src-tauri/Cargo.toml) | Updated | Dependency updates for the RPG release |
+
+#### Configuration
+
+| File | Change | Detail |
+|------|--------|--------|
+| [.gitignore](.gitignore) | -1 line | Removed `docs/` from gitignore so RPG design and planning documents are now tracked in version control |
+
+#### Testing & Validation
+
+| File | Lines | Purpose |
+|------|-------|---------|
+| [src/lib/rpg-smoke.test.ts](src/lib/rpg-smoke.test.ts) | 481 | Deterministic smoke test using mocked LLM + real filesystem: validates RPG material routing into correct directories, `current-scene` overwrite semantics, `events` append semantics, and frontend mode/type helper recognition |
+| [src/lib/project-mode.test.ts](src/lib/project-mode.test.ts) | 28 | Tests for project mode definitions and bootstrap content |
+| [src/lib/wiki-mode.test.ts](src/lib/wiki-mode.test.ts) | 51 | Tests for mode detection (persisted metadata, text markers, directory heuristics) |
+| [src/lib/rpg-dynamic-update.test.ts](src/lib/rpg-dynamic-update.test.ts) | 118 | Tests for stale-section stripping and dynamic update logic |
+| [src/lib/rpg-query-priority.test.ts](src/lib/rpg-query-priority.test.ts) | 75 | Tests for RPG retrieval priority sorting |
+| [src/lib/rpg-wiki-schema.test.ts](src/lib/rpg-wiki-schema.test.ts) | 38 | Tests for schema entry derivation from category registry |
+
+#### Evaluation & Quality
+
+| File | Purpose |
+|------|---------|
+| [docs/RPG_SMOKE_TEST_REPORT.md](docs/RPG_SMOKE_TEST_REPORT.md) | Smoke test results documenting that mocked-LLM routing/storage validation passes for all first-version RPG categories |
+| [docs/RPG_EXTRACTION_EVALUATION.md](docs/RPG_EXTRACTION_EVALUATION.md) | Bounded extraction-quality review against smoke artifacts; documents the one evidence-backed fix applied: canonical `current-scene` output now explicitly requires `wiki/current-scene/scene_state.md` |
+| [docs/LLMWIKIRPG_USAGE.md](docs/LLMWIKIRPG_USAGE.md) | First-version operating guide: mode activation, category boundaries, update semantics, review checks, compatibility notes, and current limits |
+| [docs/LLMWIKIRPG_IMPLEMENTATION_SUMMARY.md](docs/LLMWIKIRPG_IMPLEMENTATION_SUMMARY.md) | V1 handoff summary: what is complete, what is intentionally incomplete, and recommended next-phase directions |
+
+#### Automation
+
+| File | Purpose |
+|------|---------|
+| [scripts/run-codex-stages.ps1](scripts/run-codex-stages.ps1) | PowerShell stage runner for Codex: supports `-DryRun`, `-From N`, `-Until M` for isolated stage re-execution without shared chat context |
+| [scripts/run-opencode-stages.ps1](scripts/run-opencode-stages.ps1) | Legacy Opencode runner (historical reference; Codex is the current default) |
+
+#### State Tracking
+
+| File | Purpose |
+|------|---------|
+| [docs/CURRENT_STATE.md](docs/CURRENT_STATE.md) | Authoritative record: project status, completed stages, known risks, last executed stage, next stage recommendation |
+| [docs/IMPLEMENTATION_LOG.md](docs/IMPLEMENTATION_LOG.md) | Per-stage detailed log with changed files, summaries, validation results, scope notes, and next-step guidance |
+| [docs/ROADMAP.md](docs/ROADMAP.md) | Simplified automation roadmap with stage table and recovery instructions |
+
+#### Known Limitations in v0.1
+
+- No first-class persisted UI setting for wiki mode (mode is set at project creation or via `.llm-wiki/project.json`)
+- No project-template/bootstrap that pre-creates the RPG directory structure (directories created lazily on first write)
+- No real-model extraction evaluation harness (smoke test uses mocked LLM)
+- `style`, `rules`, and `runtime` remain documented design areas, not implemented category targets
+- No dedicated contradiction engine, causal consistency checker, or multi-page runtime context compiler
+- Deeper semantic resolution for boundary cases (`player` vs `characters`, `events` vs `plot-arcs`) not yet implemented
+
+#### Verified
+
+- All 29 tests pass across 4 test files (`wiki-mode`, `project-mode`, `ingest.prompt`, `rpg-smoke`)
+- TypeScript typecheck passes (`npm run typecheck`)
+- Codex stage runner dry-run validates stages 00–12 without execution errors
+
+---
+
 ## License
 
 This project is licensed under the **GNU General Public License v3.0** — see [LICENSE](LICENSE) for details.

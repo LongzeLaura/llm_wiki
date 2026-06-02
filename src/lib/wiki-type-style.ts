@@ -1,6 +1,7 @@
 import type { LucideIcon } from "lucide-react"
 import {
   User,
+  Users,
   Lightbulb,
   HelpCircle,
   FileText,
@@ -9,6 +10,13 @@ import {
   BookOpen,
   Calendar,
   Hash,
+  Globe,
+  MapPinned,
+  Shield,
+  Package,
+  Eye,
+  Link2,
+  GitMerge,
 } from "lucide-react"
 
 export interface WikiTypeStyle {
@@ -70,6 +78,66 @@ export const WIKI_TYPE_STYLES: Record<string, WikiTypeStyle> = {
     icon: BookOpen,
     chipClass: "bg-teal-500/15 text-teal-700 dark:text-teal-300",
     dotClass: "bg-teal-500",
+  },
+  world: {
+    label: "World",
+    icon: Globe,
+    chipClass: "bg-emerald-500/15 text-emerald-700 dark:text-emerald-300",
+    dotClass: "bg-emerald-500",
+  },
+  characters: {
+    label: "Characters",
+    icon: Users,
+    chipClass: "bg-blue-500/15 text-blue-700 dark:text-blue-300",
+    dotClass: "bg-blue-500",
+  },
+  player: {
+    label: "Player",
+    icon: User,
+    chipClass: "bg-cyan-500/15 text-cyan-700 dark:text-cyan-300",
+    dotClass: "bg-cyan-500",
+  },
+  locations: {
+    label: "Locations",
+    icon: MapPinned,
+    chipClass: "bg-lime-500/15 text-lime-700 dark:text-lime-300",
+    dotClass: "bg-lime-500",
+  },
+  factions: {
+    label: "Factions",
+    icon: Shield,
+    chipClass: "bg-sky-500/15 text-sky-700 dark:text-sky-300",
+    dotClass: "bg-sky-500",
+  },
+  items: {
+    label: "Items",
+    icon: Package,
+    chipClass: "bg-orange-500/15 text-orange-700 dark:text-orange-300",
+    dotClass: "bg-orange-500",
+  },
+  "plot-arcs": {
+    label: "Plot Arcs",
+    icon: GitMerge,
+    chipClass: "bg-violet-500/15 text-violet-700 dark:text-violet-300",
+    dotClass: "bg-violet-500",
+  },
+  events: {
+    label: "Events",
+    icon: Calendar,
+    chipClass: "bg-amber-500/15 text-amber-700 dark:text-amber-300",
+    dotClass: "bg-amber-500",
+  },
+  "current-scene": {
+    label: "Current Scene",
+    icon: Eye,
+    chipClass: "bg-rose-500/15 text-rose-700 dark:text-rose-300",
+    dotClass: "bg-rose-500",
+  },
+  relationships: {
+    label: "Relationships",
+    icon: Link2,
+    chipClass: "bg-pink-500/15 text-pink-700 dark:text-pink-300",
+    dotClass: "bg-pink-500",
   },
   event: {
     label: "Event",

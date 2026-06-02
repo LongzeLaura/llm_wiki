@@ -17,6 +17,9 @@ import { isGreeting } from "@/lib/greeting-detector"
 import { computeContextBudget } from "@/lib/context-budget"
 import { anyTxtSearchSmart, hasConfiguredAnyTxt } from "@/lib/anytxt-search"
 import { resolveSearchConfig, webSearch, type WebSearchResult } from "@/lib/web-search"
+import { MANDATORY_RPG_CONTEXT_DIRS, isRpgRelevantPath, prioritizeChatSearchResults } from "@/lib/rpg-query-priority"
+import { detectWikiMode } from "@/lib/wiki-mode"
+import type { FileNode } from "@/types/wiki"
 
 // Store the page mapping from the last query so SourceFilesBar can show which pages were cited
 export let lastQueryPages: { title: string; path: string }[] = []
@@ -42,6 +45,56 @@ function formatDate(timestamp: number): string {
     return d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
   }
   return d.toLocaleDateString([], { month: "short", day: "numeric" })
+}
+
+function flattenMdFiles(nodes: readonly FileNode[]): FileNode[] {
+  const files: FileNode[] = []
+  for (const node of nodes) {
+    if (node.is_dir && node.children) {
+      files.push(...flattenMdFiles(node.children))
+    } else if (!node.is_dir && node.name.endsWith(".md")) {
+      files.push(node)
+    }
+  }
+  return files
+}
+
+function sortMandatoryRpgFiles(files: readonly FileNode[], preferredFiles: readonly string[] = []): FileNode[] {
+  const preferred = new Map(preferredFiles.map((name, index) => [name.toLowerCase(), index]))
+  return [...files].sort((a, b) => {
+    const preferredA = preferred.get(a.name.toLowerCase())
+    const preferredB = preferred.get(b.name.toLowerCase())
+    if (preferredA !== undefined || preferredB !== undefined) {
+      if (preferredA === undefined) return 1
+      if (preferredB === undefined) return -1
+      return preferredA - preferredB
+    }
+    return a.name.localeCompare(b.name)
+  })
+}
+
+async function collectMandatoryRpgContextPages(projectPath: string): Promise<Array<{ title: string; path: string }>> {
+  const pages: Array<{ title: string; path: string }> = []
+  const seen = new Set<string>()
+
+  for (const { dir, limit, preferredFiles } of MANDATORY_RPG_CONTEXT_DIRS) {
+    try {
+      const tree = await listDirectory(`${projectPath}/wiki/${dir}`)
+      const files = sortMandatoryRpgFiles(flattenMdFiles(tree), preferredFiles).slice(0, limit)
+      for (const file of files) {
+        if (seen.has(file.path)) continue
+        seen.add(file.path)
+        pages.push({
+          title: getFileName(file.path).replace(/\.md$/, "").replace(/-/g, " "),
+          path: file.path,
+        })
+      }
+    } catch {
+      // Missing directories are expected in legacy projects.
+    }
+  }
+
+  return pages
 }
 
 function ConversationSidebar() {
@@ -221,14 +274,30 @@ export function ChatPanel() {
           maxPageSize: MAX_PAGE_SIZE,
         } = computeContextBudget(llmConfig.maxContextSize)
 
-        const [rawIndex, purpose] = await Promise.all([
+        const [rawIndex, purpose, schema, wikiTree] = await Promise.all([
           readFile(`${pp}/wiki/index.md`).catch(() => ""),
           readFile(`${pp}/purpose.md`).catch(() => ""),
+          readFile(`${pp}/schema.md`).catch(() => ""),
+          listDirectory(`${pp}/wiki`).catch(() => [] as FileNode[]),
         ])
+        const projectMeta = await readFile(`${pp}/.llm-wiki/project.json`).catch(() => "")
+        const wikiMode = detectWikiMode({
+          projectMeta,
+          schema,
+          purpose,
+          index: rawIndex,
+          paths: wikiTree.map((node) => node.path),
+        })
 
         // ── Phase 1: Tokenized search → top 10 ────────────────
         const searchResults = await searchWiki(pp, text)
-        const topSearchResults = searchResults.slice(0, 10)
+        const prioritizedSearchResults = wikiMode === "llmwikirpg"
+          ? prioritizeChatSearchResults(searchResults)
+          : searchResults
+        const mandatoryRpgPages = wikiMode === "llmwikirpg"
+          ? await collectMandatoryRpgContextPages(pp)
+          : []
+        const topSearchResults = prioritizedSearchResults.slice(0, 10)
 
         const resolvedExternalSearchConfig = resolveSearchConfig(searchApiConfig)
         const externalSearchResults: WebSearchResult[] = []
@@ -322,9 +391,11 @@ export function ChatPanel() {
         let usedChars = 0
         type PageEntry = { title: string; path: string; content: string; priority: number }
         const relevantPages: PageEntry[] = []
+        const selectedPaths = new Set<string>()
 
         const tryAddPage = async (title: string, filePath: string, priority: number): Promise<boolean> => {
           if (usedChars >= PAGE_BUDGET) return false
+          if (selectedPaths.has(filePath)) return false
           try {
             const raw = await readFile(filePath)
             const relativePath = getRelativePath(filePath, pp)
@@ -333,11 +404,16 @@ export function ChatPanel() {
               : raw
             if (usedChars + truncated.length > PAGE_BUDGET) return false
             usedChars += truncated.length
+            selectedPaths.add(filePath)
             relevantPages.push({ title, path: relativePath, content: truncated, priority })
             return true
           } catch { return false }
         }
 
+        // P-1: Mandatory RPG context pages when those directories exist.
+        for (const page of mandatoryRpgPages) {
+          await tryAddPage(page.title, page.path, -1)
+        }
         // P0: Title matches
         for (const r of topSearchResults.filter((r) => r.titleMatch)) {
           await tryAddPage(r.title, r.path, 0)
@@ -378,6 +454,9 @@ export function ChatPanel() {
               ? "- Answer based ONLY on the numbered wiki pages and external sources provided below."
               : "- Answer based ONLY on the numbered wiki pages provided below.",
             "- If the provided pages don't contain enough information, say so honestly.",
+            wikiMode === "llmwikirpg" && relevantPages.some((page) => isRpgRelevantPath(page.path))
+              ? "- For RPG questions, treat current-scene, player, events, plot-arcs, and relationship pages as high-priority live context when they are present."
+              : "",
             "- Use [[wikilink]] syntax to reference wiki pages.",
             externalContext
               ? "- When citing wiki information, use page numbers like [1], [2]. When citing external information, use external source IDs like [E1], [E2]."

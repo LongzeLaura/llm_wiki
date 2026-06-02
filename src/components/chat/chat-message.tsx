@@ -27,6 +27,41 @@ import { getHtmlLang, getTextDirection } from "@/lib/language-metadata"
 import { MermaidDiagram, unwrapMermaidPre } from "@/components/mermaid-diagram"
 import { inferWikiTypeFromPath } from "@/lib/wiki-page-types"
 
+const KNOWN_WIKI_DIRS = [
+  "current-scene",
+  "player",
+  "characters",
+  "relationships",
+  "events",
+  "plot-arcs",
+  "world",
+  "locations",
+  "factions",
+  "items",
+  "entities",
+  "concepts",
+  "sources",
+  "queries",
+  "synthesis",
+  "comparisons",
+] as const
+
+function buildWikiPathCandidates(projectPath: string, pageNameOrPath: string): string[] {
+  const normalized = pageNameOrPath
+    .replace(/\\/g, "/")
+    .replace(/^\/+/, "")
+    .replace(/^wiki\//, "")
+    .replace(/\.md$/i, "")
+  const base = `${projectPath}/wiki/${normalized}.md`
+  const leaf = getFileName(normalized)
+  const candidates = [
+    base,
+    ...KNOWN_WIKI_DIRS.map((dir) => `${projectPath}/wiki/${dir}/${leaf}.md`),
+    `${projectPath}/wiki/${leaf}.md`,
+  ]
+  return [...new Set(candidates)]
+}
+
 // Module-level cache of source file names
 let cachedSourceFiles: string[] = []
 
@@ -275,6 +310,16 @@ function SaveToWikiButton({ content, visible }: { content: string; visible: bool
 type CitedPage = MessageReference
 
 const REF_TYPE_CONFIG: Record<string, { icon: typeof FileText; color: string }> = {
+  world: { icon: Globe, color: "text-emerald-500" },
+  characters: { icon: Users, color: "text-blue-500" },
+  player: { icon: User, color: "text-cyan-500" },
+  locations: { icon: FileText, color: "text-lime-500" },
+  factions: { icon: Users, color: "text-sky-500" },
+  items: { icon: FileText, color: "text-orange-500" },
+  "plot-arcs": { icon: GitMerge, color: "text-violet-500" },
+  events: { icon: TrendingUp, color: "text-amber-500" },
+  "current-scene": { icon: Globe, color: "text-rose-500" },
+  relationships: { icon: Users, color: "text-pink-500" },
   entity: { icon: Users, color: "text-blue-500" },
   concept: { icon: Lightbulb, color: "text-purple-500" },
   source: { icon: BookOpen, color: "text-orange-500" },
@@ -375,16 +420,7 @@ function CitedReferencesPanel({ content, savedReferences }: { content: string; s
           return [page.path, { count: 0, firstUrl: null }] as const
         }
         const id = getFileName(page.path.replace(/^wiki\//, "").replace(/\.md$/, ""))
-        const candidates = [
-          `${pp}/${page.path}`,
-          `${pp}/wiki/entities/${id}.md`,
-          `${pp}/wiki/concepts/${id}.md`,
-          `${pp}/wiki/sources/${id}.md`,
-          `${pp}/wiki/queries/${id}.md`,
-          `${pp}/wiki/synthesis/${id}.md`,
-          `${pp}/wiki/comparisons/${id}.md`,
-          `${pp}/wiki/${id}.md`,
-        ]
+        const candidates = buildWikiPathCandidates(pp, page.path || id)
         for (const candidate of candidates) {
           try {
             const text = await readFile(candidate)
@@ -520,16 +556,7 @@ function CitedReferencesPanel({ content, savedReferences }: { content: string; s
             if (!project) return
             const pp = normalizePath(project.path)
             const id = getFileName(page.path.replace(/^wiki\//, "").replace(/\.md$/, ""))
-            const candidates = [
-              `${pp}/${page.path}`,
-              `${pp}/wiki/entities/${id}.md`,
-              `${pp}/wiki/concepts/${id}.md`,
-              `${pp}/wiki/sources/${id}.md`,
-              `${pp}/wiki/queries/${id}.md`,
-              `${pp}/wiki/synthesis/${id}.md`,
-              `${pp}/wiki/comparisons/${id}.md`,
-              `${pp}/wiki/${id}.md`,
-            ]
+            const candidates = buildWikiPathCandidates(pp, page.path || id)
             for (const candidate of candidates) {
               try {
                 await readFile(candidate)
@@ -649,8 +676,6 @@ function extractCitedPages(text: string): CitedPage[] {
   if (wikilinks) {
     const seen = new Set<string>()
     const pages: CitedPage[] = []
-    const WIKI_DIRS = ["entities", "concepts", "sources", "queries", "synthesis", "comparisons"]
-
     for (const link of wikilinks) {
       const nameMatch = link.match(/\[\[([^\]|]+?)(?:\|([^\]]+?))?\]\]/)
       if (nameMatch) {
@@ -662,22 +687,7 @@ function extractCitedPages(text: string): CitedPage[] {
         seen.add(id)
 
         // Try to find the file in known wiki subdirectories
-        let resolvedPath = ""
-        if (id.includes("/")) {
-          // Already has directory like "queries/my-query"
-          resolvedPath = `wiki/${id}.md`
-        } else {
-          // Search in common directories
-          for (const dir of WIKI_DIRS) {
-            resolvedPath = `wiki/${dir}/${id}.md`
-            // We can't do async file checking here, so try all known patterns
-            // The click handler will try multiple paths
-            break // Use first candidate, click handler resolves the rest
-          }
-          if (!resolvedPath) resolvedPath = `wiki/${id}.md`
-        }
-
-        pages.push({ title: display, path: resolvedPath })
+        pages.push({ title: display, path: `wiki/${id}.md` })
       }
     }
     if (pages.length > 0) return pages
@@ -941,15 +951,7 @@ function WikiLink({ pageName, children }: { pageName: string; children: React.Re
   useEffect(() => {
     if (!project) return
     const pp = normalizePath(project.path)
-    const candidates = [
-      `${pp}/wiki/entities/${pageName}.md`,
-      `${pp}/wiki/concepts/${pageName}.md`,
-      `${pp}/wiki/sources/${pageName}.md`,
-      `${pp}/wiki/queries/${pageName}.md`,
-      `${pp}/wiki/comparisons/${pageName}.md`,
-      `${pp}/wiki/synthesis/${pageName}.md`,
-      `${pp}/wiki/${pageName}.md`,
-    ]
+    const candidates = buildWikiPathCandidates(pp, pageName)
 
     let cancelled = false
     async function check() {
