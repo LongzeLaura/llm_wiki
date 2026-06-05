@@ -1,11 +1,16 @@
 import { describe, expect, it } from "vitest"
-import { detectExplicitWikiMode, detectWikiMode } from "./wiki-mode"
+import { detectExplicitWikiMode, detectWikiMode, isRpgWikiMode } from "./wiki-mode"
 
 describe("wiki-mode", () => {
   it("honors an explicit wikiMode override", () => {
     expect(detectExplicitWikiMode("wikiMode: rpg")).toBe("llmwikirpg")
     expect(detectExplicitWikiMode("wikiMode: llmwikirpg")).toBe("llmwikirpg")
     expect(detectWikiMode({ schema: 'wikiMode = "default"', index: "wiki/current-scene/" })).toBe("default")
+  })
+
+  it("exposes a named RPG-mode predicate for branch convergence", () => {
+    expect(isRpgWikiMode("llmwikirpg")).toBe(true)
+    expect(isRpgWikiMode("default")).toBe(false)
   })
 
   it("honors project metadata before heuristics", () => {

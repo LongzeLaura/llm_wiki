@@ -83,6 +83,21 @@ async function readQueueFile(): Promise<string> {
   return readFileRaw(`${tmp.path}/.llm-wiki/ingest-queue.json`)
 }
 
+async function readQueueJson<T = unknown>(): Promise<T> {
+  let lastError: unknown
+  for (let i = 0; i < 100; i++) {
+    try {
+      const raw = await readQueueFile()
+      if (!raw.trim()) throw new Error("queue file is empty")
+      return JSON.parse(raw) as T
+    } catch (err) {
+      lastError = err
+      await flushIO(1)
+    }
+  }
+  throw lastError instanceof Error ? lastError : new Error("queue file did not become valid JSON")
+}
+
 describe("ingest-queue persistence — write", () => {
   it("writes .llm-wiki/ingest-queue.json after enqueue", async () => {
     await enqueueIngest(TEST_ID_A, "raw/sources/a.md")
@@ -94,7 +109,7 @@ describe("ingest-queue persistence — write", () => {
         return false
       }
     })
-    const parsed = JSON.parse(await readQueueFile())
+    const parsed = await readQueueJson<Array<{ sourcePath: string }>>()
     expect(parsed[0].sourcePath).toBe("raw/sources/a.md")
   })
 
@@ -105,13 +120,13 @@ describe("ingest-queue persistence — write", () => {
     ])
     await waitFor(async () => {
       try {
-        const parsed = JSON.parse(await readQueueFile())
+        const parsed = await readQueueJson<Array<unknown>>()
         return parsed.length === 1
       } catch {
         return false
       }
     })
-    const parsed = JSON.parse(await readQueueFile())
+    const parsed = await readQueueJson<Array<{ sourcePath: string }>>()
     expect(parsed).toHaveLength(1)
     expect(parsed[0].sourcePath).toBe("raw/sources/a.md")
   })
@@ -129,7 +144,7 @@ describe("ingest-queue persistence — write", () => {
         return false
       }
     })
-    const parsed = JSON.parse(await readQueueFile()) as Array<{ sourcePath: string; folderContext: string }>
+    const parsed = await readQueueJson<Array<{ sourcePath: string; folderContext: string }>>()
     const paths = parsed.map((p) => p.sourcePath)
     expect(paths).toContain("raw/sources/注意力机制.pdf")
     expect(paths).toContain("raw/日本語.md")
@@ -161,7 +176,7 @@ describe("ingest-queue persistence — write", () => {
       }
     })
 
-    const arr = JSON.parse(await readQueueFile()) as Array<{ sourcePath: string }>
+    const arr = await readQueueJson<Array<{ sourcePath: string }>>()
     expect(arr.map((t) => t.sourcePath)).toEqual(
       expect.arrayContaining(["first.md", "second.md"]),
     )
@@ -270,7 +285,7 @@ describe("ingest-queue persistence — restore round-trip", () => {
       }
     })
     // Verify on-disk state before we blow away memory
-    const onDisk = JSON.parse(await readQueueFile()) as Array<{ sourcePath: string; folderContext: string }>
+    const onDisk = await readQueueJson<Array<{ sourcePath: string; folderContext: string }>>()
     expect(onDisk[0].sourcePath).toBe("raw/sources/注意力.pdf")
     expect(onDisk[0].folderContext).toBe("研究 > 深度学习")
 

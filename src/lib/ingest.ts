@@ -24,11 +24,13 @@ import {
 } from "@/lib/extract-source-images"
 import { captionMarkdownImages, loadCaptionCache } from "@/lib/image-caption-pipeline"
 import type { MultimodalConfig } from "@/stores/wiki-store"
-import { GENERATION_WIKI_TYPES } from "@/lib/wiki-page-types"
 import { computeContextBudget } from "@/lib/context-budget"
-import { RPG_WIKI_SCHEMA, getRpgWikiSchemaEntry, type RpgWikiUpdateStrategy } from "@/lib/rpg-wiki-schema"
+import { getRpgWikiSchemaEntry, type RpgWikiUpdateStrategy } from "@/lib/rpg-wiki-schema"
 import { prepareExistingContentForRpgDynamicMerge, validateRpgDynamicWrite } from "@/lib/rpg-dynamic-update"
-import { detectWikiMode, type WikiMode } from "@/lib/wiki-mode"
+import { validateRpgExtraction, type RpgExtractionValidationBlock } from "@/lib/rpg-extraction-validation"
+import { detectWikiMode, isRpgWikiMode, type WikiMode } from "@/lib/wiki-mode"
+import { buildDefaultAnalysisPrompt, buildDefaultGenerationPrompt } from "@/lib/prompts/default-ingest"
+import { buildRpgAnalysisPrompt, buildRpgGenerationPrompt } from "@/lib/prompts/rpg-ingest"
 
 const LONG_SOURCE_MIN_BUDGET = 8_000
 const LONG_SOURCE_MAX_SINGLE_PASS_BUDGET = 300_000
@@ -43,6 +45,11 @@ const INGEST_GENERATION_TOKENS_512K = 32_768
 const REVIEW_STAGE_MIN_SIGNAL_CHARS = 10_000
 const REVIEW_STAGE_MIN_FILE_BLOCKS = 4
 
+/**
+ * 将已保存的图片引用追加到源内容末尾，供后续 caption 流水线使用。
+ * 为什么需要：captionMarkdownImages 通过扫描 `![](path)` 标记来识别需要生成描述的图片，
+ * 此函数批量生成这些标记，确保所有提取出的图片都能被 caption 流水线发现。
+ */
 function appendSavedImageRefsForCaption(content: string, images: SavedImage[]): string {
   if (images.length === 0) return content
   const refs = images
@@ -53,6 +60,10 @@ function appendSavedImageRefsForCaption(content: string, images: SavedImage[]): 
   return `${content}\n\n## Referenced Local Images\n\n${refs.join("\n")}\n`
 }
 
+/**
+ * 判断一个图片 URL 是否属于当前源的媒体目录，用于 caption 流水线的 shouldCaption 过滤。
+ * 为什么需要：只对当前 ingest 产出的图片进行 caption，避免对用户手写的 markdown 图片引用重复处理。
+ */
 function isSavedImagePromptUrl(projectPath: string, sourceSummarySlug: string, url: string): boolean {
   return (
     url.startsWith(`${projectPath}/wiki/media/${sourceSummarySlug}/`) ||
@@ -60,10 +71,19 @@ function isSavedImagePromptUrl(projectPath: string, sourceSummarySlug: string, u
   )
 }
 
+/**
+ * 将 prompt 中使用的相对路径（media/...）转换为绝对文件系统路径。
+ * 为什么需要：caption 流水线需要用绝对路径来读写图片文件。
+ */
 function promptImageUrlToAbs(projectPath: string, url: string): string {
   return url.startsWith("media/") ? `${projectPath}/wiki/${url}` : url
 }
 
+/**
+ * 剥离 wiki media 路径中的项目绝对路径前缀，将绝对路径还原为 `media/...` 相对路径。
+ * 为什么需要：发送给 LLM 的 prompt 中不应包含本地文件系统的绝对路径，
+ * 且 wiki 页面内部引用图片时应使用 wiki-root-relative 路径。
+ */
 function stripWikiMediaAbsPaths(projectPath: string, content: string): string {
   return content.split(`${projectPath}/wiki/media/`).join("media/")
 }
@@ -200,7 +220,7 @@ export function isSafeIngestPath(p: string): boolean {
   const segments = normalized.split("/")
   if (segments.some((seg) => seg === "..")) return false
   if (segments.some((seg) => !isWindowsSafePathSegment(seg))) return false
-  // Must live under wiki/ — the only tree the ingest pipeline writes to.
+  // Must live under wiki/ --the only tree the ingest pipeline writes to.
   if (!normalized.startsWith("wiki/")) return false
   return true
 }
@@ -224,7 +244,7 @@ function isWindowsSafePathSegment(segment: string): boolean {
   return true
 }
 // Fence delimiters per CommonMark (triple+ backticks or tildes). Leading
-// indentation ≤ 3 spaces is still a fence; 4+ spaces is an indented code
+// indentation <=3 spaces is still a fence; 4+ spaces is an indented code
 // block and doesn't use fence markers.
 const FENCE_LINE = /^\s{0,3}(```+|~~~+)/
 
@@ -234,19 +254,19 @@ const FENCE_LINE = /^\s{0,3}(```+|~~~+)/
  * Known hazards the naive `---FILE:...---END FILE---` regex walks into
  * (all reproduced as fixtures in src/lib/ingest-parse.test.ts):
  *
- *   H1. Windows CRLF line endings — regex anchored on bare `\n` missed
+ *   H1. Windows CRLF line endings --regex anchored on bare `\n` missed
  *       every block.
- *   H2. Stream truncation — the last block's closing `---END FILE---`
+ *   H2. Stream truncation --the last block's closing `---END FILE---`
  *       never arrived; the entire block was silently dropped with no
  *       logging.
- *   H3. Marker whitespace / case variants — `--- END FILE ---`,
+ *   H3. Marker whitespace / case variants --`--- END FILE ---`,
  *       `---end file---`, `--- FILE: path ---`, `---FILE: foo--- \n`
  *       (trailing space) all made the regex fail.
  *   H5. Literal `---END FILE---` inside a fenced code block (e.g. when
  *       the LLM is writing a concept page about our own ingest format)
- *       — lazy match stopped at the first occurrence, truncating the
+ *       --lazy match stopped at the first occurrence, truncating the
  *       page and dumping all subsequent real content into no-man's-land.
- *   H6. Empty path — block matched but was silently dropped by a
+ *   H6. Empty path --block matched but was silently dropped by a
  *       downstream `!path` check.
  *
  * This parser fixes every one except H2 (which is fundamentally a
@@ -283,7 +303,7 @@ export function parseFileBlocks(text: string): ParseFileBlocksResult {
 
       // H5 fix: update fence state before checking closer. Only close
       // the fence when we see the same character repeated at least as
-      // many times — CommonMark rule. This lets docs-about-our-format
+      // many times --CommonMark rule. This lets docs-about-our-format
       // quote `---END FILE---` inside code fences without truncating
       // the outer block.
       const fenceMatch = FENCE_LINE.exec(line)
@@ -319,7 +339,7 @@ export function parseFileBlocks(text: string): ParseFileBlocksResult {
       // H2 fix (partial): we can't fabricate content the LLM never
       // sent, but we surface the drop instead of silently hiding it.
       const pathLabel = path || "(unnamed)"
-      const msg = `FILE block "${pathLabel}" was not closed before end of stream — likely truncation (model hit max_tokens, timeout, or connection dropped). Block dropped.`
+      const msg = `FILE block "${pathLabel}" was not closed before end of stream --likely truncation (model hit max_tokens, timeout, or connection dropped). Block dropped.`
       console.warn(`[ingest] ${msg}`)
       warnings.push(msg)
       continue
@@ -335,7 +355,7 @@ export function parseFileBlocks(text: string): ParseFileBlocksResult {
 
     if (!isSafeIngestPath(path)) {
       // Path-traversal guard. Drops blocks whose path tries to escape
-      // wiki/ — see isSafeIngestPath for the threat model.
+      // wiki/ --see isSafeIngestPath for the threat model.
       const msg = `FILE block with unsafe path "${path}" rejected (must be under wiki/, no .., no absolute paths, and Windows-safe file names).`
       console.warn(`[ingest] ${msg}`)
       warnings.push(msg)
@@ -357,7 +377,7 @@ export function languageRule(sourceContent: string = ""): string {
 }
 
 /**
- * Auto-ingest: reads source → LLM analyzes → LLM writes wiki pages, all in one go.
+ * Auto-ingest: reads source ->LLM analyzes ->LLM writes wiki pages, all in one go.
  * Used when importing new files.
  *
  * Concurrency: this function holds a per-project lock for its full
@@ -380,6 +400,25 @@ export async function autoIngest(
   )
 }
 
+/**
+ * autoIngest 的核心实现：完整的自动化 ingest 流水线。
+ * 为什么需要：这是整个 ingest 模块的主入口——执行完整的"读取源→分析→生成→写入"流水线。
+ *
+ * 流水线阶段：
+ *   Step 0:   缓存检查（跳过未改变的源）、图片提取和描述生成
+ *   Step 0.5: 从 PDF/PPTX/DOCX 提取嵌入图片
+ *   Step 0.6: 使用 VLM 为图片生成描述（caption）
+ *   Step 1:   LLM 分析源文档（结构化分析：实体、概念、论点、关联、矛盾）
+ *   Step 2:   LLM 生成 wiki 页面（FILE 块）和审阅条目（REVIEW 块）
+ *   Step 2.5: 可选——独立的审阅建议阶段
+ *   Step 3:   解析 FILE 块并写入磁盘（含页面合并、语言过滤、动态验证）
+ *   Step 3.5: 将提取的图片引用注入源摘要页面
+ *   Step 4:   解析 REVIEW 块并添加到审阅面板
+ *   Step 5:   保存到 ingest 缓存（加速后续相同源的重新导入）
+ *   Step 6:   生成向量嵌入（如果启用）
+ *
+ * 并发控制：通过 per-project mutex 确保同一项目的两个并发 ingest 调用串行执行。
+ */
 async function autoIngestImpl(
   projectPath: string,
   sourcePath: string,
@@ -420,7 +459,7 @@ async function autoIngestImpl(
     paths: wikiTree.map((node) => node.path),
   })
 
-  // ── Cache check: skip re-ingest if source content hasn't changed ──
+  // -- Cache check: skip re-ingest if source content hasn't changed --
   //
   // Image cascade still runs on cache hits. Reason: a user may have
   // ingested this source on a previous app version that didn't extract
@@ -440,7 +479,7 @@ async function autoIngestImpl(
       savedImages = [...savedImages, ...markdownImages]
       console.log(`[ingest:diag] cache-hit branch: got ${savedImages.length} image(s)`)
       if (savedImages.length > 0) {
-        // Caption first (populates the cache), THEN inject — the
+        // Caption first (populates the cache), THEN inject --the
         // safety-net section uses the cache to populate alt text.
         // Doing them in this order means cache-hit re-runs (e.g.
         // user re-imports an old PDF after captioning was added)
@@ -452,14 +491,14 @@ async function autoIngestImpl(
         // cache-hit path, so a user re-importing an old file
         // after disabling captioning sees images disappear from
         // the wiki side. (If a previous ingest had already written
-        // a `## Embedded Images` block, it stays — re-import
+        // a `## Embedded Images` block, it stays --re-import
         // doesn't proactively scrub old wiki content. The user
         // would need to delete the wiki/sources/<slug>.md page
         // to start clean.)
         const mmCfg = useWikiStore.getState().multimodalConfig
         if (!mmCfg.enabled) {
           console.log(
-            `[ingest:caption] cache-hit + disabled — skipping caption + safety-net inject (${savedImages.length} image(s) untouched on disk)`,
+            `[ingest:caption] cache-hit + disabled --skipping caption + safety-net inject (${savedImages.length} image(s) untouched on disk)`,
           )
         } else {
           const captionLlm = resolveCaptionConfig(mmCfg, llmConfig)
@@ -487,7 +526,7 @@ async function autoIngestImpl(
           // Re-embed the source-summary page so caption text lands
           // in the search index. Without this step, search by image
           // content stays empty for files ingested before captioning
-          // was added — the safety-net section was just rewritten
+          // was added --the safety-net section was just rewritten
           // with captions, but the embeddings still reflect the old
           // empty-alt content.
           await reembedSourceSummary(pp, sourceIdentity, sourceSummarySlug)
@@ -503,16 +542,16 @@ async function autoIngestImpl(
     }
     activity.updateItem(activityId, {
       status: "done",
-      detail: `Skipped (unchanged) — ${cachedFiles.length} files from previous ingest`,
+      detail: `Skipped (unchanged) --${cachedFiles.length} files from previous ingest`,
       filesWritten: cachedFiles,
     })
     return cachedFiles
   }
 
-  // ── Step 0.5: Extract embedded images ─────────────────────────
+  // -- Step 0.5: Extract embedded images -------------------------
   // Pulls every embedded image out of PDF / PPTX / DOCX into
   // `wiki/media/<source-slug>/`. We DON'T inject the markdown
-  // references into sourceContent here — without VLM captions
+  // references into sourceContent here --without VLM captions
   // (Phase 3a) the alt text is empty, which gives the LLM no
   // semantic signal to preserve them. The LLM tends to silently
   // strip empty-alt images when summarizing.
@@ -524,7 +563,7 @@ async function autoIngestImpl(
   // sourceContent injection because the captioned alt-text gives
   // the LLM something meaningful to work with.
   //
-  // Failure here is never fatal — extractAndSaveSourceImages logs
+  // Failure here is never fatal --extractAndSaveSourceImages logs
   // and returns [] on any error.
   activity.updateItem(activityId, { detail: "Extracting embedded images..." })
   console.log(`[ingest:diag] full-pipeline branch: starting image extraction for ${sp}`)
@@ -534,11 +573,11 @@ async function autoIngestImpl(
   console.log(`[ingest:diag] full-pipeline branch: got ${savedImages.length} image(s)`)
   if (savedImages.length > 0) {
     console.log(
-      `[ingest:images] saved ${savedImages.length} image(s) for "${sourceIdentity}" → wiki/media/${sourceSummarySlug}/`,
+      `[ingest:images] saved ${savedImages.length} image(s) for "${sourceIdentity}" ->wiki/media/${sourceSummarySlug}/`,
     )
   }
 
-  // ── Step 0.6: Caption embedded images ─────────────────────────
+  // -- Step 0.6: Caption embedded images -------------------------
   // Now that read_file's combined extraction has put `![](abs_path)`
   // markers inline in `sourceContent`, walk them and replace the
   // empty alt text with a vision-model-generated factual caption.
@@ -552,12 +591,12 @@ async function autoIngestImpl(
   // image reference inline at the right paragraph.
   //
   // Scope: we only caption images whose absolute path lives under
-  // <project>/wiki/media/<source-slug>/ — i.e. images the current
+  // <project>/wiki/media/<source-slug>/ --i.e. images the current
   // ingest produced. User-typed external URLs in markdown source
   // documents are passed through untouched.
   //
   // Master-toggle behavior: when `multimodalConfig.enabled` is
-  // false, we don't just skip the caption LLM call — we ALSO
+  // false, we don't just skip the caption LLM call --we ALSO
   // strip `![](url)` references from sourceContent before the LLM
   // sees it, AND skip the post-write safety-net injection further
   // down. Net effect: the wiki-side pipeline never references
@@ -568,13 +607,13 @@ async function autoIngestImpl(
   //   2. injectImagesIntoSourceSummary unconditionally appends a
   //      `## Embedded Images` section to wiki/sources/<slug>.md
   // Both paths land image refs into wiki pages, which then get
-  // embedded → searchable → visible in the search image grid even
+  // embedded ->searchable ->visible in the search image grid even
   // though the user disabled captioning. This was the user-
   // surprising behavior that prompted the fix.
   //
   // Rust extraction itself is untouched: images still land on disk
   // under wiki/media/<slug>/ (cheap), and the raw-source preview
-  // (which renders read_file output directly) still shows them —
+  // (which renders read_file output directly) still shows them --
   // that surface is "the source document as-is", separate from
   // "the curated wiki knowledge".
   let enrichedSourceContent = stripWikiMediaAbsPaths(
@@ -584,7 +623,7 @@ async function autoIngestImpl(
   const mmCfg = useWikiStore.getState().multimodalConfig
   const captionLlm = resolveCaptionConfig(mmCfg, llmConfig)
   if (!mmCfg.enabled && savedImages.length > 0) {
-    // Strip `![alt](url)` references — match the same regex shape
+    // Strip `![alt](url)` references --match the same regex shape
     // we use elsewhere for image refs. Preserve a single space
     // where the ref used to sit so adjacent words don't fuse.
     enrichedSourceContent = sourceContent.replace(
@@ -592,7 +631,7 @@ async function autoIngestImpl(
       " ",
     )
     console.log(
-      `[ingest:caption] disabled — stripped image refs from sourceContent (${savedImages.length} image(s) won't appear in wiki pages)`,
+      `[ingest:caption] disabled --stripped image refs from sourceContent (${savedImages.length} image(s) won't appear in wiki pages)`,
     )
   } else if (
     captionLlm &&
@@ -626,7 +665,7 @@ async function autoIngestImpl(
         `[ingest:caption] pipeline failed for "${fileName}":`,
         err instanceof Error ? err.message : err,
       )
-      // Fall through with original (empty-alt) source content —
+      // Fall through with original (empty-alt) source content --
       // captioning failure must NEVER break ingest.
     }
   }
@@ -659,7 +698,7 @@ async function autoIngestImpl(
     }
   }
 
-  // ── Step 1: Analysis ──────────────────────────────────────────
+  // -- Step 1: Analysis ------------------------------------------
   // LLM reads the source and produces a structured analysis:
   // key entities, concepts, main arguments, connections to existing wiki, contradictions
   activity.updateItem(activityId, {
@@ -697,7 +736,7 @@ async function autoIngestImpl(
     throw new Error(analysisActivity.detail || "Analysis stream failed")
   }
 
-  // ── Step 2: Generation ────────────────────────────────────────
+  // -- Step 2: Generation ----------------------------------------
   // LLM takes the analysis as context and produces wiki files + review items
   activity.updateItem(activityId, { detail: "Step 2/2: Generating wiki pages..." })
 
@@ -706,7 +745,7 @@ async function autoIngestImpl(
   await streamChat(
     llmConfig,
     [
-      { role: "system", content: buildGenerationPrompt(schema, purpose, index, sourceIdentity, overview, sourceContext, sourceSummaryPath, wikiMode) },
+      { role: "system", content: buildGenerationPrompt(schema, purpose, index, sourceIdentity, overview, sourceContext, sourceSummaryPath, wikiMode, analysis) },
       {
         role: "user",
         content: [
@@ -714,9 +753,9 @@ async function autoIngestImpl(
           "",
           "The Stage 1 analysis below is CONTEXT to inform your output. Do NOT echo",
           "its tables, bullet points, or prose. Your output must be FILE/REVIEW",
-          "blocks as specified in the system prompt — nothing else.",
+          "blocks as specified in the system prompt -- nothing else.",
           "",
-          "## Stage 1 Analysis (context only — do not repeat)",
+          "## Stage 1 Analysis (context only -- do not repeat)",
           "",
           analysis,
           "",
@@ -799,15 +838,17 @@ async function autoIngestImpl(
     if (reviewStageHadError) reviewSuggestionOutput = ""
   }
 
-  // ── Step 3: Write files ───────────────────────────────────────
+  // -- Step 3: Write files ---------------------------------------
   activity.updateItem(activityId, { detail: "Writing files..." })
   await migrateLegacySourceSummaryIfSafe(pp, sourceIdentity, sourceSummaryPath)
-  const { writtenPaths, warnings: writeWarnings, hardFailures } = await writeFileBlocks(
+  const { writtenPaths, warnings: writeWarnings, hardFailures, reviewItems: lintReviewItems } = await writeFileBlocks(
     pp,
     generation,
     llmConfig,
     sourceIdentity,
+    sourceContent,
     sourceSummaryPath,
+    wikiMode,
     signal,
   )
 
@@ -818,7 +859,7 @@ async function autoIngestImpl(
   if (writeWarnings.length > 0) {
     const summary = writeWarnings.length === 1
       ? writeWarnings[0]
-      : `${writeWarnings.length} ingest warnings: ${writeWarnings.slice(0, 2).join(" · ")}${writeWarnings.length > 2 ? ` … (+${writeWarnings.length - 2} more in console)` : ""}`
+      : `${writeWarnings.length} ingest warnings: ${writeWarnings.slice(0, 2).join(" 路 ")}${writeWarnings.length > 2 ? ` --(+${writeWarnings.length - 2} more in console)` : ""}`
     activity.updateItem(activityId, { detail: summary })
   }
 
@@ -827,7 +868,7 @@ async function autoIngestImpl(
   const hasSourceSummary = writtenPaths.some((p) => normalizePath(p) === sourceSummaryPath)
 
   // If the signal was aborted (e.g. user switched projects / cancelled),
-  // skip the fallback summary write — the LLM streams returned empty
+  // skip the fallback summary write --the LLM streams returned empty
   // via the abort fast-path (onDone), and writing a stub file into the
   // old project's wiki would both be noise and mask the error.
   // Returning no files lets processNext's length-0 safety net mark the
@@ -858,8 +899,8 @@ async function autoIngestImpl(
     }
   }
 
-  // ── Step 3.5: Append extracted images to the source-summary page ─
-  // Skipped when the master toggle is off — see Step 0.6 above for
+  // -- Step 3.5: Append extracted images to the source-summary page -
+  // Skipped when the master toggle is off --see Step 0.6 above for
   // the full rationale. With captioning disabled we also don't
   // want the safety-net section to slip image refs into the wiki
   // through the back door.
@@ -877,8 +918,9 @@ async function autoIngestImpl(
     }
   }
 
-  // ── Step 4: Parse review items ────────────────────────────────
+  // -- Step 4: Parse review items --------------------------------
   const reviewItems = [
+    ...lintReviewItems,
     ...parseReviewBlocks(generation, sp),
     ...parseReviewBlocks(reviewSuggestionOutput, sp),
   ]
@@ -886,14 +928,14 @@ async function autoIngestImpl(
     useReviewStore.getState().addItems(reviewItems)
   }
 
-  // ── Step 5: Save to cache ───────────────────────────────────
+  // -- Step 5: Save to cache -----------------------------------
   // Skip cache when ANY block hit a hard FS failure: we'd otherwise
   // freeze the partial-write result into the cache and a future
   // re-ingest of the same source would silently replay only the
   // pages that succeeded the first time, never giving the user a
   // chance to recover the failed ones. Soft drops (language
   // mismatch, path-traversal rejection, empty-path) are NOT failures
-  // — they represent deterministic decisions and caching them is
+  // --they represent deterministic decisions and caching them is
   // safe.
   if (writtenPaths.length > 0 && hardFailures.length === 0) {
     await saveIngestCache(pp, sourceIdentity, sourceContent, writtenPaths)
@@ -902,11 +944,11 @@ async function autoIngestImpl(
     }
   } else if (hardFailures.length > 0) {
     console.warn(
-      `[ingest] Skipping cache save for "${sourceIdentity}" — ${hardFailures.length} block(s) failed to write: ${hardFailures.join(", ")}`,
+      `[ingest] Skipping cache save for "${sourceIdentity}" --${hardFailures.length} block(s) failed to write: ${hardFailures.join(", ")}`,
     )
   }
 
-  // ── Step 6: Generate embeddings (if enabled) ───────────────
+  // -- Step 6: Generate embeddings (if enabled) ---------------
   const embCfg = useWikiStore.getState().embeddingConfig
   if (embCfg.enabled && embCfg.model && writtenPaths.length > 0) {
     try {
@@ -964,7 +1006,7 @@ function contentMatchesTargetLanguage(content: string, target: string): boolean 
 
   // Compatible families: CJK targets accept CJK variants; Latin targets
   // accept any Latin family (English may mis-detect as Italian/French for
-  // short idiomatic samples — that's fine). Cross-family is the real bug.
+  // short idiomatic samples --that's fine). Cross-family is the real bug.
   const cjk = new Set(["Chinese", "Traditional Chinese", "Japanese", "Korean"])
   const distinctNonLatin = new Set(["Arabic", "Persian", "Hindi", "Thai", "Hebrew"])
   const targetIsCjk = cjk.has(target)
@@ -975,10 +1017,18 @@ function contentMatchesTargetLanguage(content: string, target: string): boolean 
   return !detectedIsCjk
 }
 
+/**
+ * 判断路径是否为 wiki 日志页面。
+ * 为什么需要：日志页面有特殊的写入策略（追加而非覆盖）。
+ */
 function isLogPath(relativePath: string): boolean {
   return relativePath === "wiki/log.md" || relativePath.endsWith("/log.md")
 }
 
+/**
+ * 判断路径是否为列表页面（index 或 overview）。
+ * 为什么需要：列表页面总是整体覆盖写入，不应进行合并。
+ */
 function isListingPath(relativePath: string): boolean {
   return (
     relativePath === "wiki/index.md" ||
@@ -993,17 +1043,30 @@ interface WikiStorageStrategy {
   updateStrategy: RpgWikiUpdateStrategy | "legacy-log" | "listing" | "legacy-merge"
 }
 
+/**
+ * 从相对路径中提取 RPG 分类 ID（wiki 下的第一级目录名）。
+ * 为什么需要：用于判断路径是否属于 RPG wiki 目录体系。
+ */
 function getRpgCategoryIdFromPath(relativePath: string): string | null {
   const normalized = normalizePath(relativePath).replace(/^\/+/, "")
   const match = normalized.match(/^wiki\/([^/]+)(?:\/|$)/)
   return match?.[1] ?? null
 }
 
+/**
+ * 判断路径是否为 RPG wiki 路径（属于 RPG_WIKI_SCHEMA 中定义的分类）。
+ * 为什么需要：RPG 路径有特殊的动态验证和合并策略。
+ */
 function isRpgWikiPath(relativePath: string): boolean {
   const categoryId = getRpgCategoryIdFromPath(relativePath)
   return categoryId ? Boolean(getRpgWikiSchemaEntry(categoryId)) : false
 }
 
+/**
+ * 根据路径确定写入策略（追加/覆盖/合并等）。
+ * 为什么需要：不同类型的页面有不同的写入语义——
+ * 日志追加、目录覆盖、RPG 动态合并、普通页面 LLM 合并。
+ */
 function wikiStorageStrategyForPath(relativePath: string): WikiStorageStrategy {
   if (isLogPath(relativePath)) return { path: relativePath, updateStrategy: "legacy-log" }
   if (isListingPath(relativePath)) return { path: relativePath, updateStrategy: "listing" }
@@ -1019,11 +1082,19 @@ function wikiStorageStrategyForPath(relativePath: string): WikiStorageStrategy {
   return { path: relativePath, updateStrategy: schemaEntry.updateStrategy }
 }
 
+/**
+ * 剥离 frontmatter，仅返回正文内容。
+ * 为什么需要：追加模式下需要去除新内容的 frontmatter 后再拼接。
+ */
 function stripFrontmatterForAppend(content: string): string {
   const match = content.match(/^---\n[\s\S]*?\n---\s*\n?/)
   return (match ? content.slice(match[0].length) : content).trim()
 }
 
+/**
+ * 将新内容追加到已有内容之后，自动去除新内容的 frontmatter。
+ * 为什么需要：追加模式（如日志页面）不需要重复 frontmatter。
+ */
 function appendMarkdownContent(existing: string | null, incoming: string): string {
   const next = existing ? stripFrontmatterForAppend(incoming) : incoming.trim()
   if (!existing) return next
@@ -1031,6 +1102,12 @@ function appendMarkdownContent(existing: string | null, incoming: string): strin
   return `${existing.trimEnd()}\n\n${next}`
 }
 
+/**
+ * 规范化页面 frontmatter 中的 sources 字段：确保源标识使用规范的完整路径格式，
+ * 去重并追加当前源标识。
+ * 为什么需要：LLM 可能使用文件名简称或非标准路径引用源，
+ * 此函数统一规范化为完整路径，保证来源追溯的一致性。
+ */
 function canonicalizeSourcesField(content: string, sourceIdentity: string): string {
   if (!/^---\n/.test(content)) return content
 
@@ -1059,6 +1136,12 @@ function canonicalizeSourcesField(content: string, sourceIdentity: string): stri
   return writeSources(content, deduped)
 }
 
+/**
+ * 安全地将旧格式的源摘要页面迁移到新的规范路径格式。
+ * 为什么需要：早期版本的 ingest 使用文件名简称作为源摘要 slug，
+ * 新版本使用完整相对路径（含子目录）。此函数在写入前自动迁移旧格式，
+ * 避免产生孤立或重复的源摘要页面。
+ */
 async function migrateLegacySourceSummaryIfSafe(
   projectPath: string,
   sourceIdentity: string,
@@ -1117,6 +1200,11 @@ async function migrateLegacySourceSummaryIfSafe(
   }
 }
 
+/**
+ * 在 raw/sources 目录中查找所有与给定基础文件名匹配的源文件。
+ * 为什么需要：旧格式的源摘要迁移需要确认只有一个匹配的源文件时才能安全执行，
+ * 避免将摘要迁移到错误的规范路径。
+ */
 async function matchingRawSourceIdentitiesForBasename(
   projectPath: string,
   basename: string,
@@ -1154,28 +1242,38 @@ async function matchingRawSourceIdentitiesForBasename(
   return matches
 }
 
+/**
+ * 将 Stage 2 生成文本中的 FILE 块解析并写入磁盘。
+ * 为什么需要：这是 ingest 流水线的最终输出阶段——将 LLM 生成的 markdown
+ * 文本解析为结构化的文件块，应用语言过滤、动态验证、路径安全检查、
+ * 合并/追加/覆盖策略，然后写入文件系统。返回写入路径、警告、硬故障和审阅条目。
+ */
 async function writeFileBlocks(
   projectPath: string,
   text: string,
   llmConfig: LlmConfig,
-  sourceFileName: string,
+  sourceFileName: string | null,
+  sourceText: string = "",
   sourceSummaryPath?: string,
+  wikiMode: WikiMode = "default",
   signal?: AbortSignal,
-): Promise<{ writtenPaths: string[]; warnings: string[]; hardFailures: string[] }> {
+): Promise<{ writtenPaths: string[]; warnings: string[]; hardFailures: string[]; reviewItems: Omit<ReviewItem, "id" | "resolved" | "createdAt">[] }> {
   const { blocks, warnings: parseWarnings } = parseFileBlocks(text)
   const warnings = [...parseWarnings]
   const writtenPaths: string[] = []
+  const reviewItems: Omit<ReviewItem, "id" | "resolved" | "createdAt">[] = []
   // "Hard failures" = blocks we INTENDED to write but the FS rejected
   // (disk full, permission, OS-level errors). Distinct from soft drops
   // (language mismatch, parse warnings, path-traversal rejections):
   // those represent intentional content-level decisions, while hard
   // failures are unexpected losses. The autoIngest cache layer keys
-  // off this list — any hard failure means the cache entry must NOT
+  // off this list --any hard failure means the cache entry must NOT
   // be written, so the next re-ingest goes through the full pipeline
   // instead of replaying the partial result forever.
   const hardFailures: string[] = []
 
   const targetLang = useWikiStore.getState().outputLanguage
+  const preparedBlocks: Array<RpgExtractionValidationBlock & { updateStrategy: ReturnType<typeof wikiStorageStrategyForPath>["updateStrategy"] }> = []
 
   for (const { path: rawRelativePath, content: rawContent } of blocks) {
     let relativePath = rawRelativePath
@@ -1185,7 +1283,7 @@ async function writeFileBlocks(
     const storageStrategy = wikiStorageStrategyForPath(relativePath)
     relativePath = storageStrategy.path
 
-    // Sanitize at the boundary — strip stray code-fence wrappers,
+    // Sanitize at the boundary --strip stray code-fence wrappers,
     // `frontmatter:` prefixes, and repair invalid wikilink-list
     // YAML lines so the file we write is canonical regardless of
     // what shape the model emitted. See `ingest-sanitize.ts` for
@@ -1194,10 +1292,30 @@ async function writeFileBlocks(
     // unparseable frontmatter and the read-time fallback had to
     // paper over it forever.
     let content = sanitizeIngestedFileContent(rawContent)
-    if (!isLogPath(relativePath) && !isListingPath(relativePath)) {
+    if (sourceFileName && !isLogPath(relativePath) && !isListingPath(relativePath)) {
       content = canonicalizeSourcesField(content, sourceFileName)
     }
+    preparedBlocks.push({
+      path: relativePath,
+      content,
+      updateStrategy: storageStrategy.updateStrategy,
+    })
+  }
 
+  if (isRpgWikiMode(wikiMode)) {
+    const extractionValidation = validateRpgExtraction(
+      preparedBlocks.map(({ path, content }) => ({ path, content })),
+      {
+        sourcePath: sourceFileName ?? undefined,
+        sourceText,
+        existingCategoryPageCounts: await getRpgCategoryPageCounts(projectPath),
+      },
+    )
+    warnings.push(...extractionValidation.warnings)
+    reviewItems.push(...extractionValidation.reviewItems)
+  }
+
+  for (const { path: relativePath, content, updateStrategy } of preparedBlocks) {
     // Language guard: reject individual FILE blocks whose body contradicts
     // the user-set target language. Skip:
     // - log.md (structural, short)
@@ -1220,13 +1338,16 @@ async function writeFileBlocks(
       !isEntityOrSource &&
       !contentMatchesTargetLanguage(content, targetLang)
     ) {
-      const msg = `Dropped "${relativePath}" — body language doesn't match target ${targetLang}.`
+      const msg = `Dropped "${relativePath}" --body language doesn't match target ${targetLang}.`
       console.warn(`[ingest] ${msg}`)
       warnings.push(msg)
       continue
     }
 
-    const dynamicValidation = validateRpgDynamicWrite(relativePath, content)
+    const dynamicValidation = validateRpgDynamicWrite(relativePath, content, {
+      sourcePath: sourceFileName ?? undefined,
+      sourceText,
+    })
     if (!dynamicValidation.allowWrite) {
       warnings.push(...dynamicValidation.warnings)
       continue
@@ -1234,22 +1355,22 @@ async function writeFileBlocks(
 
     const fullPath = `${projectPath}/${relativePath}`
     try {
-      if (storageStrategy.updateStrategy === "legacy-log") {
+      if (updateStrategy === "legacy-log") {
         const existing = await tryReadFile(fullPath)
         const appended = existing ? `${existing}\n\n${content.trim()}` : content.trim()
         await writeFile(fullPath, appended)
       } else if (
-        storageStrategy.updateStrategy === "listing"
+        updateStrategy === "listing"
       ) {
         // Listing pages (index / overview) are always overwritten
-        // wholesale — their sources field is incidental and merging
+        // wholesale --their sources field is incidental and merging
         // wouldn't make semantic sense (they aren't source-derived
         // content pages).
         await writeFile(fullPath, content)
-      } else if (storageStrategy.updateStrategy === "append") {
+      } else if (updateStrategy === "append") {
         const existing = await tryReadFile(fullPath)
         await writeFile(fullPath, appendMarkdownContent(existing, content))
-      } else if (storageStrategy.updateStrategy === "overwrite") {
+      } else if (updateStrategy === "overwrite") {
         await writeFile(fullPath, content)
       } else {
         // Content pages (legacy entities / concepts / queries / synthesis /
@@ -1259,7 +1380,7 @@ async function writeFileBlocks(
         //   1. Frontmatter array fields (sources, tags, related)
         //      are union-merged at the application layer.
         //   2. If body content differs, an LLM call produces a
-        //      coherent merged body — preserves contributions from
+        //      coherent merged body --preserves contributions from
         //      every source document.
         //   3. Locked frontmatter fields (type, title, created)
         //      are forced back to the existing values; updated is
@@ -1276,7 +1397,7 @@ async function writeFileBlocks(
           existing || null,
           buildPageMerger(llmConfig),
           {
-            sourceFileName,
+            sourceFileName: sourceFileName ?? "interactive write",
             pagePath: relativePath,
             signal,
             backup: (oldContent) => backupExistingPage(projectPath, relativePath, oldContent),
@@ -1293,11 +1414,64 @@ async function writeFileBlocks(
     }
   }
 
-  return { writtenPaths, warnings, hardFailures }
+  return {
+    writtenPaths,
+    warnings: Array.from(new Set(warnings)),
+    hardFailures,
+    reviewItems,
+  }
+}
+
+/**
+ * 获取各 RPG 分类目录中已有的 markdown 页面数量。
+ * 为什么需要：RPG 提取验证需要了解各分类中已有多少页面，以判断提取比例是否合理。
+ */
+async function getRpgCategoryPageCounts(
+  projectPath: string,
+): Promise<Record<"player" | "locations" | "factions", number>> {
+  const categories = {
+    player: "wiki/player",
+    locations: "wiki/locations",
+    factions: "wiki/factions",
+  } as const
+
+  const entries = await Promise.all(
+    Object.entries(categories).map(async ([category, relativeDir]) => {
+      try {
+        const nodes = await listDirectory(`${projectPath}/${relativeDir}`)
+        return [category, countMarkdownFiles(nodes)] as const
+      } catch {
+        return [category, 0] as const
+      }
+    }),
+  )
+
+  return Object.fromEntries(entries) as Record<"player" | "locations" | "factions", number>
+}
+
+/**
+ * 递归统计目录树中的 markdown 文件数量。
+ * 为什么需要：用于 RPG 提取验证——了解各分类（player/locations/factions）中已有页面数量。
+ */
+function countMarkdownFiles(nodes: FileNode[]): number {
+  let count = 0
+  for (const node of nodes) {
+    if (node.is_dir) {
+      count += countMarkdownFiles(node.children ?? [])
+      continue
+    }
+    if (node.path.toLowerCase().endsWith(".md")) count++
+  }
+  return count
 }
 
 const REVIEW_BLOCK_REGEX = /---REVIEW:\s*(\w[\w-]*)\s*\|\s*(.+?)\s*---\n([\s\S]*?)---END REVIEW---/g
 
+/**
+ * 从 Stage 2 生成文本中解析 REVIEW 块，提取审阅类型、标题、描述、选项、影响页面和搜索查询。
+ * 为什么需要：LLM 在生成 wiki 页面后可以附加 REVIEW 块来标记需要人工判断的问题，
+ * 此函数将其结构化以便在 UI 中展示和操作。
+ */
 function parseReviewBlocks(
   text: string,
   sourcePath: string,
@@ -1316,6 +1490,7 @@ function parseReviewBlocks(
         : "confirm"
     ) as ReviewItem["type"]
 
+    // 解析 OPTIONS 行
     // Parse OPTIONS line
     const optionsMatch = body.match(/^OPTIONS:\s*(.+)$/m)
     const options = optionsMatch
@@ -1328,18 +1503,21 @@ function parseReviewBlocks(
           { label: "Skip", action: "Skip" },
         ]
 
+    // 解析 PAGES 行
     // Parse PAGES line
     const pagesMatch = body.match(/^PAGES:\s*(.+)$/m)
     const affectedPages = pagesMatch
       ? pagesMatch[1].split(",").map((p) => p.trim())
       : undefined
 
+    // 解析 SEARCH 行（为 Deep Research 优化的搜索查询）
     // Parse SEARCH line (optimized search queries for Deep Research)
     const searchMatch = body.match(/^SEARCH:\s*(.+)$/m)
     const searchQueries = searchMatch
       ? searchMatch[1].split("|").map((q) => q.trim()).filter((q) => q.length > 0)
       : undefined
 
+    // 描述 = 正文去掉 OPTIONS、PAGES、SEARCH 行
     // Description is the body minus OPTIONS, PAGES, and SEARCH lines
     const description = body
       .replace(/^OPTIONS:.*$/m, "")
@@ -1361,10 +1539,19 @@ function parseReviewBlocks(
   return items
 }
 
+/**
+ * 统计生成文本中的 FILE 块数量。
+ * 为什么需要：用于判断生成量是否达到触发独立 Review 阶段的最低阈值。
+ */
 function countFileBlocks(text: string): number {
   return (text.match(/---FILE:\s*[^-]+---/g) ?? []).length
 }
 
+/**
+ * 判断是否应运行独立的 Review 建议阶段。
+ * 为什么需要：只有当生成内容足够丰富（足够字符数、足够 FILE 块数、
+ * 或已包含 REVIEW 块）时，才值得额外消耗 token 进行审阅建议分析。
+ */
 function shouldRunDedicatedReviewStage(generation: string): boolean {
   return generation.length >= REVIEW_STAGE_MIN_SIGNAL_CHARS
     || countFileBlocks(generation) >= REVIEW_STAGE_MIN_FILE_BLOCKS
@@ -1372,8 +1559,10 @@ function shouldRunDedicatedReviewStage(generation: string): boolean {
 }
 
 /**
- * Step 1 prompt: AI reads the source and produces a structured analysis.
- * This is the "discussion" step — the AI reasons about the source before writing wiki pages.
+ * 构建 Stage 1 分析 prompt：让 LLM 阅读源文档并输出结构化的分析结果。
+ * 为什么需要：将"理解源文档"和"生成 wiki 页面"分离为两个阶段，
+ * Stage 1 专注于深度理解和分析，Stage 2 基于分析结果生成页面，
+ * 这种分离能显著提升生成质量（分析 → 生成，而非一步到位）。
  */
 export function buildAnalysisPrompt(
   purpose: string,
@@ -1381,108 +1570,11 @@ export function buildAnalysisPrompt(
   sourceContent: string = "",
   wikiMode: WikiMode = "default",
 ): string {
-  return [
-    "You are an expert research analyst. Read the source document and produce a structured analysis.",
-    "Do not output chain-of-thought, hidden reasoning, or a thinking transcript. Reason internally and write only the concise final analysis.",
-    "",
-    languageRule(sourceContent),
-    "",
-    "Your analysis should cover:",
-    "",
-    "## Key Entities",
-    "List people, organizations, products, datasets, tools mentioned. For each:",
-    "- Name and type",
-    "- Role in the source (central vs. peripheral)",
-    "- Whether it likely already exists in the wiki (check the index)",
-    "",
-    "## Key Concepts",
-    "List theories, methods, techniques, phenomena. For each:",
-    "- Name and brief definition",
-    "- Why it matters in this source",
-    "- Whether it likely already exists in the wiki",
-    "",
-    "## Main Arguments & Findings",
-    "- What are the core claims or results?",
-    "- What evidence supports them?",
-    "- How strong is the evidence?",
-    "",
-    "## Connections to Existing Wiki",
-    "- What existing pages does this source relate to?",
-    "- Does it strengthen, challenge, or extend existing knowledge?",
-    "",
-    "## Contradictions & Tensions",
-    "- Does anything in this source conflict with existing wiki content?",
-    "- Are there internal tensions or caveats?",
-    "",
-    "## Recommendations",
-    "- What wiki pages should be created or updated?",
-    "- What should be emphasized vs. de-emphasized?",
-    "- Any open questions worth flagging for the user?",
-    "",
-    wikiMode === "llmwikirpg" ? buildRpgExtractionAnalysisGuidance() : "",
-    "",
-    "Be thorough but concise. Focus on what's genuinely important.",
-    "",
-    "If a folder context is provided, use it as a hint for categorization — the folder structure often reflects the user's organizational intent (e.g., 'papers/energy' suggests the file is an energy-related paper).",
-    "",
-    purpose ? `## Wiki Purpose (for context)\n${purpose}` : "",
-    index ? `## Current Wiki Index (for checking existing content)\n${index}` : "",
-  ].filter(Boolean).join("\n")
+  return isRpgWikiMode(wikiMode)
+    ? buildRpgAnalysisPrompt(purpose, index, sourceContent)
+    : buildDefaultAnalysisPrompt(purpose, index, sourceContent)
 }
 
-function buildRpgExtractionAnalysisGuidance(): string {
-  return [
-    "## RPG Wiki Extraction Guidance",
-    "If the source contains RPG, tabletop, roleplay, game-session, interactive narrative, character-card, worldbook, or story-state material, explicitly analyze how it maps to the RPG wiki directories below.",
-    "Distinguish confirmed facts from speculation, current state from historical events, player state from NPC state, relationship changes from character profiles, and foreshadowing from already-happened events.",
-    "Do not duplicate the same information into multiple directories unless each copy has a distinct purpose.",
-    "",
-    "Cover these RPG-specific sections when relevant:",
-    "- Current scene: the latest immediate snapshot only; not accumulated history.",
-    "- Historical events: confirmed things that already happened and their consequences.",
-    "- Player state: player character identity, abilities, inventory, goals, knowledge, and accepted state changes.",
-    "- Character and relationship state: NPC profiles, meaningful current state, trust, conflict, tension, and relationship changes.",
-    "- Plot arcs and foreshadowing: unresolved questions, conflicts, hooks, constraints, and possible developments; never write them as if they already happened.",
-  ].join("\n")
-}
-
-function buildRpgWikiDirectoryGuidance(): string {
-  const lines = RPG_WIKI_SCHEMA.map((entry) => {
-    const fields = entry.fields.map((field) => field.name).join(", ")
-    const exclusions = entry.exclude.join("; ")
-    return [
-      `- ${entry.path}/ (${entry.label}, update: ${entry.updateStrategy}): ${entry.extractionGoal}`,
-      `  Fields: ${fields}.`,
-      `  Do not put here: ${exclusions}.`,
-      `  Granularity: ${entry.recommendedGranularity}`,
-    ].join("\n")
-  })
-
-  return [
-    "## RPG Wiki Directory Routing",
-    "When the project or source is RPG-oriented, prefer these first-version RPG directories over generic wiki/entities/ and wiki/concepts/.",
-    "Use the project schema above as authoritative if it gives a different explicit route, but do not ignore these RPG semantics when RPG material is present.",
-    "For first-version RPG projects, use the exact file wiki/current-scene/scene_state.md for the current scene snapshot unless the project schema explicitly overrides that file path.",
-    "",
-    ...lines,
-    "",
-    "RPG dynamic-state rules:",
-    "- wiki/current-scene/ is a latest-state snapshot. Generate only the current scene state needed for the next turn, and use the exact file wiki/current-scene/scene_state.md unless the schema explicitly says otherwise; do not accumulate previous scenes there.",
-    "- wiki/events/ is for confirmed, already-happened events. Do not write future plans, speculation, or possible developments as events.",
-    "- wiki/events/ pages must not contain sections like Next Steps, Possible Directions, or Future Development. Put that material in wiki/plot-arcs/ instead.",
-    "- wiki/plot-arcs/ is for story structure, unresolved questions, foreshadowing, conflicts, constraints, and possible directions; do not pretend these already happened.",
-    "- wiki/player/ is only for the player character and accepted player-state changes; ordinary NPCs belong in wiki/characters/.",
-    "- wiki/characters/ may include long-term profile and meaningful current state, but not every short-term action or full event transcript.",
-    "- wiki/relationships/ records relationship state and changes, not duplicate full character introductions.",
-    "- wiki/sources/ records provenance and source summaries, not canonical character, scene, location, or event state.",
-    "- When updating wiki/player/, wiki/characters/, wiki/relationships/, or wiki/plot-arcs/, fully rewrite current-state sections so stale status from earlier turns does not survive by accident.",
-    "- Prefer one best directory for each fact. Add cross-links instead of repeating the same fact in every related page.",
-  ].join("\n")
-}
-
-/**
- * Step 2 prompt: AI takes its own analysis and generates wiki files + review items.
- */
 export function buildGenerationPrompt(
   schema: string,
   purpose: string,
@@ -1492,163 +1584,18 @@ export function buildGenerationPrompt(
   sourceContent: string = "",
   sourceSummaryPath?: string,
   wikiMode: WikiMode = "default",
+  stage1Analysis?: string,
 ): string {
-  // Use original filename (without extension) as the source summary page name
-  const sourceBaseName = sourceFileName.replace(/\.[^.]+$/, "")
-  const summaryPath = sourceSummaryPath ?? `wiki/sources/${sourceBaseName}.md`
-
-  return [
-    "You are a wiki maintainer. Based on the analysis provided, generate wiki files.",
-    "Do not output chain-of-thought, hidden reasoning, or explanatory preamble. Reason internally and output only the requested FILE/REVIEW blocks.",
-    "",
-    languageRule(sourceContent),
-    "",
-    `## IMPORTANT: Source File`,
-    `The original source file is: **${sourceFileName}**`,
-    `All wiki pages generated from this source MUST include this filename in their frontmatter \`sources\` field.`,
-    "",
-    schema
-      ? [
-          "## Project Schema and Routing (AUTHORITATIVE)",
-          schema,
-          "",
-          "Use this schema as the primary routing rule for page types and directories.",
-          "If it defines custom folders or distinctions (for example people, technologies, organizations, methods, or cases), write pages into those schema-defined folders instead of forcing them into wiki/entities/ or wiki/concepts/.",
-          "Use wiki/entities/ and wiki/concepts/ only when the schema does not provide a more specific destination.",
-        ].join("\n")
-      : "",
-    "",
-    "## What to generate",
-    "",
-    `1. A source summary page at **${summaryPath}** (MUST use this exact path)`,
-    "2. Entity or schema-defined typed pages for key named things identified in the analysis. Prefer schema-defined directories when present; otherwise use wiki/entities/.",
-    "3. Concept or schema-defined typed pages for key ideas, methods, techniques, and abstractions. Prefer schema-defined directories when present; otherwise use wiki/concepts/.",
-    "4. An updated wiki/index.md — add new entries to existing categories, preserve all existing entries",
-    "5. A log entry for wiki/log.md (just the new entry to append, format: ## [YYYY-MM-DD] ingest | Title)",
-    "6. An updated wiki/overview.md — a high-level summary of what the entire wiki covers, updated to reflect the newly ingested source. This should be a comprehensive 2-5 paragraph overview of ALL topics in the wiki, not just the new source.",
-    "",
-    wikiMode === "llmwikirpg" ? buildRpgWikiDirectoryGuidance() : "",
-    "",
-    "## Frontmatter Rules (CRITICAL — parser is strict)",
-    "",
-    "Every page begins with a YAML frontmatter block. Format rules, in order of importance:",
-    "",
-    "1. The VERY FIRST line of the file MUST be exactly `---` (three hyphens, nothing else).",
-    "   Do NOT wrap the file in a ```yaml ... ``` code fence.",
-    "   Do NOT prefix it with a `frontmatter:` key or any other line.",
-    "2. Each frontmatter line is a `key: value` pair on its own line.",
-    "3. The frontmatter ends with another `---` line on its own.",
-    "4. The next line after the closing `---` is the start of the page body.",
-    "5. Arrays use the standard YAML inline form `[a, b, c]` (no outer brackets around each item).",
-    "   Wikilinks belong in the BODY only — never write `related: [[a]], [[b]]` (invalid YAML);",
-    "   write `related: [a, b]` with bare slugs.",
-    "",
-    "Required fields and types:",
-    `  • type     — one of the known types (${GENERATION_WIKI_TYPES.join(" | ")}), or a custom type explicitly defined by the project schema`,
-    "  • title    — string (quote it if it contains a colon, e.g. `title: \"Foo: Bar\"`)",
-    "  • created  — date in YYYY-MM-DD form (no quotes)",
-    "  • updated  — same as created",
-    "  • tags     — array of bare strings: `tags: [microbiology, ai]`",
-    "  • related  — array of bare wiki page slugs: `related: [foo, bar-baz]`. Do NOT include",
-    "               `wiki/`, `.md`, or `[[…]]` here — slugs only.",
-    `  • sources  — array of source filenames; MUST include "${sourceFileName}".`,
-    "",
-    "Concrete example of a complete, parseable page (everything between the two `---` lines",
-    "is the frontmatter; the heading and prose below are the body):",
-    "",
-    "    ---",
-    "    type: entity",
-    "    title: Example Entity",
-    "    created: 2026-04-29",
-    "    updated: 2026-04-29",
-    "    tags: [example, demo]",
-    "    related: [related-slug-1, related-slug-2]",
-    `    sources: ["${sourceFileName}"]`,
-    "    ---",
-    "",
-    "    # Example Entity",
-    "",
-    "    Body content goes here. Use [[wikilink]] syntax in the body for cross-references.",
-    "",
-    "Other rules:",
-    "- Use [[wikilink]] syntax in the BODY for cross-references between pages",
-    "- If you include images, use wiki-root-relative paths such as `media/source-slug/image.png`; never output absolute filesystem paths.",
-    "- Use kebab-case filenames",
-    "- Follow the analysis recommendations on what to emphasize",
-    "- If the analysis found connections to existing pages, add cross-references",
-    "",
-    "## Review block types",
-    "",
-    "After all FILE blocks, optionally emit REVIEW blocks for anything that needs human judgment:",
-    "",
-    "- contradiction: the analysis found conflicts with existing wiki content",
-    "- duplicate: an entity/concept might already exist under a different name in the index",
-    "- missing-page: an important concept is referenced but has no dedicated page",
-    "- suggestion: ideas for further research, related sources to look for, or connections worth exploring",
-    "",
-    "Only create reviews for things that genuinely need human input. Don't create trivial reviews.",
-    "",
-    "## OPTIONS allowed values (only these predefined labels):",
-    "",
-    "- contradiction: OPTIONS: Create Page | Skip",
-    "- duplicate: OPTIONS: Create Page | Skip",
-    "- missing-page: OPTIONS: Create Page | Skip",
-    "- suggestion: OPTIONS: Create Page | Skip",
-    "",
-    "The user also has a 'Deep Research' button (auto-added by the system) that triggers web search.",
-    "Do NOT invent custom option labels. Only use 'Create Page' and 'Skip'.",
-    "",
-    "For suggestion and missing-page reviews, the SEARCH field must contain 2-3 web search queries",
-    "(keyword-rich, specific, suitable for a search engine — NOT titles or sentences). Example:",
-    "  SEARCH: automated technical debt detection AI generated code | software quality metrics LLM code generation | static analysis tools agentic software development",
-    "",
-    purpose ? `## Wiki Purpose\n${purpose}` : "",
-    index ? `## Current Wiki Index (preserve all existing entries, add new ones)\n${index}` : "",
-    overview ? `## Current Overview (update this to reflect the new source)\n${overview}` : "",
-    "",
-    // ── OUTPUT FORMAT MUST BE THE LAST SECTION — models weight recent instructions highest ──
-    "## Output Format (MUST FOLLOW EXACTLY — this is how the parser reads your response)",
-    "",
-    "Your ENTIRE response consists of FILE blocks followed by optional REVIEW blocks. Nothing else.",
-    "",
-    "FILE block template:",
-    "```",
-    "---FILE: wiki/path/to/page.md---",
-    "(complete file content with YAML frontmatter)",
-    "---END FILE---",
-    "```",
-    "",
-    "REVIEW block template (optional, after all FILE blocks):",
-    "```",
-    "---REVIEW: type | Title---",
-    "Description of what needs the user's attention.",
-    "OPTIONS: Create Page | Skip",
-    "PAGES: wiki/page1.md, wiki/page2.md",
-    "SEARCH: query 1 | query 2 | query 3",
-    "---END REVIEW---",
-    "```",
-    "",
-    "## Output Requirements (STRICT — deviations will cause parse failure)",
-    "",
-    "1. The FIRST character of your response MUST be `-` (the opening of `---FILE:`).",
-    "2. DO NOT output any preamble such as \"Here are the files:\", \"Based on the analysis...\", or any introductory prose.",
-    "3. DO NOT echo or restate the analysis — that was stage 1's job. Your job is to emit FILE blocks.",
-    "4. DO NOT output markdown tables, bullet lists, or headings outside of FILE/REVIEW blocks.",
-    "5. DO NOT output any trailing commentary after the last `---END FILE---` or `---END REVIEW---`.",
-    "6. Between blocks, use only blank lines — no prose.",
-    "7. EVERY FILE block's content (titles, body, descriptions) MUST be in the mandatory output language specified below. No exceptions — not even for page names or section headings.",
-    "",
-    "If you start with anything other than `---FILE:`, the entire response will be discarded.",
-    "",
-    // Repeat the language directive at the very end so it wins the "most
-    // recent instruction" tie-breaker. Small-to-medium models otherwise
-    // drift back to their training-data language for individual pages.
-    "---",
-    "",
-    languageRule(sourceContent),
-  ].filter(Boolean).join("\n")
+  return isRpgWikiMode(wikiMode)
+    ? buildRpgGenerationPrompt(schema, purpose, index, sourceFileName, overview, sourceContent, sourceSummaryPath, stage1Analysis)
+    : buildDefaultGenerationPrompt(schema, purpose, index, sourceFileName, overview, sourceContent, sourceSummaryPath)
 }
-
+/**
+ * 构建审阅建议 prompt：让 LLM 在 Stage 2 生成完成后，识别值得人工关注的
+ * 知识缺口和研究建议。这是一个可选的后续阶段，仅在生成内容足够丰富时触发。
+ * 为什么需要：自动化的 wiki 生成必然有盲区——LLM 可能遗漏重要概念或无法判断的
+ * 矛盾。此阶段生成结构化的 REVIEW 块，让用户在 UI 中审阅和决策。
+ */
 function buildReviewSuggestionPrompt(
   purpose: string,
   index: string,
@@ -1662,24 +1609,32 @@ function buildReviewSuggestionPrompt(
   const sectionCap = Math.max(4_000, Math.floor(maxCtx * 0.15))
   const indexCap = Math.max(3_000, Math.floor(sectionCap * 0.8))
   return [
+    // 系统角色：识别高价值的后续研究项目
     "You are identifying high-value follow-up research items for a personal wiki.",
+    // 禁止输出思维链
     "Do not output chain-of-thought, hidden reasoning, or explanatory preamble.",
     "",
     languageRule(sourceContext),
     "",
+    // 你的任务不是生成 wiki 页面（那已经完成了）
     "Your job is NOT to generate wiki pages. The wiki page generation already happened.",
+    // 只输出 REVIEW 块
     "Output only REVIEW blocks for unresolved knowledge gaps that deserve human attention or Deep Research.",
     "",
+    // 只为真正有用的后续工作创建 REVIEW 块
     "Create REVIEW blocks only for genuinely useful follow-up work:",
-    "- missing-page: an important entity/concept is referenced but still lacks a dedicated page",
-    "- suggestion: a research question, source type, or comparison that would materially improve the wiki",
-    "- contradiction: a conflict or tension that requires user judgment",
-    "- duplicate: likely duplicate pages/names that need user review",
+    "- missing-page: an important entity/concept is referenced but still lacks a dedicated page", // 缺失页面
+    "- suggestion: a research question, source type, or comparison that would materially improve the wiki", // 建议
+    "- contradiction: a conflict or tension that requires user judgment", // 矛盾
+    "- duplicate: likely duplicate pages/names that need user review", // 重复
     "",
+    // 优先 1-5 个高信号 review
     "Prefer 1-5 high-signal reviews. If there is nothing worth reviewing, output nothing.",
+    // SEARCH 行包含关键词搜索查询
     "For suggestion and missing-page reviews, include a SEARCH line with 2-3 keyword-rich web search queries separated by ` | `.",
     "Use only these options: OPTIONS: Create Page | Skip",
     "",
+    // REVIEW 块模板
     "REVIEW block template:",
     "```",
     "---REVIEW: suggestion | Precise title---",
@@ -1690,6 +1645,7 @@ function buildReviewSuggestionPrompt(
     "---END REVIEW---",
     "```",
     "",
+    // 只返回 REVIEW 块
     "Return REVIEW blocks only. Do not output FILE blocks. Do not wrap the response in markdown fences.",
     "",
     purpose ? `## Wiki Purpose\n${purpose}` : "",
@@ -1708,10 +1664,19 @@ function buildReviewSuggestionPrompt(
   ].filter(Boolean).join("\n")
 }
 
+/**
+ * 获取聊天 store 的当前状态。
+ * 为什么需要：作为便捷访问器，避免在每个使用点重复调用 useChatStore.getState()。
+ */
 function getStore() {
   return useChatStore.getState()
 }
 
+/**
+ * 安全地读取文件内容，文件不存在时返回空字符串而非抛出异常。
+ * 为什么需要：ingest 流水线中有大量可选的配置文件（schema.md、purpose.md 等），
+ * 它们可能不存在。此包装器让调用方无需在每个读取点都写 try-catch。
+ */
 async function tryReadFile(path: string): Promise<string> {
   try {
     return await readFile(path)
@@ -1720,10 +1685,19 @@ async function tryReadFile(path: string): Promise<string> {
   }
 }
 
+/**
+ * 将数值限制在 [min, max] 范围内。
+ * 为什么需要：上下文预算计算中需要对各种参数值做上下限约束。
+ */
 function clampNumber(value: number, min: number, max: number): number {
   return Math.max(min, Math.min(max, value))
 }
 
+/**
+ * 计算 ingest 的源文档上下文预算：LLM 分析阶段可以接收的最大源文档字符数。
+ * 为什么需要：不同 LLM 有不同的上下文窗口大小，需要根据 maxContextSize
+ * 减去各种固定开销（系统 prompt、响应预留、稳定上下文等）来动态计算可用空间。
+ */
 export function computeIngestSourceBudget(
   maxContextSize: number | undefined,
   stableContextLength: number,
@@ -1736,6 +1710,10 @@ export function computeIngestSourceBudget(
   return clampNumber(Math.floor(available), LONG_SOURCE_MIN_BUDGET, upper)
 }
 
+/**
+ * 计算 Stage 2 生成阶段的最大 token 数，根据模型上下文窗口大小分档。
+ * 为什么需要：大上下文窗口的模型可以生成更长的输出，按档位分配生成 token 数。
+ */
 export function computeIngestGenerationMaxTokens(maxContextSize: number | undefined): number {
   const { maxCtx } = computeContextBudget(maxContextSize)
   if (maxCtx >= 512_000) return INGEST_GENERATION_TOKENS_512K
@@ -1744,14 +1722,23 @@ export function computeIngestGenerationMaxTokens(maxContextSize: number | undefi
   return INGEST_GENERATION_TOKENS_DEFAULT
 }
 
+/**
+ * 计算 Review 阶段的最大 token 数，约为生成阶段的一半。
+ * 为什么需要：Review 阶段是可选的后处理，输出量通常小于生成阶段。
+ */
 export function computeIngestReviewMaxTokens(maxContextSize: number | undefined): number {
   return Math.min(8_192, Math.max(4_096, Math.floor(computeIngestGenerationMaxTokens(maxContextSize) / 2)))
 }
 
+/**
+ * 将一个过大的文本块按句子边界拆分为多个不超过目标大小的片段。
+ * 为什么需要：语义分块后某些段落可能仍然过大（超过 targetChars * 1.25），
+ * 需要进一步拆分以适配 LLM 上下文窗口。
+ */
 function splitOversizedBlock(block: string, targetChars: number): string[] {
   if (block.length <= targetChars * 1.25) return [block]
 
-  const pieces = block.match(/[^.!?。！？\n]+[.!?。！？]?|\n+/g) ?? [block]
+  const pieces = block.match(/[^.!?\n]+[.!?]?|\n+/g) ?? [block]
   const out: string[] = []
   let current = ""
   for (const piece of pieces) {
@@ -1772,6 +1759,11 @@ function splitOversizedBlock(block: string, targetChars: number): string[] {
   return out
 }
 
+/**
+ * 将 markdown 内容按语义边界（标题和段落）拆分为块，每个块附带其标题路径。
+ * 为什么需要：长文档分块需要保留标题层级信息，以便 LLM 理解每个块的上下文位置。
+ * 标题作为独立的块，段落按空行分隔。
+ */
 function semanticBlocks(content: string, targetChars: number): Array<{ text: string; headingPath: string }> {
   const blocks: Array<{ text: string; headingPath: string }> = []
   const headingStack: string[] = []
@@ -1815,6 +1807,11 @@ function semanticBlocks(content: string, targetChars: number): Array<{ text: str
   return blocks
 }
 
+/**
+ * 提取文本末尾的重叠后缀，优先在段落边界（其次是句子边界）处截断。
+ * 为什么需要：分块处理时需要重叠区域来保持上下文连续性，
+ * 在自然边界处截断能获得更干净的上下文片段。
+ */
 function overlapSuffix(text: string, maxChars: number): string {
   if (!text || maxChars <= 0) return ""
   if (text.length <= maxChars) return text
@@ -1823,13 +1820,18 @@ function overlapSuffix(text: string, maxChars: number): string {
   if (paragraphBreak > 0 && raw.length - paragraphBreak > maxChars * 0.4) {
     return raw.slice(paragraphBreak).trim()
   }
-  const sentenceBreak = raw.search(/[.!?。！？]\s+/)
+  const sentenceBreak = raw.search(/[.!?]\s+/)
   if (sentenceBreak > 0 && raw.length - sentenceBreak > maxChars * 0.4) {
     return raw.slice(sentenceBreak + 1).trim()
   }
   return raw.trim()
 }
 
+/**
+ * 将源文档按语义边界拆分为带重叠的块，用于超长文档的分块分析。
+ * 为什么需要：当源文档超过 LLM 上下文预算时，需要将其切分为多个块，
+ * 每个块附带前一块的重叠区域以保持上下文连续性。
+ */
 export function splitSourceIntoSemanticChunks(
   content: string,
   targetChars: number,
@@ -1872,11 +1874,20 @@ export function splitSourceIntoSemanticChunks(
   }))
 }
 
+/**
+ * 截断文本到指定长度，超出部分用 "[...trimmed for prompt budget...]" 标记。
+ * 为什么需要：prompt 上下文预算有限，超长文本需要截断并明确告知 LLM。
+ */
 function trimLongText(text: string, maxChars: number): string {
   if (text.length <= maxChars) return text
   return `${text.slice(0, maxChars).trimEnd()}\n\n[...trimmed for prompt budget...]`
 }
 
+/**
+ * 对文本计算 64 位 FNV-1a 哈希（十六进制）。
+ * 为什么需要：作为长文档分块检查点的稳定性键——当源文档内容不变时，
+ * 哈希相同，可以从上次中断处恢复进度。这不是安全原语，仅用于稳定性校验。
+ */
 function hashTextHex(text: string): string {
   // 64-bit FNV-1a over UTF-16 code units. This is a stability key, not
   // a security primitive; validation also checks source length/chunk
@@ -1890,6 +1901,10 @@ function hashTextHex(text: string): string {
   return hash.toString(16).padStart(16, "0")
 }
 
+/**
+ * 生成长文档分块检查点的文件路径。
+ * 为什么需要：长文档分析可能中断（超时、取消等），检查点机制允许从中断处恢复。
+ */
 function longSourceCheckpointPath(
   projectPath: string,
   sourceSummarySlug: string,
@@ -1898,6 +1913,10 @@ function longSourceCheckpointPath(
   return `${normalizePath(projectPath)}/.llm-wiki/ingest-progress/${sourceSummarySlug}-${sourceHash}.json`
 }
 
+/**
+ * 验证检查点是否与当前参数兼容（版本、源标识、哈希、分块参数均需匹配）。
+ * 为什么需要：如果源文档或分块参数已改变，旧检查点无效，必须重新开始分析。
+ */
 function isCompatibleLongSourceCheckpoint(
   checkpoint: LongSourceCheckpoint,
   params: {
@@ -1924,6 +1943,10 @@ function isCompatibleLongSourceCheckpoint(
     && checkpoint.analyses.length === checkpoint.completedThrough
 }
 
+/**
+ * 从磁盘加载长文档检查点，如果不存在或不兼容则返回 null。
+ * 为什么需要：支持长文档分析的断点续传。
+ */
 async function loadLongSourceCheckpoint(
   checkpointPath: string,
   params: Parameters<typeof isCompatibleLongSourceCheckpoint>[1],
@@ -1938,6 +1961,10 @@ async function loadLongSourceCheckpoint(
   }
 }
 
+/**
+ * 保存长文档分析进度到磁盘检查点文件。
+ * 为什么需要：每个块分析完成后立即保存进度，确保中断后可从最近完成的块恢复。
+ */
 async function saveLongSourceCheckpoint(
   checkpointPath: string,
   checkpoint: LongSourceCheckpoint,
@@ -1947,23 +1974,38 @@ async function saveLongSourceCheckpoint(
   await writeFile(checkpointPath, JSON.stringify(checkpoint, null, 2))
 }
 
+/**
+ * 清除长文档检查点文件。
+ * 为什么需要：全部块分析完成后清理检查点文件，避免残留过期的进度数据。
+ */
 async function clearLongSourceCheckpoint(checkpointPath: string): Promise<void> {
   try {
     if (await fileExists(checkpointPath)) {
       await deleteFile(checkpointPath)
     }
   } catch {
+    // 尽力清理。如果源哈希/分块形状不再匹配，过期检查点会被忽略。
     // Best-effort cleanup. A stale checkpoint is ignored if source
     // hash / chunk shape no longer matches.
   }
 }
 
+/**
+ * 从 LLM 原始输出中提取指定标题下的 markdown 段落内容。
+ * 为什么需要：分块分析的 LLM 输出包含多个部分（块分析 + 全局摘要），
+ * 需要按标题分别提取。
+ */
 function extractMarkedSection(raw: string, heading: string): string {
   const escaped = heading.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
   const re = new RegExp(`(?:^|\\n)##\\s+${escaped}\\s*\\n([\\s\\S]*?)(?=\\n##\\s|$)`, "i")
   return re.exec(raw)?.[1]?.trim() ?? ""
 }
 
+/**
+ * 构建长文档分块分析的系统 prompt：用于超长源文档的分块处理。
+ * 为什么需要：当源文档超过上下文预算时，需要将文档切分为语义块，逐块分析。
+ * 此 prompt 要求 LLM 分析当前块并更新全局摘要。
+ */
 function buildChunkAnalysisSystemPrompt(
   purpose: string,
   schema: string,
@@ -1971,15 +2013,21 @@ function buildChunkAnalysisSystemPrompt(
   sourceContent: string,
 ): string {
   return [
+    // 系统角色：分析长源文档
     "You are analyzing a long source document for a personal wiki.",
+    // 禁止输出思维链
     "Do not output chain-of-thought, hidden reasoning, or a thinking transcript.",
+    // 只分析当前主块，用重叠和摘要做上下文
     "Analyze only the current MAIN CHUNK. Use overlap and digest for context only.",
+    // 保持与已有 wiki 和之前的摘要一致的命名
     "Keep stable names consistent with the existing wiki and prior digest.",
     "",
     languageRule(sourceContent),
     "",
+    // 输出恰好两个 markdown 部分
     "Output exactly two markdown sections:",
     "",
+    // 块分析：简明摘要、实体、概念、主张、证据、矛盾、开放问题
     "## Chunk Analysis",
     "- Concise summary of the main chunk",
     "- New or updated entities",
@@ -1987,10 +2035,12 @@ function buildChunkAnalysisSystemPrompt(
     "- Claims, findings, evidence, contradictions",
     "- Open questions or research gaps",
     "",
+    // 更新的全局摘要：整合当前块并保留跨块上下文
     "## Updated Global Digest",
     "A compact document-level digest that incorporates this chunk and preserves prior cross-chunk context.",
     "Keep this digest structured under: Summary, Entities, Concepts, Claims, Evidence, Contradictions, Open Questions, Cross-Chunk Relations.",
     "",
+    // 稳定的项目上下文（背景）
     "Stable project context follows. It changes rarely and should be treated as background:",
     purpose ? `## Wiki Purpose\n${purpose}` : "",
     schema ? `## Wiki Schema\n${schema}` : "",
@@ -1998,6 +2048,10 @@ function buildChunkAnalysisSystemPrompt(
   ].filter(Boolean).join("\n")
 }
 
+/**
+ * 构建长文档分块分析的用户 prompt：为每个语义块提供该块的文本、全局摘要和重叠上下文。
+ * 为什么需要：与 buildChunkAnalysisSystemPrompt 配对使用，提供具体的块内容。
+ */
 function buildChunkAnalysisUserPrompt(
   sourceIdentity: string,
   folderContext: string | undefined,
@@ -2010,18 +2064,28 @@ function buildChunkAnalysisUserPrompt(
     `Chunk: ${chunk.index}/${chunk.total}`,
     chunk.headingPath ? `Heading path: ${chunk.headingPath}` : "",
     "",
+    // 当前全局摘要
     "## Current Global Digest",
     globalDigest || "(No prior digest yet.)",
     "",
+    // 前一块的重叠上下文
     chunk.overlapBefore ? "## Previous Overlap Context\n" + chunk.overlapBefore : "",
     "",
+    // 要分析的主块
     "## MAIN CHUNK TO ANALYZE",
     chunk.main,
     "",
+    // 只返回两个请求的部分，不要重复仅出现在重叠中的事实
     "Return only the two requested sections. Do not repeat overlap-only facts unless the main chunk supports them.",
   ].filter(Boolean).join("\n")
 }
 
+/**
+ * 对超长源文档进行分块分析：将源文档按语义边界切分，逐块调用 LLM 分析。
+ * 为什么需要：当源文档超过上下文预算时，无法一次性发送给 LLM。
+ * 此函数将文档分块，每块附带前一块的上下文重叠，维护全局摘要，
+ * 支持断点续传（检查点机制），最终合并所有分析结果。
+ */
 async function analyzeLongSourceInChunks(
   projectPath: string,
   llmConfig: LlmConfig,
@@ -2108,7 +2172,7 @@ async function analyzeLongSourceInChunks(
     const chunkAnalysis = extractMarkedSection(raw, "Chunk Analysis") || raw.trim()
     const nextDigest = extractMarkedSection(raw, "Updated Global Digest")
     analyses.push([
-      `## Chunk ${chunk.index}/${chunk.total}${chunk.headingPath ? ` — ${chunk.headingPath}` : ""}`,
+      `## Chunk ${chunk.index}/${chunk.total}${chunk.headingPath ? ` -- ${chunk.headingPath}` : ""}`,
       trimLongText(chunkAnalysis, LONG_SOURCE_CHUNK_ANALYSIS_MAX),
     ].join("\n"))
 
@@ -2153,34 +2217,39 @@ async function analyzeLongSourceInChunks(
 }
 
 /**
- * Build a MergeFn for a given LLM config. The returned function asks
- * the model to merge two versions of the same wiki page into one.
- * Page-merge.ts handles all the sanity-checking and fallback paths;
- * this is just the "stream the LLM" wrapper.
+ * 为给定的 LLM 配置构建一个 MergeFn（页面合并函数）。
+ * 为什么需要：当同一 wiki 页面已存在且新 ingest 产生同一页面的新版本时，
+ * 需要 LLM 智能合并两个版本——保留双方的事实主张、消除冗余、重组结构——
+ * 而非简单覆盖或拼接。page-merge.ts 负责健全性检查和回退路径。
  */
 function buildPageMerger(llmConfig: LlmConfig): MergeFn {
   return async (existingContent, incomingContent, sourceFileName, signal) => {
+    // 合并系统 prompt：你是合并两个版本的同一 wiki 页面
     const systemPrompt = [
       "You are merging two versions of the same wiki page into one coherent document.",
+      // 两个版本描述同一实体/概念；一个已在磁盘上，另一个刚从不同源生成
       "Both versions describe the same entity / concept; one is already on disk,",
       "the other was just generated from a different source document.",
       "",
+      // 输出一个合并版本，要求：
       "Output ONE merged version that:",
-      "- Preserves every factual claim from both versions (do not drop content)",
-      "- Eliminates redundancy when both versions state the same fact",
-      "- Reorganizes sections so the structure is logical for the merged topic,",
+      "- Preserves every factual claim from both versions (do not drop content)",  // 保留双方所有事实主张
+      "- Eliminates redundancy when both versions state the same fact",           // 消除重复
+      "- Reorganizes sections so the structure is logical for the merged topic,", // 重组结构
       "  not just a concatenation of the two inputs",
-      "- Uses consistent markdown structure (headings, tables, lists, callouts)",
-      "- Keeps `[[wikilink]]` references intact",
+      "- Uses consistent markdown structure (headings, tables, lists, callouts)",  // 一致的 markdown 结构
+      "- Keeps `[[wikilink]]` references intact",                                 // 保持 wikilink 引用完整
       "",
+      // 输出要求
       "Output requirements:",
-      "- The FIRST character of your response MUST be `-` (the opening of `---`)",
-      "- Output the COMPLETE file: YAML frontmatter + body",
-      "- No preamble (no \"Here is the merged version:\"), no analysis prose",
-      "- The caller will overwrite `sources`/`tags`/`related`/`updated` with",
-      "  deterministic values — your job is the body and any other fields",
+      "- The FIRST character of your response MUST be `-` (the opening of `---`)", // 第一个字符必须是 `-`
+      "- Output the COMPLETE file: YAML frontmatter + body",                       // 输出完整文件
+      "- No preamble (no \"Here is the merged version:\"), no analysis prose",     // 无前言
+      "- The caller will overwrite `sources`/`tags`/`related`/`updated` with",   // 调用方会覆盖这些字段
+      "  deterministic values -- your job is the body and any other fields",
     ].join("\n")
 
+    // 用户消息：已有的磁盘版本 + 新生成的版本
     const userMessage = [
       `## Existing version on disk`,
       "",
@@ -2194,6 +2263,7 @@ function buildPageMerger(llmConfig: LlmConfig): MergeFn {
       "",
       "---",
       "",
+      // 现在输出合并后的文件
       "Now output the merged file. Start with `---` on the first line.",
     ].join("\n")
 
@@ -2219,6 +2289,7 @@ function buildPageMerger(llmConfig: LlmConfig): MergeFn {
         signal,
         { temperature: 0.1 },
       ).catch((err) => {
+        // 防御性处理：streamChat 返回 Promise<void>，如果它 reject 而非走 onError，也捕获
         // Defensive: streamChat returns a Promise<void>; if it rejects
         // (instead of going through onError), surface that too.
         streamError = err instanceof Error ? err : new Error(String(err))
@@ -2249,7 +2320,7 @@ async function backupExistingPage(
 
 /**
  * Append (or replace) the embedded-images section on the source-
- * summary page. Idempotent — paired marker comments bracket our
+ * summary page. Idempotent --paired marker comments bracket our
  * injection, so re-running this for the same source either:
  *   - replaces an existing injection in-place (image set changed), or
  *   - leaves an existing injection untouched (image set unchanged).
@@ -2275,7 +2346,7 @@ async function injectImagesIntoSourceSummary(
     const existing = await tryReadFile(sourceSummaryFullPath)
     console.log(`[ingest:diag] injectImagesIntoSourceSummary: existing file ${existing ? `read OK (${existing.length} chars)` : "MISSING (will write stub)"}`)
     // Load captions from the on-disk cache so the safety-net
-    // section embeds caption text as alt — the embedding pipeline
+    // section embeds caption text as alt --the embedding pipeline
     // indexes whatever's in the wiki page, so without this, search
     // by image content (e.g. "find the chart with revenue data")
     // never matches because alt text was empty.
@@ -2292,12 +2363,12 @@ async function injectImagesIntoSourceSummary(
       )
       await writeFile(sourceSummaryFullPath, stripped.trimEnd() + wrapped)
     } else {
-      // Page is missing — write a minimal stub so the user actually
+      // Page is missing --write a minimal stub so the user actually
       // sees the images in the file tree. Without this fallback, the
       // images sit in wiki/media/<slug>/ with no .md page referencing
       // them, which means the lint view's orphan-page sweep eventually
       // reaps the media directory (cascadeDeleteWikiPage triggered by
-      // a missing source page) — silent loss of extracted images.
+      // a missing source page) --silent loss of extracted images.
       const date = new Date().toISOString().slice(0, 10)
       const stubFrontmatter = [
         "---",
@@ -2365,6 +2436,12 @@ async function reembedSourceSummary(
   }
 }
 
+/**
+ * 启动交互式 ingest 流程：读取源文档，让 LLM 进行分析讨论（聊天模式），
+ * 用户可以在聊天面板中看到分析结果并与 AI 交互，之后再调用 executeIngestWrites 写入文件。
+ * 为什么需要：与 autoIngest（全自动）不同，此函数提供交互式体验——
+ * 用户可以先看到 LLM 对源文档的理解，进行讨论，然后再决定写入哪些 wiki 页面。
+ */
 export async function startIngest(
   projectPath: string,
   sourcePath: string,
@@ -2381,13 +2458,18 @@ export async function startIngest(
   store.clearMessages()
   store.setStreaming(false)
 
-  // Extract embedded images upfront — independent of the LLM call
+  // 提前提取嵌入图片——独立于后续的 LLM 调用。
+  // 在这里急切地完成（而非在 executeIngestWrites 中），
+  // 以便在用户看到分析流之前图片已经在磁盘上了。
+  // 容错设计——extractAndSaveSourceImages 在任何错误时返回 [] 并内部记录；
+  // 我们绝不让图片提取中断 ingest 聊天流。
+  // Extract embedded images upfront --independent of the LLM call
   // that follows. Done eagerly here (rather than in
   // `executeIngestWrites`) so the images are on disk before the user
   // even sees the analysis stream, and the cost is only paid once
   // per source: a follow-up `executeIngestWrites` will reuse the
   // already-extracted set rather than re-running pdfium.
-  // Failure-tolerant — `extractAndSaveSourceImages` returns [] on
+  // Failure-tolerant --`extractAndSaveSourceImages` returns [] on
   // any error and logs internally; we never want image extraction
   // to break the ingest chat flow.
   void extractAndSaveSourceImages(pp, sp, sourceSummarySlug).catch((err) => {
@@ -2404,6 +2486,7 @@ export async function startIngest(
     tryReadFile(`${pp}/wiki/index.md`),
   ])
 
+  // 系统 prompt：你是帮助构建 wiki 的知识渊博的助手
   const systemPrompt = [
     "You are a knowledgeable assistant helping to build a wiki from source documents.",
     "",
@@ -2416,9 +2499,11 @@ export async function startIngest(
     .filter(Boolean)
     .join("\n\n")
 
+  // 用户消息：我正在将以下源文件导入 wiki
   const userMessage = [
     `I'm ingesting the following source file into my wiki: **${sourceIdentity}**`,
     "",
+    // 请仔细阅读并展示关键收获、重要概念和有价值的信息
     "Please read it carefully and present the key takeaways, important concepts, and information that would be valuable to capture in the wiki. Highlight anything that relates to the wiki's purpose and schema.",
     "",
     "---",
@@ -2455,6 +2540,13 @@ export async function startIngest(
   )
 }
 
+/**
+ * 执行交互式 ingest 的写入阶段：基于聊天面板中的讨论历史，调用 LLM 生成
+ * wiki 页面文件并写入磁盘。这是 startIngest 的后续步骤。
+ * 为什么需要：交互式 ingest 将"分析讨论"和"写入文件"分为两步——
+ * 用户先与 AI 讨论源文档内容（startIngest），确认理解后再执行写入操作。
+ * 这种分离允许用户在写入前提供额外指导或纠正 AI 的理解。
+ */
 export async function executeIngestWrites(
   projectPath: string,
   llmConfig: LlmConfig,
@@ -2474,15 +2566,27 @@ export async function executeIngestWrites(
     ? `wiki/sources/${activeSourceSummarySlug}.md`
     : null
 
-  const [schema, index] = await Promise.all([
+  const [schema, purpose, index, projectMeta, wikiTree, activeSourceContent] = await Promise.all([
     tryReadFile(`${pp}/schema.md`),
+    tryReadFile(`${pp}/purpose.md`),
     tryReadFile(`${pp}/wiki/index.md`),
+    tryReadFile(`${pp}/.llm-wiki/project.json`),
+    listDirectory(`${pp}/wiki`).catch(() => [] as FileNode[]),
+    ingestSource ? tryReadFile(ingestSource) : Promise.resolve(""),
   ])
+  const wikiMode = detectWikiMode({
+    projectMeta,
+    schema,
+    purpose,
+    index,
+    paths: wikiTree.map((node) => node.path),
+  })
 
   const conversationHistory = store.messages
     .filter((m) => m.role !== "system")
     .map((m) => ({ role: m.role as "user" | "assistant", content: m.content }))
 
+  // 写入 prompt：基于讨论生成应创建或更新的 wiki 文件
   const writePrompt = [
     "Based on our discussion, please generate the wiki files that should be created or updated.",
     "",
@@ -2499,6 +2603,7 @@ export async function executeIngestWrites(
         ].join("\n")
       : "",
     "",
+    // 仅输出 FILE 块格式的内容
     "Output ONLY the file contents in this exact format for each file:",
     "```",
     "---FILE: wiki/path/to/file.md---",
@@ -2506,6 +2611,7 @@ export async function executeIngestWrites(
     "---END FILE---",
     "```",
     "",
+    // wiki/log.md 包含要追加的日志条目，其他文件输出完整内容
     "For wiki/log.md, include a log entry to append. For all other files, output the complete file content.",
     "Use relative paths from the project root (e.g., wiki/sources/topic.md).",
     "Do not include any other text outside the FILE blocks.",
@@ -2520,6 +2626,8 @@ export async function executeIngestWrites(
 
   let accumulated = ""
 
+  // 在 auto 模式下，从聊天历史中检测语言（而非空字符串），
+  // 否则无论源内容是什么，都会默认使用英语。
   // In auto mode, fall back to detecting language from the chat history
   // (user's discussion messages) rather than the empty string, which would
   // default to English regardless of the source content.
@@ -2527,7 +2635,11 @@ export async function executeIngestWrites(
     .map((m) => m.content)
     .join("\n")
     .slice(0, 2000)
+  const dynamicValidationSourceText = [activeSourceContent, historyText, userGuidance ?? ""]
+    .filter(Boolean)
+    .join("\n\n")
 
+  // 系统 prompt：你是 wiki 生成助手
   const systemPrompt = [
     "You are a wiki generation assistant. Your task is to produce structured wiki file contents.",
     "",
@@ -2555,46 +2667,32 @@ export async function executeIngestWrites(
     signal,
   )
 
-  const writtenPaths: string[] = []
-  const matches = accumulated.matchAll(FILE_BLOCK_REGEX)
+  const {
+    writtenPaths: relativeWrittenPaths,
+    warnings: writeWarnings,
+    reviewItems: lintReviewItems,
+  } = await writeFileBlocks(
+    pp,
+    accumulated,
+    llmConfig,
+    activeSourceIdentity,
+    dynamicValidationSourceText,
+    activeSourceSummaryPath ?? undefined,
+    wikiMode,
+    signal,
+  )
 
-  for (const match of matches) {
-    let relativePath = match[1].trim()
-    let content = match[2]
+  writeWarnings.forEach((warning) => console.warn(`[ingest] ${warning}`))
 
-    if (!relativePath) continue
-    if (
-      activeSourceSummaryPath &&
-      relativePath.startsWith("wiki/sources/")
-    ) {
-      relativePath = activeSourceSummaryPath
-    }
-
-    if (
-      activeSourceIdentity &&
-      !isLogPath(relativePath) &&
-      !isListingPath(relativePath)
-    ) {
-      content = canonicalizeSourcesField(content, activeSourceIdentity)
-    }
-
-    const fullPath = `${pp}/${relativePath}`
-
-    try {
-      if (isLogPath(relativePath)) {
-        const existing = await tryReadFile(fullPath)
-        const appended = existing
-          ? `${existing}\n\n${content.trim()}`
-          : content.trim()
-        await writeFile(fullPath, appended)
-      } else {
-        await writeFile(fullPath, content)
-      }
-      writtenPaths.push(fullPath)
-    } catch (err) {
-      console.error(`Failed to write ${fullPath}:`, err)
-    }
+  const reviewItems = [
+    ...lintReviewItems,
+    ...parseReviewBlocks(accumulated, activeSourceIdentity ?? pp),
+  ]
+  if (reviewItems.length > 0) {
+    useReviewStore.getState().addItems(reviewItems)
   }
+
+  const writtenPaths = relativeWrittenPaths.map((relativePath) => `${pp}/${relativePath}`)
 
   if (writtenPaths.length > 0) {
     const fileList = writtenPaths.map((p) => `- ${p}`).join("\n")
@@ -2605,7 +2703,7 @@ export async function executeIngestWrites(
 
   // Image cascade: surface any embedded images on the source-summary
   // page. `startIngest` already kicked off extraction in parallel
-  // with the chat stream — by now the images are sitting in
+  // with the chat stream --by now the images are sitting in
   // `wiki/media/<slug>/`, but no markdown references them yet. We
   // re-run extraction here to get back the SavedImage metadata
   // (rel_path, page) needed to build the markdown section. The Rust
@@ -2613,12 +2711,12 @@ export async function executeIngestWrites(
   // writes), so repeating it is cheap on the second call where every
   // file already exists.
   //
-  // Read the source path from the chat store — `startIngest` set it
+  // Read the source path from the chat store --`startIngest` set it
   // there at the beginning of the flow, and we don't have it as a
   // parameter (the chat-panel "Save to Wiki" button only passes
   // projectPath). Skipped silently when there's no ingestSource
   // (e.g. user manually entered chat mode and called this).
-  // Master toggle gate — see autoIngestImpl Step 0.6 / 3.5 for
+  // Master toggle gate --see autoIngestImpl Step 0.6 / 3.5 for
   // the full rationale. When captioning is disabled, we skip the
   // safety-net inject here too so the executeIngestWrites path
   // stays consistent with autoIngest.

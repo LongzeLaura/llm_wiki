@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest"
 import {
+  DEFAULT_PROJECT_MODE,
+  PROJECT_MODE_OPTIONS,
   getProjectModeBootstrap,
   normalizeProjectMode,
 } from "./project-mode"
@@ -10,6 +12,13 @@ describe("project-mode", () => {
     expect(normalizeProjectMode("rpg")).toBe("llmwikirpg")
     expect(normalizeProjectMode("llmwikirpg")).toBe("llmwikirpg")
     expect(normalizeProjectMode("unknown")).toBeNull()
+  })
+
+  it("makes llmWikiRPG the project default while retaining legacy default as an explicit option", () => {
+    expect(DEFAULT_PROJECT_MODE).toBe("llmwikirpg")
+    expect(PROJECT_MODE_OPTIONS[0].id).toBe("llmwikirpg")
+    expect(PROJECT_MODE_OPTIONS.map((mode) => mode.id)).toContain("default")
+    expect(PROJECT_MODE_OPTIONS.find((mode) => mode.id === "default")?.label).toContain("Legacy")
   })
 
   it("provides llmWikiRPG bootstrap files and directories", () => {

@@ -17,6 +17,7 @@ import { OUTPUT_LANGUAGE_OPTIONS } from "@/lib/output-language-options"
 import { useWikiStore, type OutputLanguage } from "@/stores/wiki-store"
 import { saveOutputLanguage } from "@/lib/project-store"
 import {
+  DEFAULT_PROJECT_MODE,
   PROJECT_MODE_OPTIONS,
   getProjectModeBootstrap,
   type ProjectMode,
@@ -33,7 +34,7 @@ export function CreateProjectDialog({ open: isOpen, onOpenChange, onCreated }: C
   const [name, setName] = useState("")
   const [path, setPath] = useState("")
   const [selectedTemplate, setSelectedTemplate] = useState("general")
-  const [selectedMode, setSelectedMode] = useState<ProjectMode>("default")
+  const [selectedMode, setSelectedMode] = useState<ProjectMode>(DEFAULT_PROJECT_MODE)
   // Empty string = "user hasn't picked yet"; we validate this on
   // submit so a fresh project never starts in implicit auto-detect
   // mode. Once chosen, the value is one of OUTPUT_LANGUAGE_OPTIONS
@@ -102,7 +103,7 @@ export function CreateProjectDialog({ open: isOpen, onOpenChange, onCreated }: C
       setName("")
       setPath("")
       setSelectedTemplate("general")
-      setSelectedMode("default")
+      setSelectedMode(DEFAULT_PROJECT_MODE)
       setLanguage("")
     } catch (err) {
       setError(String(err))

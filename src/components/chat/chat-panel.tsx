@@ -18,7 +18,7 @@ import { computeContextBudget } from "@/lib/context-budget"
 import { anyTxtSearchSmart, hasConfiguredAnyTxt } from "@/lib/anytxt-search"
 import { resolveSearchConfig, webSearch, type WebSearchResult } from "@/lib/web-search"
 import { MANDATORY_RPG_CONTEXT_DIRS, isRpgRelevantPath, prioritizeChatSearchResults } from "@/lib/rpg-query-priority"
-import { detectWikiMode } from "@/lib/wiki-mode"
+import { detectWikiMode, isRpgWikiMode } from "@/lib/wiki-mode"
 import type { FileNode } from "@/types/wiki"
 
 // Store the page mapping from the last query so SourceFilesBar can show which pages were cited
@@ -291,10 +291,11 @@ export function ChatPanel() {
 
         // ── Phase 1: Tokenized search → top 10 ────────────────
         const searchResults = await searchWiki(pp, text)
-        const prioritizedSearchResults = wikiMode === "llmwikirpg"
+        const rpgMode = isRpgWikiMode(wikiMode)
+        const prioritizedSearchResults = rpgMode
           ? prioritizeChatSearchResults(searchResults)
           : searchResults
-        const mandatoryRpgPages = wikiMode === "llmwikirpg"
+        const mandatoryRpgPages = rpgMode
           ? await collectMandatoryRpgContextPages(pp)
           : []
         const topSearchResults = prioritizedSearchResults.slice(0, 10)
@@ -454,7 +455,7 @@ export function ChatPanel() {
               ? "- Answer based ONLY on the numbered wiki pages and external sources provided below."
               : "- Answer based ONLY on the numbered wiki pages provided below.",
             "- If the provided pages don't contain enough information, say so honestly.",
-            wikiMode === "llmwikirpg" && relevantPages.some((page) => isRpgRelevantPath(page.path))
+            isRpgWikiMode(wikiMode) && relevantPages.some((page) => isRpgRelevantPath(page.path))
               ? "- For RPG questions, treat current-scene, player, events, plot-arcs, and relationship pages as high-priority live context when they are present."
               : "",
             "- Use [[wikilink]] syntax to reference wiki pages.",

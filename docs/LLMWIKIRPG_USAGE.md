@@ -45,12 +45,12 @@ The first-version migration targets these 11 directories:
 - `items`: notable equipment, artifacts, clues, and key objects.
 - `plot-arcs`: unresolved threads, conflicts, foreshadowing, and possible development directions.
 - `events`: confirmed past events only.
-- `current-scene`: current snapshot only.
+- `current-scene`: current snapshot only; writing it requires live input marked with `[RPG-LIVE]`.
 - `relationships`: relationship changes, trust, conflict, dependence, and tension between actors.
 
 ## Update Semantics
 
-- `wiki/current-scene/scene_state.md` is the canonical first-version current-scene file and is overwrite-oriented.
+- `wiki/current-scene/scene_state.md` is the canonical first-version current-scene file, is overwrite-oriented, and can only be generated from source input containing `[RPG-LIVE]`.
 - `wiki/events/timeline.md` is append-oriented and keeps event history.
 - `player`, `characters`, `relationships`, and `plot-arcs` use merge-style updates, with Stage 07 cleanup rules intended to replace stale dynamic sections instead of letting them linger.
 - `world`, `locations`, `factions`, and `items` remain merge-oriented knowledge pages.
@@ -68,10 +68,20 @@ The current implementation is suited for these source classes:
 ## Practical Workflow
 
 1. Mark the project with `wikiMode: rpg`.
-2. Ingest setting files, character material, and scene/session text through the normal pipeline.
-3. Confirm that outputs are routed into RPG directories rather than legacy `wiki/entities/` or `wiki/concepts/`.
-4. Review the separation between `current-scene`, `events`, and `plot-arcs`.
-5. Use chat/query flows against the project; Stage 08 and Stage 09 prioritize live RPG pages when the project is detected as RPG mode.
+2. Ingest setting files, character material, and static plot/canon text through the normal pipeline without `[RPG-LIVE]`.
+3. For active play or turn-runtime input that should update `wiki/current-scene/scene_state.md`, include `[RPG-LIVE]` in the source text.
+4. Confirm that outputs are routed into RPG directories rather than legacy `wiki/entities/` or `wiki/concepts/`.
+5. Review the separation between `current-scene`, `events`, and `plot-arcs`.
+6. Use chat/query flows against the project; Stage 08 and Stage 09 prioritize live RPG pages when the project is detected as RPG mode.
+
+Example live input:
+
+```md
+[RPG-LIVE]
+当前场景：玩家站在冬木市教会门口，准备进入。
+```
+
+Do not add `[RPG-LIVE]` when importing setting, character, plot-analysis, canon narrative, or dialogue-corpus files unless that source is truly the current active play turn.
 
 ## High-Value Review Checks
 

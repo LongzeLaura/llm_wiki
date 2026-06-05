@@ -18,6 +18,7 @@ This repository now contains a bounded llmWikiRPG adaptation of the original `ll
 - Deterministic smoke coverage for RPG routing and the most important live-state storage semantics.
 - A bounded extraction-quality review with one evidence-backed prompt/schema refinement for canonical `current-scene` output.
 - First-version usage and handoff documentation suitable for future isolated stage execution.
+- Post-v0.2 hardening: `current-scene` live input now requires the explicit `[RPG-LIVE]` marker.
 
 ## V1 Capability Boundary
 

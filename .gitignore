@@ -40,6 +40,7 @@ tests/
 
 # Logs
 *.log
+__pycache__/
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
@@ -48,3 +49,6 @@ pnpm-debug.log*
 # Brainstorm assets (not tracked in source control)
 .superpowers/
 .claude/
+
+# Local agent-run artifacts
+.agent_runs/

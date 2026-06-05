@@ -3,6 +3,9 @@ import { normalizePath } from "@/lib/path-utils"
 
 export type ProjectMode = "default" | "llmwikirpg"
 
+export const DEFAULT_PROJECT_MODE: ProjectMode = "llmwikirpg"
+export const LEGACY_PROJECT_MODE: ProjectMode = "default"
+
 export interface ProjectModeOption {
   id: ProjectMode
   label: string
@@ -26,14 +29,14 @@ interface ProjectMetadata {
 
 export const PROJECT_MODE_OPTIONS: readonly ProjectModeOption[] = [
   {
-    id: "default",
-    label: "Default",
-    description: "Legacy llm_wiki entities / concepts / sources workflow.",
-  },
-  {
     id: "llmwikirpg",
     label: "llmWikiRPG",
     description: "RPG wiki directories, prompts, and extraction semantics.",
+  },
+  {
+    id: "default",
+    label: "Legacy Default",
+    description: "Legacy llm_wiki entities / concepts / sources workflow.",
   },
 ] as const
 

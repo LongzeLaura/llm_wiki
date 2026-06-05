@@ -2,6 +2,10 @@ import { RPG_CATEGORIES } from "./rpg-categories"
 
 export type WikiMode = "default" | "llmwikirpg"
 
+export function isRpgWikiMode(mode: WikiMode): mode is "llmwikirpg" {
+  return mode === "llmwikirpg"
+}
+
 interface DetectWikiModeInput {
   schema?: string
   purpose?: string

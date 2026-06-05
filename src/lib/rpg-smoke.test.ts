@@ -144,6 +144,8 @@ describe("Stage 10 RPG smoke test", () => {
     await writeFileRaw(
       turnOneSourcePath,
       [
+        "[RPG-LIVE]",
+        "",
         "# Session 01",
         "",
         "Iven and Mira descend into the flooded customs tunnel.",
@@ -153,6 +155,8 @@ describe("Stage 10 RPG smoke test", () => {
     await writeFileRaw(
       turnTwoSourcePath,
       [
+        "[RPG-LIVE]",
+        "",
         "# Session 02",
         "",
         "The canal gate is locked from above.",
@@ -318,7 +322,7 @@ describe("Stage 10 RPG smoke test", () => {
       [
         "## RPG Extraction",
         "- current-scene/state.md",
-        "- events/timeline.md",
+        "- events/canal-gate-incident.md",
         "- plot-arcs/shadow-below-the-port.md",
       ].join("\n"),
       [
@@ -334,14 +338,14 @@ describe("Stage 10 RPG smoke test", () => {
         "Iven and Mira stand in the flooded customs tunnel while warning bells echo overhead.",
         "---END FILE---",
         "",
-        "---FILE: wiki/events/timeline.md---",
+        "---FILE: wiki/events/canal-gate-incident.md---",
         "---",
         'type: "events"',
-        'title: "Timeline"',
+        'title: "Canal Gate Incident"',
         'sources: ["session-01.md"]',
         "---",
         "",
-        "# Timeline",
+        "# Canal Gate Incident",
         "",
         "- Session 01: Iven and Mira entered the flooded customs tunnel and found that the lantern key fits an iron gate.",
         "---END FILE---",
@@ -376,7 +380,7 @@ describe("Stage 10 RPG smoke test", () => {
       [
         "## RPG Extraction",
         "- current-scene/scene_state.md",
-        "- events/timeline.md",
+        "- events/canal-gate-incident.md",
       ].join("\n"),
       [
         "---FILE: wiki/current-scene/scene_state.md---",
@@ -391,16 +395,16 @@ describe("Stage 10 RPG smoke test", () => {
         "The canal gate is now locked from above while Mira bargains with a dock runner and Iven hides the lantern key under his coat.",
         "---END FILE---",
         "",
-        "---FILE: wiki/events/timeline.md---",
+        "---FILE: wiki/events/canal-gate-incident.md---",
         "---",
         'type: "events"',
-        'title: "Timeline"',
+        'title: "Canal Gate Incident"',
         'sources: ["session-02.md"]',
         "---",
         "",
-        "# Timeline Update",
+        "# Canal Gate Incident Update",
         "",
-        "- Session 02: The canal gate was locked from above, forcing Mira to negotiate for a route while Iven concealed the lantern key.",
+        "- Session 02: The canal gate was locked from above, forcing Mira to negotiate passage while Iven concealed the lantern key.",
         "---END FILE---",
         "",
         "---FILE: wiki/sources/session-02.md---",
@@ -431,7 +435,7 @@ describe("Stage 10 RPG smoke test", () => {
       `${projectPath}/wiki/factions/amber-guild.md`,
       `${projectPath}/wiki/items/lantern-key.md`,
       `${projectPath}/wiki/plot-arcs/shadow-below-the-port.md`,
-      `${projectPath}/wiki/events/timeline.md`,
+      `${projectPath}/wiki/events/canal-gate-incident.md`,
       `${projectPath}/wiki/current-scene/scene_state.md`,
       `${projectPath}/wiki/relationships/player-mira.md`,
       expectedSourceSummaryPath(projectPath, worldSourcePath),
@@ -452,9 +456,14 @@ describe("Stage 10 RPG smoke test", () => {
     expect(sceneState).toContain("locked from above")
     expect(sceneState).not.toContain("warning bells echo overhead")
 
-    const timeline = await readFileRaw(`${projectPath}/wiki/events/timeline.md`)
-    expect(timeline).toContain("Session 01")
-    expect(timeline).toContain("Session 02")
+    const eventLog = await readFileRaw(`${projectPath}/wiki/events/canal-gate-incident.md`)
+    expect(eventLog).toContain("Session 01")
+    expect(eventLog).toContain("Session 02")
+
+    const characterPage = await readFileRaw(`${projectPath}/wiki/characters/mira-vale.md`)
+    expect(characterPage).not.toContain("Amber Guild")
+    expect(characterPage).not.toContain("River Port")
+    expect(characterPage).not.toContain("Lantern Key")
 
     const schema = await readFileRaw(`${projectPath}/schema.md`)
     const index = await readFileRaw(`${projectPath}/wiki/index.md`)
@@ -468,7 +477,7 @@ describe("Stage 10 RPG smoke test", () => {
       makeResult(`${projectPath}/wiki/world/basic-overview.md`, 30),
       makeResult(`${projectPath}/wiki/player/player.md`, 25),
       makeResult(`${projectPath}/wiki/current-scene/scene_state.md`, 10),
-      makeResult(`${projectPath}/wiki/events/timeline.md`, 20),
+      makeResult(`${projectPath}/wiki/events/canal-gate-incident.md`, 20),
     ])
     expect(prioritized.map((result) => inferWikiTypeFromPath(result.path)).slice(0, 3)).toEqual([
       "current-scene",
