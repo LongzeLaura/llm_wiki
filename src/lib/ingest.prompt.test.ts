@@ -67,17 +67,19 @@ describe("buildAnalysisPrompt language directive", () => {
     expect(prompt).toContain("MANDATORY OUTPUT LANGUAGE: English")
   })
 
-  it("contains structural analysis sections", () => {
+  it("uses the RPG Stage 1 analysis structure", () => {
     const prompt = buildAnalysisPrompt("", "", "")
-    expect(prompt).toContain("## Key Entities")
-    expect(prompt).toContain("## Key Concepts")
-    expect(prompt).toContain("## Main Arguments & Findings")
-    expect(prompt).toContain("## Recommendations")
+    expect(prompt).toContain("## RPG Wiki Extraction Guidance")
+    expect(prompt).toContain("## Source Profile")
+    expect(prompt).toContain("## Candidate Objects")
+    expect(prompt).toContain("## Ignored Noise")
   })
 
-  it("keeps default-mode analysis prompt free of RPG-only routing guidance", () => {
+  it("ignores legacy/default analysis mode requests and stays RPG-only", () => {
     const prompt = buildAnalysisPrompt("", "", "")
-    expect(prompt).not.toContain("## RPG Wiki Extraction Guidance")
+    expect(prompt).toContain("## RPG Wiki Extraction Guidance")
+    expect(prompt).not.toContain("## Key Entities")
+    expect(prompt).not.toContain("## Key Concepts")
   })
 
   it("keeps RPG analysis prompt focused on Stage 1 analysis contract", () => {
@@ -193,7 +195,7 @@ describe("buildGenerationPrompt language directive", () => {
     expect(prompt).toContain("my-paper.pdf")
   })
 
-  it("makes project schema routing authoritative over default entity and concept folders", () => {
+  it("makes project schema routing RPG-authoritative without legacy fallback folders", () => {
     const prompt = buildGenerationPrompt(
       "Use wiki/people/ for people. Use wiki/technologies/ for technical methods.",
       "",
@@ -201,10 +203,12 @@ describe("buildGenerationPrompt language directive", () => {
       "source.pdf",
     )
 
-    expect(prompt).toContain("## Project Schema and Routing (AUTHORITATIVE)")
-    expect(prompt).toContain("write pages into those schema-defined folders")
-    expect(prompt).toContain("otherwise use wiki/entities/")
-    expect(prompt).not.toContain("Entity pages in wiki/entities/ for key entities")
+    expect(prompt).toContain("## RPG Project Schema and Routing (AUTHORITATIVE)")
+    expect(prompt).toContain("project-level naming, formatting, and override guidance")
+    expect(prompt).not.toContain("otherwise use wiki/entities/")
+    expect(prompt).not.toContain("wiki/entities/")
+    expect(prompt).not.toContain("wiki/concepts/")
+    expect(prompt).not.toContain("wiki/queries/")
   })
 
   it("respects user setting regardless of source content language", () => {
@@ -214,9 +218,12 @@ describe("buildGenerationPrompt language directive", () => {
     expect(prompt).not.toContain("OUTPUT LANGUAGE: Japanese")
   })
 
-  it("keeps default-mode generation prompt on legacy/custom schema routing only", () => {
+  it("ignores legacy/default generation mode requests and stays RPG-only", () => {
     const prompt = buildGenerationPrompt("", "", "", "source.md")
-    expect(prompt).not.toContain("## RPG Wiki Directory Routing")
+    expect(prompt).toContain("## RPG Wiki Generation Contract")
+    expect(prompt).not.toContain("wiki/entities/")
+    expect(prompt).not.toContain("wiki/concepts/")
+    expect(prompt).not.toContain("wiki/queries/")
   })
 
   it("uses only the minimal RPG generation contract when Source Profile is missing", () => {

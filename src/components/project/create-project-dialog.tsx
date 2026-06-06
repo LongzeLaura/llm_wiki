@@ -9,19 +9,12 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { FolderOpen } from "lucide-react"
 import { createProject, writeFile, createDirectory } from "@/commands/fs"
-import { getTemplate } from "@/lib/templates"
-import { TemplatePicker } from "@/components/project/template-picker"
 import type { WikiProject } from "@/types/wiki"
 import { normalizePath } from "@/lib/path-utils"
 import { OUTPUT_LANGUAGE_OPTIONS } from "@/lib/output-language-options"
 import { useWikiStore, type OutputLanguage } from "@/stores/wiki-store"
 import { saveOutputLanguage } from "@/lib/project-store"
-import {
-  DEFAULT_PROJECT_MODE,
-  PROJECT_MODE_OPTIONS,
-  getProjectModeBootstrap,
-  type ProjectMode,
-} from "@/lib/project-mode"
+import { getProjectModeBootstrap } from "@/lib/project-mode"
 
 interface CreateProjectDialogProps {
   open: boolean
@@ -33,8 +26,6 @@ export function CreateProjectDialog({ open: isOpen, onOpenChange, onCreated }: C
   const { t } = useTranslation()
   const [name, setName] = useState("")
   const [path, setPath] = useState("")
-  const [selectedTemplate, setSelectedTemplate] = useState("general")
-  const [selectedMode, setSelectedMode] = useState<ProjectMode>(DEFAULT_PROJECT_MODE)
   // Empty string = "user hasn't picked yet"; we validate this on
   // submit so a fresh project never starts in implicit auto-detect
   // mode. Once chosen, the value is one of OUTPUT_LANGUAGE_OPTIONS
@@ -68,26 +59,17 @@ export function CreateProjectDialog({ open: isOpen, onOpenChange, onCreated }: C
     setCreating(true)
     setError("")
     try {
-      const project = await createProject(name.trim(), path.trim(), selectedMode)
+      const project = await createProject(name.trim(), path.trim())
       const pp = normalizePath(project.path)
 
-      const modeBootstrap = getProjectModeBootstrap(selectedMode)
-      if (modeBootstrap) {
-        await writeFile(`${pp}/schema.md`, modeBootstrap.schema)
-        await writeFile(`${pp}/purpose.md`, modeBootstrap.purpose)
-        await writeFile(`${pp}/wiki/index.md`, modeBootstrap.index)
-        await writeFile(`${pp}/wiki/overview.md`, modeBootstrap.overview)
-        await writeFile(`${pp}/wiki/log.md`, modeBootstrap.log)
-        for (const dir of modeBootstrap.extraDirs) {
-          await createDirectory(`${pp}/${dir}`)
-        }
-      } else {
-        const template = getTemplate(selectedTemplate)
-        await writeFile(`${pp}/schema.md`, template.schema)
-        await writeFile(`${pp}/purpose.md`, template.purpose)
-        for (const dir of template.extraDirs) {
-          await createDirectory(`${pp}/${dir}`)
-        }
+      const modeBootstrap = getProjectModeBootstrap()
+      await writeFile(`${pp}/schema.md`, modeBootstrap.schema)
+      await writeFile(`${pp}/purpose.md`, modeBootstrap.purpose)
+      await writeFile(`${pp}/wiki/index.md`, modeBootstrap.index)
+      await writeFile(`${pp}/wiki/overview.md`, modeBootstrap.overview)
+      await writeFile(`${pp}/wiki/log.md`, modeBootstrap.log)
+      for (const dir of modeBootstrap.extraDirs) {
+        await createDirectory(`${pp}/${dir}`)
       }
 
       // Persist the user's language choice. The store / disk
@@ -102,8 +84,6 @@ export function CreateProjectDialog({ open: isOpen, onOpenChange, onCreated }: C
       onOpenChange(false)
       setName("")
       setPath("")
-      setSelectedTemplate("general")
-      setSelectedMode(DEFAULT_PROJECT_MODE)
       setLanguage("")
     } catch (err) {
       setError(String(err))
@@ -124,32 +104,10 @@ export function CreateProjectDialog({ open: isOpen, onOpenChange, onCreated }: C
             <Input id="name" value={name} onChange={(e) => setName(e.target.value)} placeholder={t("project.namePlaceholder")} />
           </div>
           <div className="flex flex-col gap-2">
-            <Label htmlFor="mode">Mode</Label>
-            <select
-              id="mode"
-              value={selectedMode}
-              onChange={(e) => setSelectedMode(e.target.value as ProjectMode)}
-              className="w-full rounded-md border bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
-            >
-              {PROJECT_MODE_OPTIONS.map((mode) => (
-                <option key={mode.id} value={mode.id}>
-                  {mode.label}
-                </option>
-              ))}
-            </select>
-            <p className="text-xs text-muted-foreground">
-              {PROJECT_MODE_OPTIONS.find((mode) => mode.id === selectedMode)?.description}
-            </p>
-          </div>
-          <div className="flex flex-col gap-2">
             <Label>{t("project.template")}</Label>
-            {selectedMode === "llmwikirpg" ? (
-              <p className="text-sm text-muted-foreground">
-                llmWikiRPG mode uses its own RPG schema, index, and bootstrap directories.
-              </p>
-            ) : (
-              <TemplatePicker selected={selectedTemplate} onSelect={setSelectedTemplate} />
-            )}
+            <p className="text-sm text-muted-foreground">
+              llmWikiRPG projects use the RPG runtime schema, index, and bootstrap directories.
+            </p>
           </div>
           <div className="flex flex-col gap-2">
             <Label htmlFor="language">

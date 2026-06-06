@@ -1,5 +1,726 @@
 # Implementation Log
 
+## 2026-06-06 - Stage 6.8 Pending RPG Updates Review + Apply UI v0
+
+### Stage
+
+Stage 6.8: Pending RPG Updates Review + Apply UI v0.
+
+### Changed files
+
+- `src/components/rpg/pending-rpg-updates-panel.tsx`
+- `src/components/rpg/index.ts`
+- `src/components/rpg/rpg-runtime-panel.tsx`
+- `src/components/rpg/pending-rpg-updates-panel.test.tsx`
+- `src/components/rpg/rpg-runtime-panel.test.tsx`
+- `docs/CURRENT_STATE.md`
+- `docs/IMPLEMENTATION_LOG.md`
+
+### Summary
+
+- Added `PendingRpgUpdatesPanel` as the Stage 6.8 review surface for staged RPG wiki updates.
+- The review panel renders each update's `targetPath`, `strategy`, `status`, `reason`, `content`, and `references`.
+- Added explicit per-update accept/reject controls. These only call the existing in-memory status helpers through `RpgRuntimePanel` state and do not write wiki files.
+- Added a manual `Apply accepted` action that is enabled only when at least one local pending update has `status: "accepted"`.
+- Wired the review panel into `RpgRuntimePanel` beside the existing `RpgPlayPanel`, without replacing the runtime turn flow or normal app views.
+- Added `applyRpgRuntimePanelAcceptedUpdates()` as the testable UI apply helper. It filters to accepted updates, calls the injected `applyPendingUpdates` dependency, removes applied updates locally, and keeps skipped/pending/rejected updates visible.
+- Kept `applyRpgPendingUpdates()` as the only writeback boundary. The UI does not directly write files and still relies on Stage 6 write policy to reject stable/manual/base/legacy paths.
+- Displayed the latest apply result with applied updates, skipped updates, and warnings.
+- Reset stale apply results when a new runtime turn produces a fresh `pendingUpdates` list.
+
+### Validation
+
+- `npx.cmd vitest run src/components/rpg/pending-rpg-updates-panel.test.tsx src/components/rpg/rpg-runtime-panel.test.tsx` passed.
+  - 2 test files passed.
+  - 16 tests passed.
+- `npx.cmd vitest run src/components/rpg/pending-rpg-updates-panel.test.tsx src/components/rpg/rpg-runtime-panel.test.tsx src/components/rpg/rpg-play-panel.test.tsx src/lib/rpg-runtime-controller.test.ts src/lib/rpg-llm-narration-adapter.test.ts src/lib/rpg-turn-orchestrator.test.ts src/lib/rpg-state-extractor.test.ts src/lib/rpg-update-staging.test.ts src/lib/rpg-write-policy.test.ts src/lib/rpg-runtime.test.ts src/lib/rpg-turn-model.test.ts src/lib/rpg-narration-prompts.test.ts src/lib/rpg-play-panel-state.test.ts` passed.
+  - 13 test files passed.
+  - 82 tests passed.
+- `npm.cmd run typecheck` passed.
+
+### Scope notes
+
+- Stage 6.8 does not automatically accept pending updates.
+- Stage 6.8 does not automatically apply pending updates.
+- Stage 6.8 does not write pending or rejected updates to wiki.
+- Stage 6.8 does not bypass `applyRpgPendingUpdates()`.
+- Stage 6.8 does not allow UI editing of stable/manual/base/legacy paths.
+- Stage 6.8 does not extract facts from `nextActionOptions`.
+- Stage 6.8 does not implement outline impact detection, outline regeneration, relationship/tension derivation, or Stage 7-9 behavior.
+- No `git commit` or `git push` was performed.
+
+## 2026-06-06 - Stage 6.7 RPG Play Panel App Integration v0
+
+### Stage
+
+Stage 6.7: RPG Play Panel App Integration v0.
+
+### Changed files
+
+- `src/components/rpg/rpg-runtime-panel.tsx`
+- `src/components/rpg/index.ts`
+- `src/components/rpg/rpg-runtime-panel.test.tsx`
+- `src/components/layout/content-area.tsx`
+- `src/components/layout/icon-sidebar.tsx`
+- `src/stores/wiki-store.ts`
+- `src/i18n/en.json`
+- `src/i18n/zh.json`
+- `docs/CURRENT_STATE.md`
+- `docs/IMPLEMENTATION_LOG.md`
+
+### Summary
+
+- Added `RpgRuntimePanel` as the app-level container for the existing dumb `RpgPlayPanel`.
+- Added `loadRpgCurrentScene()` to read `wiki/current-scene/scene_state.md` and return a clear warning when it is missing.
+- Added `submitRpgRuntimePanelAction()` as the testable submit boundary that constructs `createLlmRpgNarrationAdapter()` and calls `runRpgRuntimeTurnFlow()`.
+- Updated the panel state after a completed turn with `turnResult.narrative` and `turnResult.nextActionOptions`.
+- Displayed loading/disabled state, runtime warnings, runtime errors, and a read-only pending update count/path summary.
+- Exported the new runtime panel and helper types from `src/components/rpg/index.ts`.
+- Added a dedicated `play` app view and sidebar button so llmWikiRPG users can open the RPG Runtime panel without reusing the normal wiki QA chat.
+- Kept existing wiki/chat/source/search/graph/lint/review/settings views intact.
+- Recorded that `docs/LLMWIKIRPG_NEXT_ARCHITECTURE_STEPS.md` still points to Stage 7 while this product stage needs the pending-review bridge next.
+
+### Validation
+
+- `npx.cmd vitest run src/components/rpg/rpg-runtime-panel.test.tsx src/components/rpg/rpg-play-panel.test.tsx src/lib/rpg-play-panel-state.test.ts src/lib/rpg-runtime-controller.test.ts src/lib/rpg-llm-narration-adapter.test.ts src/lib/rpg-turn-orchestrator.test.ts src/lib/rpg-state-extractor.test.ts src/lib/rpg-update-staging.test.ts src/lib/rpg-write-policy.test.ts src/lib/rpg-runtime.test.ts src/lib/rpg-turn-model.test.ts src/lib/rpg-narration-prompts.test.ts` passed.
+  - 12 test files passed.
+  - 76 tests passed.
+- `npx.cmd vitest run src/i18n/i18n-parity.test.ts src/components/rpg/rpg-runtime-panel.test.tsx` passed.
+  - 2 test files passed.
+  - 15 tests passed.
+- `npm.cmd run typecheck` passed.
+- `npm.cmd run dev -- --host 127.0.0.1 --port 5173 --strictPort false` reached Vite ready state in foreground. Browser-level verification was not completed because the in-app Browser plugin reported that `iab` was unavailable in this session.
+
+### Scope notes
+
+- Stage 6.7 does not call `applyRpgPendingUpdates()`.
+- Stage 6.7 does not automatically accept or reject pending updates.
+- Stage 6.7 does not implement pending update review/apply buttons.
+- Stage 6.7 does not write wiki files.
+- Stage 6.7 does not implement outline impact detection/regeneration, relationship derivation, or Stage 7-9 behavior.
+- Normal wiki QA chat was not reused as the RPG runtime surface.
+- No `git commit` or `git push` was performed.
+
+## 2026-06-06 - Stage 6.6 Runtime Turn Controller + Pending Output
+
+### Stage
+
+Stage 6.6: Runtime Turn Controller + Pending Output.
+
+### Changed files
+
+- `src/lib/rpg-runtime/runtime-controller.ts`
+- `src/lib/rpg-runtime/index.ts`
+- `src/lib/rpg-runtime-controller.test.ts`
+- `docs/CURRENT_STATE.md`
+- `docs/IMPLEMENTATION_LOG.md`
+
+### Summary
+
+- Added `runRpgRuntimeTurnFlow()` as the dedicated Stage 6.6 controller.
+- Added Stage 6.6 input/result types: `RunRpgRuntimeTurnFlowInput` and `RunRpgRuntimeTurnFlowResult`.
+- Reused the existing `runRpgTurn()` boundary instead of duplicating context compilation, prompt construction, narration validation, or turn-record creation.
+- Passed the completed `RpgTurnRecord` from `runRpgTurn()` into `extractRpgStateUpdates()`.
+- Passed extracted `ProposedWikiUpdate[]` into `createPendingRpgUpdates()`.
+- Returned `brief`, `turnResult`, `turnRecord`, `proposedUpdates`, `pendingUpdates`, and merged warnings from turn orchestration plus extraction.
+- Kept all new pending updates at default `status: "pending"`.
+- Exported the controller helper and types from `src/lib/rpg-runtime`.
+- Added focused tests for the full fixture-adapter flow, fenced `rpg-wiki-update` extraction, pending default status, merged warnings, malformed adapter output propagation, read-only behavior, and the absence of automatic accept/reject/apply calls.
+
+### Validation
+
+- `npx.cmd vitest run src/lib/rpg-runtime-controller.test.ts` passed.
+  - 1 test file passed.
+  - 6 tests passed.
+- `npx.cmd vitest run src/lib/rpg-runtime-controller.test.ts src/lib/rpg-llm-narration-adapter.test.ts src/lib/rpg-turn-orchestrator.test.ts src/lib/rpg-state-extractor.test.ts src/lib/rpg-update-staging.test.ts src/lib/rpg-write-policy.test.ts src/lib/rpg-runtime.test.ts src/lib/rpg-turn-model.test.ts src/lib/rpg-narration-prompts.test.ts src/lib/rpg-play-panel-state.test.ts` passed.
+  - 10 test files passed.
+  - 62 tests passed.
+- `npm.cmd run typecheck` passed.
+
+### Scope notes
+
+- Stage 6.6 does not write wiki files.
+- Stage 6.6 does not call `acceptPendingRpgUpdate()`, `rejectPendingRpgUpdate()`, or `applyRpgPendingUpdates()`.
+- Stage 6.6 does not attach to the RPG Play Panel or UI.
+- Stage 6.6 does not call a real LLM in tests; the controller remains adapter-driven.
+- Stage 6.6 does not implement outline impact detection/regeneration, relationship derivation, or ingest-flow changes.
+- No `git commit` or `git push` was performed.
+
+## 2026-06-06 - Stage 6.5 Real RPG Narration Adapter v0
+
+### Stage
+
+Stage 6.5: Real RPG Narration Adapter v0.
+
+### Changed files
+
+- `src/lib/rpg-runtime/llm-narration-adapter.ts`
+- `src/lib/rpg-runtime/index.ts`
+- `src/lib/rpg-llm-narration-adapter.test.ts`
+- `docs/CURRENT_STATE.md`
+- `docs/IMPLEMENTATION_LOG.md`
+
+### Summary
+
+- Added `createLlmRpgNarrationAdapter()` as the first real LLM-backed `RpgNarrationAdapter`.
+- Added Stage 6.5 input/options types: `CreateLlmRpgNarrationAdapterInput` and `LlmRpgNarrationAdapterOptions`.
+- Reused the existing `streamChat()` path instead of adding provider-specific RPG LLM logic.
+- Converted `RpgNarrationPrompt` into LLM messages with `prompt.systemPrompt` as the system message and `prompt.userPrompt` as the user message.
+- Forwarded the provided `AbortSignal` and optional `RequestOverrides` to `streamChat()`.
+- Collected streamed tokens into one final output string.
+- Parsed `RpgTurnResult` JSON from pure JSON output, markdown fenced JSON blocks, and short prose-wrapped JSON object output.
+- Delegated final shape and field validation to the existing `validateRpgTurnResult()` helper.
+- Added clear error messages for empty output, missing JSON object, JSON parse failure, LLM streaming error, and malformed `RpgTurnResult` validation failure.
+- Exported the Stage 6.5 adapter helper and types from `src/lib/rpg-runtime`.
+- Added focused tests that mock `streamChat()` and verify prompt-to-message conversion, supported output shapes, error paths, validation reuse, and streaming error handling.
+
+### Validation
+
+- `npx.cmd vitest run src/lib/rpg-llm-narration-adapter.test.ts` passed.
+  - 1 test file passed.
+  - 9 tests passed.
+- `npx.cmd vitest run src/lib/rpg-llm-narration-adapter.test.ts src/lib/rpg-turn-orchestrator.test.ts src/lib/rpg-state-extractor.test.ts src/lib/rpg-update-staging.test.ts src/lib/rpg-write-policy.test.ts src/lib/rpg-runtime.test.ts src/lib/rpg-turn-model.test.ts src/lib/rpg-narration-prompts.test.ts src/lib/rpg-play-panel-state.test.ts` passed.
+  - 9 test files passed.
+  - 56 tests passed.
+- `npm.cmd run typecheck` passed.
+
+### Scope notes
+
+- Stage 6.5 does not write wiki files.
+- Stage 6.5 does not extract pending updates.
+- Stage 6.5 does not call `applyRpgPendingUpdates()`.
+- Stage 6.5 does not attach to `runRpgTurn()` by default; it only provides an injectable adapter implementation.
+- Stage 6.5 does not attach to the RPG Play Panel or UI.
+- Stage 6.5 does not implement outline impact detection/regeneration, relationship derivation, or ingest-flow changes.
+- No `git commit` or `git push` was performed.
+
+## 2026-06-06 - Stage 6 Runtime Write Policy
+
+### Stage
+
+Stage 6: Runtime Write Policy.
+
+### Changed files
+
+- `src/lib/rpg-runtime/write-policy.ts`
+- `src/lib/rpg-runtime/index.ts`
+- `src/lib/rpg-write-policy.test.ts`
+- `docs/CURRENT_STATE.md`
+- `docs/IMPLEMENTATION_LOG.md`
+
+### Summary
+
+- Added `applyRpgPendingUpdates()` as the dedicated Stage 6 runtime write boundary.
+- Added Stage 6 result types: `ApplyRpgPendingUpdatesInput`, `AppliedRpgUpdate`, `SkippedRpgUpdate`, and `ApplyRpgPendingUpdatesResult`.
+- Applied only `PendingRpgUpdate.status === "accepted"` updates. `pending` and `rejected` updates are returned as skipped and do not write files.
+- Revalidated every accepted update at write time: `wiki/current-scene/scene_state.md` requires `overwrite`, direct `wiki/events/*.md` pages require `append`, and direct `wiki/player/*.md`, `wiki/relationships/*.md`, `wiki/plot-arcs/*.md`, plus `characters` / `locations` / `factions` / `items` `runtime/*.md` overlays require `merge`.
+- Rejected stable/manual paths (`world`, `style`, `rules`, `sources`), base `characters` / `locations` / `factions` / `items` pages, legacy paths, strategy/path mismatches, and targets outside the runtime write allowlist with skipped results and warnings.
+- Constrained actual writes to `projectPath/wiki/...` using resolved filesystem paths, and created parent directories before writing.
+- Implemented first-pass write behavior: current-scene overwrite, event append/create, and conservative append-style merge for dynamic pages and runtime overlays.
+- Exported the Stage 6 types and helper from `src/lib/rpg-runtime`.
+- Added focused tests for accepted current-scene overwrite, event append/create, dynamic merge paths, pending/rejected no-write behavior, legacy/stable/base path rejection, strategy/path mismatch rejection, path escape rejection, and nextActionOptions non-contamination through the accepted pending update flow.
+
+### Validation
+
+- `npx.cmd vitest run src/lib/rpg-write-policy.test.ts` passed.
+  - 1 test file passed.
+  - 9 tests passed.
+- `npx.cmd vitest run src/lib/rpg-write-policy.test.ts src/lib/rpg-state-extractor.test.ts src/lib/rpg-update-staging.test.ts src/lib/rpg-turn-orchestrator.test.ts src/lib/rpg-runtime.test.ts src/lib/rpg-turn-model.test.ts src/lib/rpg-narration-prompts.test.ts src/lib/rpg-play-panel-state.test.ts` passed.
+  - 8 test files passed.
+  - 47 tests passed.
+- `npm.cmd run typecheck` passed.
+
+### Scope notes
+
+- Stage 6 does not automatically attach to `runRpgTurn()`.
+- Stage 6 does not automatically attach to the RPG Play Panel or UI.
+- Stage 6 does not automatically accept pending updates.
+- Stage 6 does not call a real LLM.
+- Stage 6 does not implement a relationship deriver, outline impact detection, outline regeneration, or ingest-flow changes.
+- Stage 6 does not extract or write facts from `RpgTurnResult.nextActionOptions`; it only consumes explicit pending updates.
+- No `git commit` or `git push` was performed.
+
+## 2026-06-06 - Stage 5 State Update Extractor + Pending Updates
+
+### Stage
+
+Stage 5: State Update Extractor + Pending Updates.
+
+### Changed files
+
+- `src/lib/rpg-runtime/state-extractor.ts`
+- `src/lib/rpg-runtime/update-staging.ts`
+- `src/lib/rpg-runtime/index.ts`
+- `src/lib/rpg-state-extractor.test.ts`
+- `src/lib/rpg-update-staging.test.ts`
+- `docs/CURRENT_STATE.md`
+- `docs/IMPLEMENTATION_LOG.md`
+
+### Summary
+
+- Added `extractRpgStateUpdates()` as a pure in-memory extractor from completed `RpgTurnRecord` to `ProposedWikiUpdate[]`.
+- Added Stage 5 types: `RpgUpdateStrategy`, `ProposedWikiUpdate`, `ExtractRpgStateUpdatesInput`, `ExtractRpgStateUpdatesResult`, `PendingRpgUpdateStatus`, and `PendingRpgUpdate`.
+- Used explicit fenced `rpg-wiki-update` blocks inside `turnRecord.generatedNarrative` as the deterministic extraction input. The extractor does not accept `RpgTurnResult`, does not see `nextActionOptions`, and does not read wiki files.
+- Added runtime update path gating: `wiki/current-scene/scene_state.md` requires `overwrite`; direct `wiki/events/*.md` pages require `append`; direct `wiki/player/*.md`, `wiki/relationships/*.md`, `wiki/plot-arcs/*.md`, and `characters` / `locations` / `factions` / `items` `runtime/*.md` overlays require `merge`.
+- Filtered legacy paths, stable/manual paths (`world`, `style`, `rules`), and base `characters` / `locations` / `factions` / `items` pages from proposed runtime updates with warnings.
+- Added `createPendingRpgUpdates()`, `acceptPendingRpgUpdate()`, and `rejectPendingRpgUpdate()` for in-memory pending update staging. New pending updates default to `status: "pending"`; accept/reject only changes the selected update status.
+- Exported the Stage 5 types and helpers from `src/lib/rpg-runtime`.
+- Added focused tests for proposed update extraction, unchosen option exclusion, allowed strategy/path combinations, legacy/base/stable path filtering, pending default status, accept/reject behavior, and no wiki file reads/writes in Stage 5 helpers.
+
+### Validation
+
+- `npx.cmd vitest run src/lib/rpg-state-extractor.test.ts src/lib/rpg-update-staging.test.ts` passed.
+  - 2 test files passed.
+  - 11 tests passed.
+- `npx.cmd vitest run src/lib/rpg-state-extractor.test.ts src/lib/rpg-update-staging.test.ts src/lib/rpg-turn-orchestrator.test.ts src/lib/rpg-runtime.test.ts src/lib/rpg-turn-model.test.ts src/lib/rpg-narration-prompts.test.ts src/lib/rpg-play-panel-state.test.ts` passed.
+  - 7 test files passed.
+  - 38 tests passed.
+- `npm.cmd run typecheck` passed.
+
+### Scope notes
+
+- Stage 5 does not implement a runtime write API.
+- Stage 5 does not apply pending updates or write wiki files.
+- Stage 5 does not call a real LLM or reuse normal wiki QA chat.
+- Stage 5 does not implement relationship derivation, outline impact detection, outline regeneration, or ingest-flow changes.
+- Unchosen `nextActionOptions` remain excluded because the extractor only accepts completed `RpgTurnRecord` data.
+- No `git commit` or `git push` was performed.
+
+## 2026-06-06 - Stage 4.5 Runtime Turn Orchestrator + Narration Adapter
+
+### Stage
+
+Stage 4.5: Runtime Turn Orchestrator + Narration Adapter.
+
+### Changed files
+
+- `src/lib/rpg-runtime/turn-orchestrator.ts`
+- `src/lib/rpg-runtime/narration-adapter.ts`
+- `src/lib/rpg-runtime/turn-model.ts`
+- `src/lib/rpg-runtime/index.ts`
+- `src/lib/rpg-turn-orchestrator.test.ts`
+- `docs/CURRENT_STATE.md`
+- `docs/IMPLEMENTATION_LOG.md`
+
+### Summary
+
+- Added a dedicated single-turn orchestrator entry, `runRpgTurn()`, that calls the existing read-only runtime preview/context compiler, builds an RPG narration prompt, invokes an injected narration adapter, validates the returned `RpgTurnResult`, and creates a completed `RpgTurnRecord`.
+- Added the replaceable `RpgNarrationAdapter` boundary and `createFixtureNarrationAdapter()` for deterministic tests and later model integration.
+- Added `validateRpgTurnResult()` to reject malformed adapter output: missing/empty narrative, option counts outside 3 to 5, invalid option shape, invalid `intent` / `riskLevel`, invalid `likelyAffectedPaths`, and non-array `references`.
+- Reused the existing RPG reference cleaning/filtering rules for validated turn results and completed records, preserving the legacy path filter.
+- Exported the Stage 4.5 types and helpers from `src/lib/rpg-runtime`.
+- Added focused tests for the full `SubmittedAction -> CompactStoryBrief -> RpgNarrationPrompt -> RpgTurnResult -> RpgTurnRecord` flow, current-scene/player/character runtime-overlay context inclusion, malformed output rejection, unchosen option exclusion from completed records, and read-only/no-pending-update behavior.
+
+### Validation
+
+- `npx.cmd vitest run src/lib/rpg-turn-orchestrator.test.ts` was run first and initially failed because the test expected raw fixture reference order while validation now cleans and sorts references. The test assertion was corrected to expect the validated reference order.
+- `npx.cmd vitest run src/lib/rpg-turn-orchestrator.test.ts src/lib/rpg-runtime.test.ts src/lib/rpg-turn-model.test.ts src/lib/rpg-narration-prompts.test.ts src/lib/rpg-play-panel-state.test.ts` passed.
+  - 5 test files passed.
+  - 27 tests passed.
+- `npm.cmd run typecheck` passed.
+
+### Scope notes
+
+- Stage 4.5 remains read-only after context compilation: no runtime write API, no pending updates, no state extractor, no relationship deriver, no outline impact/regeneration, and no wiki writes.
+- No real LLM network call was added; narration remains adapter-driven and fixture-testable.
+- Normal wiki QA chat was not reused as RPG runtime.
+- Unchosen `nextActionOptions` remain future candidates only and are excluded from `RpgTurnRecord`.
+- No `git commit` or `git push` was performed.
+
+## 2026-06-06 - Architecture roadmap recalibration after schema overlay
+
+### Stage
+
+Planning/documentation update after the final schema overlay contract.
+
+### Changed files
+
+- `docs/LLMWIKIRPG_FINAL_ARCHITECTURE.md`
+- `docs/LLMWIKIRPG_NEXT_ARCHITECTURE_STEPS.md`
+- `docs/CURRENT_STATE.md`
+- `docs/IMPLEMENTATION_LOG.md`
+
+### Summary
+
+- Updated the final architecture runtime directory list to include `wiki/characters/runtime/`, `wiki/locations/runtime/`, `wiki/factions/runtime/`, and `wiki/items/runtime/`.
+- Recorded that the final schema overlay contract has landed in bootstrap/category/schema/test coverage, while runtime write APIs and pending updates remain unimplemented.
+- Reframed the remaining architecture work so the next step is not another isolated skeleton module.
+- Added Stage 4.5 `Runtime Turn Orchestrator + Narration Adapter` as the next recommended implementation target: a thin single-turn flow connecting context compilation, narration prompt construction, model/fixture adapter output, `RpgTurnResult` validation, and `RpgTurnRecord` creation.
+- Moved Stage 5 `State Update Extractor + Pending Updates` to follow Stage 4.5, so pending updates are extracted from a real completed turn record instead of another disconnected fixture-only seam.
+
+### Validation
+
+- Documentation-only change; no tests were run.
+
+### Scope notes
+
+- Did not implement Stage 4.5 runtime orchestration.
+- Did not implement real model calls, runtime write APIs, pending updates, state extraction, relationship derivation, or outline regeneration.
+- No `git commit` or `git push` was performed.
+
+## 2026-06-06 - Final schema overlay contract
+
+### Stage
+
+Final architecture schema contract: base pages plus runtime overlays.
+
+### Changed files
+
+- `src/lib/project-mode.ts`
+- `src-tauri/src/commands/project.rs`
+- `src/lib/rpg-categories.ts`
+- `src/lib/rpg-wiki-schema.ts`
+- `src/lib/project-mode.test.ts`
+- `src/lib/rpg-wiki-schema.test.ts`
+- `src/lib/wiki-page-types.test.ts`
+- `docs/CURRENT_STATE.md`
+- `docs/IMPLEMENTATION_LOG.md`
+
+### Summary
+
+- Added `wiki/characters/runtime`, `wiki/locations/runtime`, `wiki/factions/runtime`, and `wiki/items/runtime` to llmWikiRPG bootstrap directory creation.
+- Rewrote the bootstrap schema contract around `llmwikirpg` only, rejected legacy llm_wiki directories, runtime wiki directory write policies, overlay resolution, dynamic update rules, and frontmatter examples.
+- Updated `characters`, `locations`, `factions`, and `items` category/schema wording so static ingest writes stable source-supported base pages while runtime/current campaign changes belong in matching `runtime/` overlays.
+- Kept the 11 core RPG extraction categories unchanged; overlay directories are not new extraction category ids.
+- Added focused tests for overlay bootstrap directories, schema text boundaries, stable category runtime-overlay wording, unchanged schema/category counts, and runtime subdirectory path inference.
+
+### Validation
+
+- `npx.cmd vitest run src/lib/project-mode.test.ts src/lib/rpg-wiki-schema.test.ts src/lib/wiki-page-types.test.ts src/lib/rpg-runtime.test.ts` passed.
+  - 4 test files passed.
+  - 25 tests passed.
+- `npm.cmd run typecheck` passed.
+
+### Scope notes
+
+- Did not implement runtime write APIs, pending updates, relationship derivation, state extraction, or outline regeneration.
+- Did not change the FILE block protocol.
+- Did not delete legacy directories or user files.
+- No `git commit` or `git push` was performed.
+
+## 2026-06-05 - Stage 4 RPG Play Panel v0
+
+### Stage
+
+Stage 4: RPG Play Panel v0.
+
+### Changed files
+
+- `src/components/rpg/rpg-play-panel.tsx`
+- `src/components/rpg/current-scene-panel.tsx`
+- `src/components/rpg/action-options-panel.tsx`
+- `src/components/rpg/turn-narrative-panel.tsx`
+- `src/components/rpg/index.ts`
+- `src/components/rpg/rpg-play-panel.test.tsx`
+- `src/lib/rpg-runtime/play-panel-state.ts`
+- `src/lib/rpg-runtime/index.ts`
+- `src/lib/rpg-play-panel-state.test.ts`
+- `docs/CURRENT_STATE.md`
+- `docs/IMPLEMENTATION_LOG.md`
+
+### Summary
+
+- Added independent RPG play UI components under `src/components/rpg/`, separate from normal wiki QA chat.
+- Added `RpgPlayPanel` to show the current scene, last narrative, future candidate action options, freeform action input, selected option state, and the most recently submitted action.
+- Added `CurrentScenePanel`, `TurnNarrativePanel`, and `ActionOptionsPanel` as focused display components.
+- Added `src/components/rpg/index.ts` so Stage 4 components can be imported from `src/components/rpg`.
+- Added pure play-panel state helpers in `src/lib/rpg-runtime/play-panel-state.ts`, exported from `src/lib/rpg-runtime`.
+- Selecting a candidate option constructs `SubmittedAction` with `id`, `text` from `option.playerFacingText`, `source: "selected_option"`, and `selectedOptionId`.
+- Submitting freeform input constructs `SubmittedAction` with `id`, trimmed `text`, `source: "freeform"`, and no `selectedOptionId`.
+- `nextActionOptions` are displayed and modeled as future candidate actions only. The Stage 4 semantic helper keeps them out of completed narrative, submitted-action records for unselected options, pending wiki updates, and any wiki writeback concept.
+
+### Validation
+
+- `npx.cmd vitest run src/lib/rpg-play-panel-state.test.ts src/components/rpg/rpg-play-panel.test.tsx` passed.
+  - 2 test files passed.
+  - 10 tests passed.
+- `npx.cmd vitest run src/lib/rpg-narration-prompts.test.ts` passed.
+  - 1 test file passed.
+  - 7 tests passed.
+- `npx.cmd vitest run src/lib/rpg-turn-model.test.ts` passed.
+  - 1 test file passed.
+  - 4 tests passed.
+- `npx.cmd vitest run src/lib/rpg-runtime.test.ts` passed.
+  - 1 test file passed.
+  - 5 tests passed.
+- `npm.cmd run typecheck` passed.
+
+### Scope notes
+
+- Stage 4 remains fully read-only: no real LLM calls, no automatic wiki updates, no state extraction, no pending updates, and no wiki writeback.
+- Stage 4 does not overwrite `current-scene`, append `events`, update `relationships`, or modify any wiki files.
+- Stage 4 does not delete or alter legacy `entities`, `concepts`, or `sources` behavior.
+- The UI does not reuse the normal wiki QA chat panel as the RPG runtime main interface.
+- No `git commit` or `git push` was performed.
+
+## 2026-06-05 - Stage 3 Narration Prompt Builder
+
+### Stage
+
+Stage 3: Narration Prompt Builder.
+
+### Changed files
+
+- `src/lib/rpg-runtime/narration-prompts.ts`
+- `src/lib/rpg-runtime/index.ts`
+- `src/lib/rpg-narration-prompts.test.ts`
+- `docs/CURRENT_STATE.md`
+- `docs/IMPLEMENTATION_LOG.md`
+
+### Summary
+
+- Added independent RPG narration prompt types under the dedicated runtime module: `BuildRpgNarrationPromptInput` and `RpgNarrationPrompt`.
+- Added pure `buildRpgNarrationPrompt()`, which accepts a `CompactStoryBrief` and returns `{ systemPrompt, userPrompt }` for a future narration LLM call.
+- The prompt uses `brief.submittedAction` as the only submitted action for the turn and includes the compact brief fields: current scene, player state, hard facts, active constraints, present characters, relationship tensions, plot pressure, relevant locations/factions/items, style/rules/memory notes, forbidden contradictions, and references.
+- The prompt requests strict `RpgTurnResult`-compatible JSON with `narrative`, `nextActionOptions`, and `references`.
+- The prompt requires 3 to 5 `nextActionOptions`, lists the required `RpgActionOption` fields, and enumerates allowed `intent` and `riskLevel` values.
+- The prompt explicitly states that unchosen `nextActionOptions` are candidate future actions, not completed facts; they must not be written into `narrative` as happened outcomes, and later state extraction must not extract facts from them.
+- Exported the Stage 3 types and helper from `src/lib/rpg-runtime`.
+
+### Validation
+
+- `npx.cmd vitest run src/lib/rpg-narration-prompts.test.ts` passed.
+  - 1 test file passed.
+  - 7 tests passed.
+- `npx.cmd vitest run src/lib/rpg-turn-model.test.ts` passed.
+  - 1 test file passed.
+  - 4 tests passed.
+- `npx.cmd vitest run src/lib/rpg-runtime.test.ts` passed.
+  - 1 test file passed.
+  - 5 tests passed.
+- `npm.cmd run typecheck` passed.
+
+### Scope notes
+
+- Stage 3 remains fully read-only: no LLM calls, no real narration generation, no state extraction, no wiki writeback, and no UI changes.
+- The prompt builder does not reuse normal wiki QA chat prompts.
+- No wiki files were created or changed by the helper; read-only behavior is covered by the new prompt test.
+- No legacy `entities`, `concepts`, or `sources` behavior was removed.
+- No `git commit` or `git push` was performed.
+
+## 2026-06-05 - Stage 2 RPG Turn Model
+
+### Stage
+
+Stage 2: RPG Turn Model.
+
+### Changed files
+
+- `src/lib/rpg-runtime/turn-model.ts`
+- `src/lib/rpg-runtime/index.ts`
+- `src/lib/rpg-turn-model.test.ts`
+- `docs/CURRENT_STATE.md`
+- `docs/IMPLEMENTATION_LOG.md`
+
+### Summary
+
+- Added independent RPG turn model types under the dedicated runtime module: `RpgActionIntent`, `RpgRiskLevel`, `RpgActionOption`, `RpgTurnResult`, `RpgTurnRecord`, and `CreateRpgTurnRecordInput`.
+- Added pure `createRpgTurnRecord()`, which builds a completed record only from `SubmittedAction`, `turnResult.narrative`, and cleaned references.
+- Deliberately excludes `turnResult.nextActionOptions` from `RpgTurnRecord`, so unchosen options and their `playerFacingText` cannot be serialized as completed facts.
+- Cleans references by trimming empty strings, normalizing backslashes to `/`, collapsing duplicate slashes, removing duplicate paths, stable sorting, keeping only allowed RPG wiki reference directories, and filtering legacy directories.
+- Exported the Stage 2 types and helper from `src/lib/rpg-runtime`.
+
+### Validation
+
+- `npx.cmd vitest run src/lib/rpg-turn-model.test.ts` passed.
+  - 1 test file passed.
+  - 4 tests passed.
+- `npx.cmd vitest run src/lib/rpg-runtime.test.ts` passed.
+  - 1 test file passed.
+  - 5 tests passed.
+- `npm.cmd run typecheck` passed.
+
+### Scope notes
+
+- Stage 2 remains fully read-only: no LLM calls, no narration generation, no state extraction, no wiki writeback, and no UI changes.
+- No normal chat message type was reused as an RPG turn record.
+- No legacy `entities`, `concepts`, or `sources` behavior was removed.
+- No `git commit` or `git push` was performed.
+
+## 2026-06-05 - Stage 1 RPG Runtime Agent v0
+
+### Stage
+
+Stage 1: RPG Runtime Agent v0 (read-only).
+
+### Changed files
+
+- `src/lib/rpg-runtime/types.ts`
+- `src/lib/rpg-runtime/context-compiler.ts`
+- `src/lib/rpg-runtime/runtime-agent.ts`
+- `src/lib/rpg-runtime/index.ts`
+- `src/lib/rpg-runtime.test.ts`
+- `docs/CURRENT_STATE.md`
+- `docs/IMPLEMENTATION_LOG.md`
+
+### Summary
+
+- Added an independent RPG runtime module separate from normal wiki QA chat.
+- Added `SubmittedAction`, `CompileRpgContextInput`, `RunRpgRuntimePreviewInput`, `CompactStoryBrief`, and `RpgRuntimePreviewResult`.
+- Added `runRpgRuntimePreview()`, which validates `wikiMode === "llmwikirpg"`, calls the internal context compiler, and returns `{ submittedAction, brief, warnings }`.
+- Added read-only Context Compiler v0 that compiles deterministic brief context from RPG runtime allowed directories only.
+- Fixed `current-scene` reads to `wiki/current-scene/scene_state.md` and emits a warning when it is missing.
+- Reads `player/`, high-priority `style/`, `rules/`, and `memory`, plus relevant `events`, `plot-arcs`, `relationships`, and action-matched `characters`, `locations`, `factions`, and `items`.
+- Keeps `wiki/sources/` as reference paths only, not hard facts.
+- Ignores legacy directories: `entities`, `concepts`, `queries`, `comparisons`, `synthesis`, `methodology`, `findings`, and `thesis`.
+- Strips unchosen next-action option sections before wiki content enters the brief.
+- Supports base page plus runtime overlay reads, such as `wiki/characters/rin.md` with `wiki/characters/runtime/rin.md`, using deterministic append.
+- Uses stable sorting, relevance scoring, and truncation without LLM compression.
+
+### Validation
+
+- `npx.cmd vitest run src/lib/rpg-runtime.test.ts` passed.
+  - 1 test file passed.
+  - 5 tests passed.
+- `npm.cmd run typecheck` passed.
+- A parallel validation attempt that included `npx.cmd vitest run src/lib/rpg-runtime.test.ts` failed before running tests because Vitest resolved the suite from the sandbox wrapper cwd (`C:/Users/CodexSandboxOffline/.codex/.sandbox/...`). The same Vitest command was rerun by itself from the project workdir and passed as recorded above.
+
+### Scope notes
+
+- Stage 1 remains fully read-only: no narration generation, no action option generation, no state extraction, and no wiki writeback.
+- No legacy directory behavior was removed.
+- No `git commit` or `git push` was performed.
+
+## 2026-06-05 - Revise next architecture target to Runtime Agent v0
+
+### Stage
+
+Architecture planning documentation only; not a new implementation stage.
+
+### Changed files
+
+- `docs/LLMWIKIRPG_NEXT_ARCHITECTURE_STEPS.md`
+- `docs/CURRENT_STATE.md`
+- `docs/IMPLEMENTATION_LOG.md`
+
+### Summary
+
+- Re-read the final runtime architecture around the `PlayTurn` flow and revised the next-step roadmap so the first implementation target is read-only RPG Runtime Agent v0.
+- Repositioned Context Compiler v0 as the first internal capability of the Runtime Agent rather than an isolated module.
+- Added the recommended stage-1 boundary: accept `SubmittedAction`, compile `CompactStoryBrief`, ignore legacy directories and unchosen options, and perform no narration, state extraction, or wiki writeback.
+- Updated the recommended execution order and acceptance criteria to start from a dedicated runtime entry separated from normal wiki QA chat.
+
+### Validation
+
+- Documentation-only change; no tests were run.
+
+### Scope notes
+
+- No production code was modified.
+- No `git commit` or `git push` was performed.
+
+## 2026-06-05 - Rust warning cleanup
+
+### Stage
+
+Backend maintenance / warning cleanup.
+
+### Changed files
+
+- `src-tauri/src/commands/codex_cli.rs`
+- `src-tauri/src/clip_server.rs`
+- `src-tauri/src/commands/fs.rs`
+- `docs/CURRENT_STATE.md`
+- `docs/IMPLEMENTATION_LOG.md`
+
+### Summary
+
+- Removed the unused Windows `CommandExt` import from Codex CLI console suppression.
+- Stopped resetting `restart_count` immediately after a successful clip-server bind, so the existing max-restart guard can actually count server-loop exits.
+- Replaced irrefutable DOCX table `if let` patterns with direct `let` destructuring.
+- Removed unused DOCX fallback XML parser variables and assignments.
+
+### Validation
+
+- `rustfmt --edition 2021 --check src\commands\codex_cli.rs src\clip_server.rs src\commands\fs.rs` passes.
+- `cargo check --no-default-features --color never` was attempted from `src-tauri/`, but dependency build stopped because `protoc` is not installed for `lance-encoding`; no project Rust source error was reached.
+
+## 2026-06-05 - RPG-only hard cutover
+
+### Stage
+
+Mode removal / product hard cutover.
+
+### Changed files
+
+- `src/lib/project-mode.ts`
+- `src/lib/wiki-mode.ts`
+- `src/commands/fs.ts`
+- `src-tauri/src/commands/project.rs`
+- `src/lib/ingest.ts`
+- `src/lib/prompts/rpg-ingest.ts`
+- `src/lib/prompts/shared-ingest.ts`
+- `src/lib/wiki-page-types.ts`
+- `src/lib/wiki-type-style.ts`
+- `src/components/project/create-project-dialog.tsx`
+- `src/components/chat/chat-message.tsx`
+- `src/components/review/review-view.tsx`
+- `src/components/layout/knowledge-tree.tsx`
+- `src/components/layout/activity-panel.tsx`
+- `src/components/graph/graph-view.tsx`
+- `src/components/settings/sections/maintenance-section.tsx`
+- `src/lib/deep-research.ts`
+- `src/lib/graph-relevance.ts`
+- `src/lib/wiki-graph.ts`
+- `src/lib/rpg-extraction-validation.ts`
+- `src/test-helpers/scenarios/ingest-scenarios.ts`
+- targeted mode/prompt/RPG tests
+- `package.json`
+- `package-lock.json`
+- `src-tauri/tauri.conf.json`
+- `src-tauri/Cargo.toml`
+- `src-tauri/Cargo.lock`
+- `README.md`
+- `README_CN.md`
+- `README_JA.md`
+- `docs/CURRENT_STATE.md`
+- `docs/IMPLEMENTATION_LOG.md`
+
+### Summary
+
+- Collapsed project/wiki mode handling to `llmwikirpg` only and made `default` / legacy llm_wiki metadata reject opening instead of falling back or migrating.
+- Changed project creation so frontend and Rust backend create RPG projects directly, with RPG directories and RPG metadata/schema markers.
+- Removed default prompt/template branches and made analysis/generation prompt builders call the RPG prompt builders directly.
+- Added write-boundary rejection for legacy FILE blocks under `entities`, `concepts`, `queries`, `comparisons`, `synthesis`, `methodology`, `findings`, and `thesis`; rejected legacy writes also create review items explaining the failure.
+- Converted user saved chat/review/research output away from `wiki/queries/` and into `wiki/memory/`, without follow-up legacy query auto-ingest.
+- Hid legacy directories from visible wiki UI grouping and removed the exposed duplicate entity/concept maintenance tool from settings.
+- Updated visible branding and README docs to llmWikiRPG while keeping `.llm-wiki/` as the internal metadata directory.
+
+### Validation
+
+- `npm.cmd run typecheck` passes.
+- Targeted Vitest bundle passes: `ingest.prompt.test.ts`, `ingest.scenarios.test.ts`, `rpg-smoke.test.ts`, `rpg-wiki-schema.test.ts`, `rpg-dynamic-update.test.ts`, `rpg-extraction-validation.test.ts`, `project-mode.test.ts`, `wiki-mode.test.ts`, `wiki-page-types.test.ts`, and `wiki-type-style.test.ts` pass with 10 files / 96 tests.
+- `cargo check` was attempted from `src-tauri/`, but dependency build stopped because `protoc` is not installed for `lance-encoding`; no project Rust source error was reached.
+
+### Notes
+
+- Existing user files in legacy directories are not deleted automatically.
+- Some old helper modules and tests still contain legacy fixtures but are no longer product paths for new/opened RPG projects.
+
+## 2026-06-05 - Update RPG-only architecture docs
+
+### Stage
+
+Documentation alignment after mode removal.
+
+### Changed files
+
+- `docs/LLMWIKIRPG_FINAL_ARCHITECTURE.md`
+- `docs/LLMWIKIRPG_NEXT_ARCHITECTURE_STEPS.md`
+- `docs/CURRENT_STATE.md`
+- `docs/IMPLEMENTATION_LOG.md`
+
+### Summary
+
+- Rewrote the final architecture document around the RPG-only product boundary: only `llmwikirpg` projects are valid, legacy/default projects are rejected, legacy llm_wiki directories are not product capabilities, and `wiki/sources/` is retained as the RPG evidence layer.
+- Updated the final architecture sections for project validation, runtime wiki directories, ingest behavior, relationship/tension derivation, runtime write policy, module boundaries, acceptance criteria, and non-goals.
+- Rewrote the next architecture steps document so follow-up implementation starts from the post-cutover state and targets RPG Runtime Context Compiler v0, not mode migration or compatibility cleanup.
+- Added explicit next-step safeguards that runtime context compilation and runtime writeback must ignore/reject legacy directories even if old files exist on disk.
+
+### Validation
+
+- Searched both architecture docs for stale compatibility claims such as retaining legacy default mode or treating `entities`/`concepts`/`queries` as live product paths; remaining references describe removed/rejected legacy behavior only.
+
 ## 2026-06-05 - v0.2 push-preparation validation
 
 ### Stage

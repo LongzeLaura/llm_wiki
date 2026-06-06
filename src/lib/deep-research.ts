@@ -1,7 +1,6 @@
 import { anyTxtSearchSmart, hasConfiguredAnyTxt } from "./anytxt-search"
 import { hasConfiguredSearchProvider, resolveSearchConfig, webSearch } from "./web-search"
 import { streamChat } from "./llm-client"
-import { autoIngest } from "./ingest"
 import { writeFile, readFile, listDirectory } from "@/commands/fs"
 import { useWikiStore, type LlmConfig, type SearchApiConfig } from "@/stores/wiki-store"
 import { useResearchStore } from "@/stores/research-store"
@@ -194,8 +193,8 @@ async function executeResearch(
       "",
       "## Cross-referencing (IMPORTANT)",
       "- The wiki already has existing pages listed in the Wiki Index below.",
-      "- When your synthesis mentions an entity or concept that exists in the wiki, ALWAYS use [[wikilink]] syntax to link to it.",
-      "- For example, if the wiki has an entity 'anthropic', write [[anthropic]] when mentioning it.",
+      "- When your synthesis mentions an existing RPG wiki page, use [[wikilink]] syntax to link to it.",
+      "- Link to characters, locations, factions, items, events, plot arcs, relationships, world facts, and sources when relevant.",
       "- This is critical for connecting new research to existing knowledge in the graph.",
       "",
       "## Writing Rules",
@@ -203,7 +202,7 @@ async function executeResearch(
       "- Cite sources using [N] notation",
       "- Note contradictions or gaps",
       "- Suggest additional sources worth finding",
-      "- Neutral, encyclopedic tone",
+      "- Neutral, source-grounded tone",
       "",
       wikiIndex ? `## Existing Wiki Index (link to these pages with [[wikilink]])\n${wikiIndex}` : "",
     ].filter(Boolean).join("\n")
@@ -242,9 +241,9 @@ async function executeResearch(
     store.updateTask(taskId, { status: "saving", synthesis: accumulated })
 
     const date = new Date().toISOString().slice(0, 10)
-    const slug = topic.toLowerCase().replace(/[^a-z0-9\s-]/g, "").trim().replace(/\s+/g, "-").slice(0, 50)
+    const slug = topic.toLowerCase().replace(/[^a-z0-9\s-]/g, "").trim().replace(/\s+/g, "-").slice(0, 50) || "research"
     const fileName = `research-${slug}-${date}.md`
-    const filePath = `${pp}/wiki/queries/${fileName}`
+    const filePath = `${pp}/wiki/memory/${fileName}`
 
     const references = webResults
       .map((r, i) => `${i + 1}. [${r.title}](${r.url}) — ${r.source}`)
@@ -258,7 +257,7 @@ async function executeResearch(
 
     const pageContent = [
       "---",
-      `type: query`,
+      `type: memory`,
       `title: "Research: ${topic.replace(/"/g, '\\"')}"`,
       `created: ${date}`,
       `origin: deep-research`,
@@ -276,7 +275,7 @@ async function executeResearch(
     ].join("\n")
 
     await writeFile(filePath, pageContent)
-    const savedPath = `wiki/queries/${fileName}`
+    const savedPath = `wiki/memory/${fileName}`
 
     useResearchStore.getState().updateTask(taskId, {
       status: "done",
@@ -292,10 +291,6 @@ async function executeResearch(
       // ignore
     }
 
-    // Auto-ingest the research result to generate entities, concepts, cross-references
-    autoIngest(pp, `${pp}/${savedPath}`, llmConfig).catch((err) => {
-      console.error("Failed to auto-ingest research result:", err)
-    })
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err)
     useResearchStore.getState().updateTask(taskId, {

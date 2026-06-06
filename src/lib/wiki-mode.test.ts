@@ -5,19 +5,25 @@ describe("wiki-mode", () => {
   it("honors an explicit wikiMode override", () => {
     expect(detectExplicitWikiMode("wikiMode: rpg")).toBe("llmwikirpg")
     expect(detectExplicitWikiMode("wikiMode: llmwikirpg")).toBe("llmwikirpg")
-    expect(detectWikiMode({ schema: 'wikiMode = "default"', index: "wiki/current-scene/" })).toBe("default")
+    expect(() => detectExplicitWikiMode("wikiMode: default")).toThrow(/Legacy default/)
   })
 
   it("exposes a named RPG-mode predicate for branch convergence", () => {
     expect(isRpgWikiMode("llmwikirpg")).toBe(true)
-    expect(isRpgWikiMode("default")).toBe(false)
   })
 
-  it("honors project metadata before heuristics", () => {
+  it("honors RPG project metadata before heuristics", () => {
     expect(detectWikiMode({
       projectMeta: '{ "mode": "llmwikirpg" }',
       schema: "| entity | wiki/entities/ | Named things |",
     })).toBe("llmwikirpg")
+  })
+
+  it("rejects legacy default project metadata", () => {
+    expect(() => detectWikiMode({
+      projectMeta: '{ "mode": "default" }',
+      paths: ["/project/wiki/current-scene"],
+    })).toThrow(/Legacy default/)
   })
 
   it("detects RPG mode from distinctive schema directories", () => {
@@ -39,18 +45,18 @@ describe("wiki-mode", () => {
     })).toBe("llmwikirpg")
   })
 
-  it("stays in default mode for legacy or non-RPG custom directories", () => {
-    expect(detectWikiMode({
+  it("rejects legacy or non-RPG custom directories", () => {
+    expect(() => detectWikiMode({
       schema: "| entity | wiki/entities/ | Named things |",
       index: "## Entities\n- [[openai]]",
-    })).toBe("default")
+    })).toThrow(/not an llmWikiRPG/)
 
-    expect(detectWikiMode({
+    expect(() => detectWikiMode({
       schema: [
         "| character | wiki/characters/ | Book character |",
         "| source | wiki/sources/ | Reading notes |",
       ].join("\n"),
       paths: ["/project/wiki/characters", "/project/wiki/sources"],
-    })).toBe("default")
+    })).toThrow(/not an llmWikiRPG/)
   })
 })

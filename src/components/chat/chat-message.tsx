@@ -6,7 +6,7 @@ import rehypeKatex from "rehype-katex"
 import "katex/dist/katex.min.css"
 import {
   Bot, User, FileText, BookmarkPlus, ChevronDown, ChevronRight, RefreshCw, Copy, Check,
-  Users, Lightbulb, BookOpen, HelpCircle, GitMerge, BarChart3, Layout, Globe,
+  Users, BookOpen, GitMerge, Layout, Globe,
   TrendingUp, Target, Image as ImageIcon, FileSearch,
 } from "lucide-react"
 import { openUrl } from "@tauri-apps/plugin-opener"
@@ -19,7 +19,6 @@ import type { FileNode } from "@/types/wiki"
 import { convertLatexToUnicode } from "@/lib/latex-to-unicode"
 import { normalizePath, getFileName } from "@/lib/path-utils"
 import { makeQueryFileName } from "@/lib/wiki-filename"
-import { hasUsableLlm } from "@/lib/has-usable-llm"
 import { resolveMarkdownImageSrc } from "@/lib/markdown-image-resolver"
 import { findRawSourceForImage, imageUrlToAbsolute } from "@/lib/raw-source-resolver"
 import { detectLanguage } from "@/lib/detect-language"
@@ -38,12 +37,11 @@ const KNOWN_WIKI_DIRS = [
   "locations",
   "factions",
   "items",
-  "entities",
-  "concepts",
   "sources",
-  "queries",
-  "synthesis",
-  "comparisons",
+  "style",
+  "rules",
+  "quests",
+  "memory",
 ] as const
 
 function buildWikiPathCandidates(projectPath: string, pageNameOrPath: string): string[] {
@@ -211,9 +209,9 @@ function SaveToWikiButton({ content, visible }: { content: string; visible: bool
       // (so CJK titles don't collapse to empty) and the HHMMSS
       // timestamp suffix guarantees same-day saves stay distinct.
       const firstLine = content.split("\n")[0].replace(/^#+\s*/, "").trim()
-      const title = firstLine.slice(0, 60) || "Saved Query"
+      const title = firstLine.slice(0, 60) || "Saved Memory"
       const { date, fileName } = makeQueryFileName(title)
-      const filePath = `${pp}/wiki/queries/${fileName}`
+      const filePath = `${pp}/wiki/memory/${fileName}`
 
       // Strip hidden sources comment and thinking blocks from content
       const cleanContent = content
@@ -224,7 +222,7 @@ function SaveToWikiButton({ content, visible }: { content: string; visible: bool
 
       const frontmatter = [
         "---",
-        `type: query`,
+        `type: memory`,
         `title: "${title.replace(/"/g, '\\"')}"`,
         `created: ${date}`,
         `tags: []`,
@@ -240,20 +238,20 @@ function SaveToWikiButton({ content, visible }: { content: string; visible: bool
       try {
         indexContent = await readFile(indexPath)
       } catch {
-        indexContent = "# Wiki Index\n\n## Queries\n"
+        indexContent = "# Wiki Index\n\n## Memory\n"
       }
       // The wikilink target is the filename WITHOUT the `.md`
       // extension — must match `fileName` exactly (including the
       // time suffix) or the link lands on a 404.
       const linkTarget = fileName.replace(/\.md$/, "")
-      const entry = `- [[queries/${linkTarget}|${title}]]`
-      if (indexContent.includes("## Queries")) {
+      const entry = `- [[memory/${linkTarget}|${title}]]`
+      if (indexContent.includes("## Memory")) {
         indexContent = indexContent.replace(
-          /(## Queries\n)/,
+          /(## Memory\n)/,
           `$1${entry}\n`
         )
       } else {
-        indexContent = indexContent.trimEnd() + "\n\n## Queries\n" + entry + "\n"
+        indexContent = indexContent.trimEnd() + "\n\n## Memory\n" + entry + "\n"
       }
       await writeFile(indexPath, indexContent)
 
@@ -265,7 +263,7 @@ function SaveToWikiButton({ content, visible }: { content: string; visible: bool
       } catch {
         logContent = "# Wiki Log\n\n"
       }
-      const logEntry = `- ${date}: Saved query page \`${fileName}\`\n`
+      const logEntry = `- ${date}: Saved memory note \`${fileName}\`\n`
       await writeFile(logPath, logContent.trimEnd() + "\n" + logEntry)
 
       // Refresh file tree and update graph
@@ -276,14 +274,6 @@ function SaveToWikiButton({ content, visible }: { content: string; visible: bool
       setSaved(true)
       setTimeout(() => setSaved(false), 2000)
 
-      // Full auto-ingest: extract entities, concepts, cross-references from saved content
-      const llmConfig = useWikiStore.getState().llmConfig
-      if (hasUsableLlm(llmConfig)) {
-        const { autoIngest } = await import("@/lib/ingest")
-        autoIngest(pp, filePath, llmConfig).catch((err) =>
-          console.error("Failed to auto-ingest saved query:", err)
-        )
-      }
     } catch (err) {
       console.error("Failed to save to wiki:", err)
     } finally {
@@ -302,7 +292,7 @@ function SaveToWikiButton({ content, visible }: { content: string; visible: bool
       title="Save to wiki"
     >
       <BookmarkPlus className="h-3 w-3" />
-      {saved ? "Saved!" : saving ? "Saving..." : "Save to Wiki"}
+      {saved ? "Saved!" : saving ? "Saving..." : "Save to Memory"}
     </button>
   )
 }
@@ -320,15 +310,11 @@ const REF_TYPE_CONFIG: Record<string, { icon: typeof FileText; color: string }> 
   events: { icon: TrendingUp, color: "text-amber-500" },
   "current-scene": { icon: Globe, color: "text-rose-500" },
   relationships: { icon: Users, color: "text-pink-500" },
-  entity: { icon: Users, color: "text-blue-500" },
-  concept: { icon: Lightbulb, color: "text-purple-500" },
   source: { icon: BookOpen, color: "text-orange-500" },
-  query: { icon: HelpCircle, color: "text-green-500" },
-  synthesis: { icon: GitMerge, color: "text-red-500" },
-  comparison: { icon: BarChart3, color: "text-teal-500" },
-  finding: { icon: TrendingUp, color: "text-purple-500" },
-  thesis: { icon: Target, color: "text-rose-500" },
-  methodology: { icon: BookOpen, color: "text-teal-500" },
+  style: { icon: FileText, color: "text-purple-500" },
+  rules: { icon: BookOpen, color: "text-teal-500" },
+  quests: { icon: Target, color: "text-yellow-500" },
+  memory: { icon: FileText, color: "text-stone-500" },
   overview: { icon: Layout, color: "text-yellow-500" },
   clip: { icon: Globe, color: "text-blue-400" },
   external: { icon: Globe, color: "text-sky-500" },
@@ -682,7 +668,7 @@ function extractCitedPages(text: string): CitedPage[] {
         const id = nameMatch[1].trim()
         const display = nameMatch[2]?.trim() || id
 
-        // Skip if id contains path separators (already a path like queries/xxx)
+        // Skip if id contains path separators (already a path like memory/xxx)
         if (seen.has(id)) continue
         seen.add(id)
 

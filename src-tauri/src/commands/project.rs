@@ -20,16 +20,28 @@ fn create_project_impl(name: String, path: String) -> Result<WikiProject, String
         return Err(format!("Directory already exists: '{}'", root.display()));
     }
 
-    // Create all required subdirectories
     let dirs = [
         "raw/sources",
         "raw/assets",
-        "wiki/entities",
-        "wiki/concepts",
         "wiki/sources",
-        "wiki/queries",
-        "wiki/comparisons",
-        "wiki/synthesis",
+        "wiki/world",
+        "wiki/characters",
+        "wiki/characters/runtime",
+        "wiki/player",
+        "wiki/locations",
+        "wiki/locations/runtime",
+        "wiki/factions",
+        "wiki/factions/runtime",
+        "wiki/items",
+        "wiki/items/runtime",
+        "wiki/plot-arcs",
+        "wiki/events",
+        "wiki/current-scene",
+        "wiki/relationships",
+        "wiki/style",
+        "wiki/rules",
+        "wiki/quests",
+        "wiki/memory",
     ];
     for dir in &dirs {
         fs::create_dir_all(root.join(dir))
@@ -38,167 +50,21 @@ fn create_project_impl(name: String, path: String) -> Result<WikiProject, String
 
     let today = Local::now().format("%Y-%m-%d").to_string();
 
-    // schema.md
-    let schema_content = format!(
-        r#"# Wiki Schema
+    write_file_inner(root.join("schema.md"), RPG_SCHEMA)?;
+    write_file_inner(root.join("purpose.md"), RPG_PURPOSE)?;
+    write_file_inner(root.join("wiki/index.md"), RPG_INDEX)?;
+    write_file_inner(
+        root.join("wiki/log.md"),
+        &format!("# Campaign Log\n\n## {today}\n\n- Project created in llmWikiRPG mode\n"),
+    )?;
+    write_file_inner(root.join("wiki/overview.md"), RPG_OVERVIEW)?;
 
-## Page Types
-
-| Type | Directory | Purpose |
-|------|-----------|---------|
-| entity | wiki/entities/ | Named things (models, companies, people, datasets) |
-| concept | wiki/concepts/ | Ideas, techniques, phenomena |
-| source | wiki/sources/ | Papers, articles, talks, blog posts |
-| query | wiki/queries/ | Open questions under investigation |
-| comparison | wiki/comparisons/ | Side-by-side analysis of related entities |
-| synthesis | wiki/synthesis/ | Cross-cutting summaries and conclusions |
-
-## Naming Conventions
-
-- Files: `kebab-case.md`
-- Entities: match official name where possible (e.g., `gpt-4.md`, `openai.md`)
-- Concepts: descriptive noun phrases (e.g., `chain-of-thought.md`)
-- Sources: `author-year-slug.md` (e.g., `wei-2022-chain-of-thought.md`)
-- Queries: question as slug (e.g., `does-scale-improve-reasoning.md`)
-
-## Frontmatter
-
-All pages must include YAML frontmatter:
-
-```yaml
----
-type: entity | concept | source | query | comparison | synthesis | overview
-title: Human-readable title
-tags: []
-related: []
-created: YYYY-MM-DD
-updated: YYYY-MM-DD
----
-```
-
-Source pages also include:
-```yaml
-authors: []
-year: YYYY
-url: ""
-venue: ""
-```
-
-## Index Format
-
-`wiki/index.md` lists all pages grouped by type. Each entry:
-```
-- [[page-slug]] — one-line description
-```
-
-## Log Format
-
-`wiki/log.md` records research activity in reverse chronological order:
-```
-## YYYY-MM-DD
-
-- Action taken / finding noted
-```
-
-## Cross-referencing Rules
-
-- Use `[[page-slug]]` syntax to link between wiki pages
-- Every entity and concept should appear in `wiki/index.md`
-- Queries link to the sources and concepts they draw on
-- Synthesis pages cite all contributing sources via `related:`
-
-## Contradiction Handling
-
-When sources contradict each other:
-1. Note the contradiction in the relevant concept or entity page
-2. Create or update a query page to track the open question
-3. Link both sources from the query page
-4. Resolve in a synthesis page once sufficient evidence exists
-"#
-    );
-    write_file_inner(root.join("schema.md"), &schema_content)?;
-
-    // purpose.md
-    let purpose_content = r#"# Project Purpose
-
-## Goal
-
-<!-- What are you trying to understand or build? -->
-
-## Key Questions
-
-<!-- List the primary questions driving this research -->
-
-1.
-2.
-3.
-
-## Scope
-
-<!-- What is in scope? What is explicitly out of scope? -->
-
-**In scope:**
--
-
-**Out of scope:**
--
-
-## Thesis
-
-<!-- Your current working hypothesis or conclusion (update as research progresses) -->
-
-> TBD
-"#;
-    write_file_inner(root.join("purpose.md"), purpose_content)?;
-
-    // wiki/index.md
-    let index_content = r#"# Wiki Index
-
-## Entities
-
-## Concepts
-
-## Sources
-
-## Queries
-
-## Comparisons
-
-## Synthesis
-"#;
-    write_file_inner(root.join("wiki/index.md"), index_content)?;
-
-    // wiki/log.md
-    let log_content = format!(
-        r#"# Research Log
-
-## {today}
-
-- Project created
-"#
-    );
-    write_file_inner(root.join("wiki/log.md"), &log_content)?;
-
-    // wiki/overview.md
-    let overview_content = r#"---
-type: overview
-title: Project Overview
-tags: []
-related: []
----
-
-# Overview
-
-<!-- Provide a high-level summary of what this wiki covers and its current state. Update regularly as understanding deepens. -->
-"#;
-    write_file_inner(root.join("wiki/overview.md"), overview_content)?;
-
-    // .obsidian config for Obsidian compatibility
     fs::create_dir_all(root.join(".obsidian"))
         .map_err(|e| format!("Failed to create .obsidian: {}", e))?;
 
-    // Obsidian app config: set attachment folder, exclude hidden dirs
-    let obsidian_app_config = r#"{
+    write_file_inner(
+        root.join(".obsidian/app.json"),
+        r#"{
   "attachmentFolderPath": "raw/assets",
   "userIgnoreFilters": [
     ".cache",
@@ -208,18 +74,18 @@ related: []
   "useMarkdownLinks": false,
   "newLinkFormat": "shortest",
   "showUnsupportedFiles": false
-}"#;
-    write_file_inner(root.join(".obsidian/app.json"), obsidian_app_config)?;
-
-    // Obsidian appearance: dark mode
-    let obsidian_appearance = r#"{
+}"#,
+    )?;
+    write_file_inner(
+        root.join(".obsidian/appearance.json"),
+        r#"{
   "baseFontSize": 16,
   "theme": "obsidian"
-}"#;
-    write_file_inner(root.join(".obsidian/appearance.json"), obsidian_appearance)?;
-
-    // Enable graph view and backlinks core plugins
-    let obsidian_core_plugins = r#"{
+}"#,
+    )?;
+    write_file_inner(
+        root.join(".obsidian/core-plugins.json"),
+        r#"{
   "file-explorer": true,
   "global-search": true,
   "graph": true,
@@ -228,15 +94,11 @@ related: []
   "page-preview": true,
   "outgoing-link": true,
   "starred": true
-}"#;
-    write_file_inner(
-        root.join(".obsidian/core-plugins.json"),
-        obsidian_core_plugins,
+}"#,
     )?;
 
     Ok(WikiProject {
         name,
-        // Forward slashes for cross-platform consistency in the TS layer.
         path: root.to_string_lossy().replace('\\', "/"),
     })
 }
@@ -248,7 +110,6 @@ pub fn open_project(path: String) -> Result<WikiProject, String> {
 
         validate_wiki_project_root(root)?;
 
-        // Derive project name from the directory name
         let name = root
             .file_name()
             .and_then(|n| n.to_str())
@@ -257,7 +118,6 @@ pub fn open_project(path: String) -> Result<WikiProject, String> {
 
         Ok(WikiProject {
             name,
-            // Forward slashes for cross-platform consistency in the TS layer.
             path: path.replace('\\', "/"),
         })
     })
@@ -296,21 +156,72 @@ fn validate_wiki_project_root(root: &Path) -> Result<(), String> {
     if !root.is_dir() {
         return Err(format!("Path is not a directory: '{}'", root.display()));
     }
-
     if !root.join("schema.md").exists() {
         return Err(format!(
-            "Not a valid wiki project (missing schema.md): '{}'",
+            "Not a valid llmWikiRPG project (missing schema.md): '{}'",
             root.display()
         ));
     }
     if !root.join("wiki").is_dir() {
         return Err(format!(
-            "Not a valid wiki project (missing wiki/ directory): '{}'",
+            "Not a valid llmWikiRPG project (missing wiki/ directory): '{}'",
+            root.display()
+        ));
+    }
+    if !is_llmwikirpg_project_root(root)? {
+        return Err(format!(
+            "Legacy llm_wiki projects are no longer supported. Open an llmWikiRPG project instead: '{}'",
             root.display()
         ));
     }
 
     Ok(())
+}
+
+fn is_llmwikirpg_project_root(root: &Path) -> Result<bool, String> {
+    let project_meta = root.join(".llm-wiki/project.json");
+    if project_meta.exists() {
+        let raw = fs::read_to_string(&project_meta).map_err(|e| {
+            format!(
+                "Failed to read project metadata '{}': {}",
+                project_meta.display(),
+                e
+            )
+        })?;
+        let lower = raw.to_lowercase();
+        if lower.contains(r#""mode": "default""#) || lower.contains(r#""mode":"default""#) {
+            return Ok(false);
+        }
+        if lower.contains("llmwikirpg") || lower.contains(r#""mode": "rpg""#) {
+            return Ok(has_core_rpg_dirs(root));
+        }
+    }
+
+    let schema = fs::read_to_string(root.join("schema.md")).unwrap_or_default().to_lowercase();
+    if schema.contains("wikimode: default") || schema.contains("wikimode = \"default\"") {
+        return Ok(false);
+    }
+
+    Ok((schema.contains("wikimode: llmwikirpg") || schema.contains("wikimode: rpg"))
+        && has_core_rpg_dirs(root))
+}
+
+fn has_core_rpg_dirs(root: &Path) -> bool {
+    [
+        "wiki/sources",
+        "wiki/world",
+        "wiki/characters",
+        "wiki/player",
+        "wiki/locations",
+        "wiki/factions",
+        "wiki/items",
+        "wiki/plot-arcs",
+        "wiki/events",
+        "wiki/current-scene",
+        "wiki/relationships",
+    ]
+    .iter()
+    .all(|dir| root.join(dir).is_dir())
 }
 
 fn write_file_inner(path: std::path::PathBuf, contents: &str) -> Result<(), String> {
@@ -326,3 +237,155 @@ fn write_file_inner(path: std::path::PathBuf, contents: &str) -> Result<(), Stri
     fs::write(&path, contents)
         .map_err(|e| format!("Failed to write file '{}': {}", path.display(), e))
 }
+
+const RPG_SCHEMA: &str = r#"wikiMode: llmwikirpg
+
+# Wiki Schema - llmWikiRPG
+
+## Project Boundary
+
+- This project schema supports only `llmwikirpg`.
+- Legacy directories rejected: `wiki/entities/`, `wiki/concepts/`, `wiki/queries/`, `wiki/comparisons/`, `wiki/synthesis/`, `wiki/methodology/`, `wiki/findings/`, `wiki/thesis/`.
+- Existing legacy files may remain on disk, but they are not valid product schema directories or write targets.
+
+## Runtime Wiki Directories
+
+| Path | Layer | Write policy | Contract |
+|------|-------|--------------|----------|
+| `wiki/sources/` | Evidence | ingest merge/append | Source evidence layer, imported material summaries, provenance, and document-level notes. |
+| `wiki/world/` | Stable base | ingest/manual merge; runtime blocked | Stable setting, lore, history, social rules, and world systems. |
+| `wiki/characters/` | Stable base | ingest/manual merge; runtime must not rewrite base pages | Base character models, canon facts, portrayal rules, and source-supported stable traits. |
+| `wiki/characters/runtime/` | Runtime overlay | runtime merge | Current campaign status overlays for characters: condition, intent, temporary resources, and scene-relevant changes. |
+| `wiki/player/` | Runtime/base state | runtime/manual merge | Player character identity, abilities, inventory, goals, knowledge, and accepted state. |
+| `wiki/locations/` | Stable base | ingest/manual merge; runtime must not rewrite base pages | Base location setting, layout, access rules, residents, and stable hooks. |
+| `wiki/locations/runtime/` | Runtime overlay | runtime merge | Current location status overlays: danger, access, occupants, damage, clues, and temporary atmosphere. |
+| `wiki/factions/` | Stable base | ingest/manual merge; runtime must not rewrite base pages | Base faction identity, agenda, members, resources, and durable relationships. |
+| `wiki/factions/runtime/` | Runtime overlay | runtime merge | Current faction stance/resource overlays for campaign-time pressure and temporary moves. |
+| `wiki/items/` | Stable base | ingest/manual merge; runtime must not rewrite base pages | Base item identity, capabilities, history, constraints, and plot function. |
+| `wiki/items/runtime/` | Runtime overlay | runtime merge | Current holder, location, condition, consumption, loss, damage, or other runtime item state. |
+| `wiki/plot-arcs/` | Dynamic derived | derivation/runtime merge | Unresolved conflicts, foreshadowing, possible developments, future pressure, and constraints. |
+| `wiki/events/` | Timeline | append/create only | Confirmed events that already happened; never store hypothetical future outcomes as history. |
+| `wiki/current-scene/scene_state.md` | Snapshot | overwrite | Latest immediate scene snapshot only. |
+| `wiki/relationships/` | Dynamic derived | derivation/runtime merge | Relationship state, trust, tension, dependency, conflict, and relationship-change pressure. |
+| `wiki/style/` | Manual control | manual only | Tone, narration style, voice, variables, and presentation conventions. |
+| `wiki/rules/` | Manual control | manual only | House rules, system rulings, safety boundaries, and runtime constraints. |
+| `wiki/quests/` | Objective tracking | manual/runtime merge | Goals, missions, tasks, blockers, and explicit objective tracking. |
+| `wiki/memory/` | Explicit memory | explicit user action only | User-approved memory and reminders; do not infer or write automatically. |
+| `wiki/overview.md` | Summary | manual/ingest merge | High-level campaign overview. |
+| `wiki/index.md` | Navigation | generated/manual refresh | Navigation index for the RPG wiki. |
+
+## Overlay Resolution
+
+- For `characters`, `locations`, `factions`, and `items`, resolve the base page first, then apply the matching `runtime/` overlay by slug.
+- Example: `wiki/characters/rin.md` supplies the stable model; `wiki/characters/runtime/rin.md` supplies current campaign state.
+- Runtime agents may merge overlay pages, but base pages are runtime blocked and should only receive ingest/manual stable facts.
+- If base and overlay disagree, prefer the overlay for immediate play state and keep the base as the stable/source-supported contract.
+
+## Dynamic Update Rules
+
+- Static ingest output for `characters`, `locations`, `factions`, and `items` writes stable facts to base directories; runtime state writes to the matching `runtime/` overlay.
+- `wiki/current-scene/scene_state.md` is a snapshot and should be overwritten on each accepted scene advance.
+- `wiki/events/` is append/create-only history for confirmed happened events.
+- `wiki/plot-arcs/` may contain foreshadowing, unresolved questions, and future pressure, but must not invent events as already happened.
+- `wiki/player/`, `wiki/relationships/`, `wiki/quests/`, and runtime overlays should merge accepted state without treating unchosen options as facts.
+- Avoid current-state pollution in historical `events`, and avoid writing unresolved future pressure as completed history.
+- Preserve `sources:` frontmatter provenance on every generated page.
+
+## Derived Content Frontmatter
+
+```yaml
+---
+type: relationships
+title: "Rin and Player"
+derived: true
+derivation_source: runtime
+sources: []
+related: []
+---
+```
+
+## Generated Page Frontmatter
+
+```yaml
+---
+type: characters
+title: "Tohsaka Rin"
+sources: []
+related: []
+tags: []
+---
+```
+"#;
+
+const RPG_PURPOSE: &str = r#"# Project Purpose - llmWikiRPG
+
+## Campaign Goal
+
+<!-- What campaign, module, setting, or interactive narrative does this wiki track? -->
+
+## Scope
+
+**In scope:**
+- World facts that matter during play
+- Player and NPC state that has become canon
+- Confirmed events, active scene state, and unresolved arcs
+
+**Out of scope:**
+- Pure speculation with no narrative support
+- Future plans written as if they already happened
+- Duplicate notes better stored in existing RPG directories
+
+## Current Focus
+
+<!-- Current chapter, scene, party objective, or campaign focus -->
+
+## Mode Notes
+
+- This project runs in `llmwikirpg` mode.
+- Legacy llm_wiki `entities`, `concepts`, and `queries` directories are not supported.
+"#;
+
+const RPG_INDEX: &str = r#"# Wiki Index
+
+## Sources
+
+## World
+
+## Characters
+
+## Player
+
+## Locations
+
+## Factions
+
+## Items
+
+## Plot Arcs
+
+## Events
+
+## Current Scene
+
+## Relationships
+
+## Style
+
+## Rules
+
+## Quests
+
+## Memory
+"#;
+
+const RPG_OVERVIEW: &str = r#"---
+type: overview
+title: "Campaign Overview"
+tags: []
+related: []
+---
+
+# Overview
+
+<!-- Summarize the campaign world, active conflicts, party situation, and current trajectory. -->
+"#;

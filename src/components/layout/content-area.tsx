@@ -6,6 +6,7 @@ import { ReviewView } from "@/components/review/review-view"
 import { LintView } from "@/components/lint/lint-view"
 import { SearchView } from "@/components/search/search-view"
 import { GraphView } from "@/components/graph/graph-view"
+import { RpgRuntimePanel } from "@/components/rpg"
 
 export function ContentArea() {
   const activeView = useWikiStore((s) => s.activeView)
@@ -15,6 +16,8 @@ export function ContentArea() {
       return <SettingsView />
     case "sources":
       return <SourcesView />
+    case "play":
+      return <RpgRuntimePanel />
     case "review":
       return <ReviewView />
     case "lint":

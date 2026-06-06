@@ -21,17 +21,23 @@ import { wikiTypeLabel } from "@/lib/wiki-page-types"
 import { useTranslation } from "react-i18next"
 
 const NODE_TYPE_COLORS: Record<string, string> = {
-  entity: "#60a5fa",    // blue-400
-  concept: "#c084fc",   // purple-400
-  source: "#fb923c",    // orange-400
-  query: "#4ade80",     // green-400
-  synthesis: "#f87171", // red-400
-  overview: "#facc15",  // yellow-400
-  comparison: "#2dd4bf", // teal-400
-  finding: "#a855f7",    // purple-500
-  thesis: "#f43f5e",     // rose-500
-  methodology: "#14b8a6", // teal-500
-  other: "#94a3b8",     // slate-400
+  source: "#fb923c",
+  world: "#34d399",
+  characters: "#60a5fa",
+  player: "#22d3ee",
+  locations: "#84cc16",
+  factions: "#38bdf8",
+  items: "#f97316",
+  "plot-arcs": "#a78bfa",
+  events: "#fbbf24",
+  "current-scene": "#fb7185",
+  relationships: "#f472b6",
+  style: "#c084fc",
+  rules: "#14b8a6",
+  quests: "#facc15",
+  memory: "#a8a29e",
+  overview: "#facc15",
+  other: "#94a3b8",
 }
 
 const CUSTOM_NODE_COLORS = [
@@ -565,16 +571,22 @@ export function GraphView() {
   // Initialize node type labels when i18n is ready
   useEffect(() => {
     setNodeTypeLabels({
-      entity: t("graph.nodeTypeLabels.entity"),
-      concept: t("graph.nodeTypeLabels.concept"),
       source: t("graph.nodeTypeLabels.source"),
-      query: t("graph.nodeTypeLabels.query"),
-      synthesis: t("graph.nodeTypeLabels.synthesis"),
+      world: wikiTypeLabel("world"),
+      characters: wikiTypeLabel("characters"),
+      player: wikiTypeLabel("player"),
+      locations: wikiTypeLabel("locations"),
+      factions: wikiTypeLabel("factions"),
+      items: wikiTypeLabel("items"),
+      "plot-arcs": wikiTypeLabel("plot-arcs"),
+      events: wikiTypeLabel("events"),
+      "current-scene": wikiTypeLabel("current-scene"),
+      relationships: wikiTypeLabel("relationships"),
+      style: wikiTypeLabel("style"),
+      rules: wikiTypeLabel("rules"),
+      quests: wikiTypeLabel("quests"),
+      memory: wikiTypeLabel("memory"),
       overview: t("graph.nodeTypeLabels.overview"),
-      comparison: t("graph.nodeTypeLabels.comparison"),
-      finding: t("graph.nodeTypeLabels.finding"),
-      thesis: t("graph.nodeTypeLabels.thesis"),
-      methodology: t("graph.nodeTypeLabels.methodology"),
       other: t("graph.nodeTypeLabels.other"),
     })
   }, [t])

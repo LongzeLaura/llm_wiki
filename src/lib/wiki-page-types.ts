@@ -2,31 +2,19 @@ import { RPG_CATEGORIES, getRpgCategoryById } from "./rpg-categories"
 
 export const GENERATION_WIKI_TYPES = [
   "source",
-  "entity",
-  "concept",
-  "comparison",
-  "query",
-  "synthesis",
-  "thesis",
-  "methodology",
-  "finding",
-  ...RPG_CATEGORIES.map((category) => category.id),
+  ...RPG_CATEGORIES.filter((category) => category.id !== "sources").map((category) => category.id),
 ] as const
 
 const WIKI_TYPE_DIRS: Array<{ dir: string; type: string }> = [
-  { dir: "entities", type: "entity" },
-  { dir: "concepts", type: "concept" },
   { dir: "sources", type: "source" },
-  { dir: "queries", type: "query" },
-  { dir: "comparisons", type: "comparison" },
-  { dir: "synthesis", type: "synthesis" },
-  { dir: "findings", type: "finding" },
-  { dir: "thesis", type: "thesis" },
-  { dir: "methodology", type: "methodology" },
-  ...RPG_CATEGORIES.map((category) => ({
+  ...RPG_CATEGORIES.filter((category) => category.id !== "sources").map((category) => ({
     dir: category.path.replace(/^wiki\//, ""),
     type: category.id,
   })),
+  { dir: "style", type: "style" },
+  { dir: "rules", type: "rules" },
+  { dir: "quests", type: "quests" },
+  { dir: "memory", type: "memory" },
 ]
 
 export function inferWikiTypeFromPath(path: string, fileName?: string): string | null {
@@ -46,9 +34,6 @@ export function inferWikiTypeFromPath(path: string, fileName?: string): string |
 export function wikiTypeLabel(type: string): string {
   const rpgCategory = getRpgCategoryById(type)
   if (rpgCategory) return rpgCategory.label
-  if (type === "thesis") return "Thesis"
-  if (type === "methodology") return "Methodology"
-  if (type === "finding") return "Finding"
   return type
     .split(/[-_\s]+/)
     .filter(Boolean)

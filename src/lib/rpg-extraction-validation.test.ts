@@ -81,7 +81,7 @@ describe("validateRpgExtraction", () => {
     expect(result.reviewItems[0].title).toContain("current-scene")
   })
 
-  it("warns when concepts pages contain trope or community-tag noise", () => {
+  it("warns when legacy llm_wiki directories appear in RPG extraction output", () => {
     const result = validateRpgExtraction([
       makePage(
         "wiki/concepts/poor-moe.md",
@@ -91,8 +91,8 @@ describe("validateRpgExtraction", () => {
       ),
     ])
 
-    expect(result.warnings[0]).toContain("trope/community-tag")
-    expect(result.reviewItems[0].description).toContain("wiki/concepts/")
+    expect(result.warnings[0]).toContain("Legacy llm_wiki path")
+    expect(result.reviewItems[0].title).toContain("legacy path rejected")
   })
 
   it("creates omission reviews when obvious locations or factions are present but their directories stay empty", () => {
@@ -141,7 +141,7 @@ describe("validateRpgExtraction", () => {
 
     expect(result.warnings.some((warning) => warning.includes("wiki/player"))).toBe(true)
     expect(result.warnings.some((warning) => warning.includes("too broad"))).toBe(true)
-    expect(result.warnings.some((warning) => warning.includes("trope/community-tag"))).toBe(true)
+    expect(result.warnings.some((warning) => warning.includes("Legacy llm_wiki path"))).toBe(true)
     expect(result.reviewItems.some((item) => item.title.includes("current-scene"))).toBe(true)
   })
 

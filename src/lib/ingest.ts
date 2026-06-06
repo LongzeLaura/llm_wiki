@@ -29,7 +29,6 @@ import { getRpgWikiSchemaEntry, type RpgWikiUpdateStrategy } from "@/lib/rpg-wik
 import { prepareExistingContentForRpgDynamicMerge, validateRpgDynamicWrite } from "@/lib/rpg-dynamic-update"
 import { validateRpgExtraction, type RpgExtractionValidationBlock } from "@/lib/rpg-extraction-validation"
 import { detectWikiMode, isRpgWikiMode, type WikiMode } from "@/lib/wiki-mode"
-import { buildDefaultAnalysisPrompt, buildDefaultGenerationPrompt } from "@/lib/prompts/default-ingest"
 import { buildRpgAnalysisPrompt, buildRpgGenerationPrompt } from "@/lib/prompts/rpg-ingest"
 
 const LONG_SOURCE_MIN_BUDGET = 8_000
@@ -44,6 +43,16 @@ const INGEST_GENERATION_TOKENS_256K = 24_576
 const INGEST_GENERATION_TOKENS_512K = 32_768
 const REVIEW_STAGE_MIN_SIGNAL_CHARS = 10_000
 const REVIEW_STAGE_MIN_FILE_BLOCKS = 4
+const LEGACY_WIKI_DIRS = new Set([
+  "entities",
+  "concepts",
+  "queries",
+  "comparisons",
+  "synthesis",
+  "methodology",
+  "findings",
+  "thesis",
+])
 
 /**
  * 将已保存的图片引用追加到源内容末尾，供后续 caption 流水线使用。
@@ -195,7 +204,7 @@ const CLOSER_LINE = /^---\s*END\s+FILE\s*---\s*$/i
  * sandboxing of its own (it's a generic command used for many things),
  * so the gate has to live here at the parse boundary.
  *
- * Allowed: any path under `wiki/` (e.g. `wiki/concepts/foo.md`).
+ * Allowed: any path under `wiki/` (e.g. `wiki/world/foo.md`).
  * Rejected:
  *   - paths not starting with `wiki/`
  *   - absolute paths (`/etc/passwd`, `C:/Windows/...`)
@@ -699,8 +708,8 @@ async function autoIngestImpl(
   }
 
   // -- Step 1: Analysis ------------------------------------------
-  // LLM reads the source and produces a structured analysis:
-  // key entities, concepts, main arguments, connections to existing wiki, contradictions
+  // LLM reads the source and produces a structured RPG analysis:
+  // source profile, candidate objects, routes, merge targets, and open questions.
   activity.updateItem(activityId, {
     detail: precomputedAnalysis
       ? "Step 1/2: Consolidating long-source analysis..."
@@ -1040,7 +1049,7 @@ function isListingPath(relativePath: string): boolean {
 
 interface WikiStorageStrategy {
   path: string
-  updateStrategy: RpgWikiUpdateStrategy | "legacy-log" | "listing" | "legacy-merge"
+  updateStrategy: RpgWikiUpdateStrategy | "log" | "listing" | "merge"
 }
 
 /**
@@ -1062,18 +1071,23 @@ function isRpgWikiPath(relativePath: string): boolean {
   return categoryId ? Boolean(getRpgWikiSchemaEntry(categoryId)) : false
 }
 
+function isLegacyWikiPath(relativePath: string): boolean {
+  const categoryId = getRpgCategoryIdFromPath(relativePath)
+  return categoryId ? LEGACY_WIKI_DIRS.has(categoryId) : false
+}
+
 /**
  * 根据路径确定写入策略（追加/覆盖/合并等）。
  * 为什么需要：不同类型的页面有不同的写入语义——
  * 日志追加、目录覆盖、RPG 动态合并、普通页面 LLM 合并。
  */
 function wikiStorageStrategyForPath(relativePath: string): WikiStorageStrategy {
-  if (isLogPath(relativePath)) return { path: relativePath, updateStrategy: "legacy-log" }
+  if (isLogPath(relativePath)) return { path: relativePath, updateStrategy: "log" }
   if (isListingPath(relativePath)) return { path: relativePath, updateStrategy: "listing" }
 
   const categoryId = getRpgCategoryIdFromPath(relativePath)
   const schemaEntry = categoryId ? getRpgWikiSchemaEntry(categoryId) : undefined
-  if (!schemaEntry) return { path: relativePath, updateStrategy: "legacy-merge" }
+  if (!schemaEntry) return { path: relativePath, updateStrategy: "merge" }
 
   if (schemaEntry.categoryId === "current-scene") {
     return { path: "wiki/current-scene/scene_state.md", updateStrategy: schemaEntry.updateStrategy }
@@ -1255,7 +1269,7 @@ async function writeFileBlocks(
   sourceFileName: string | null,
   sourceText: string = "",
   sourceSummaryPath?: string,
-  wikiMode: WikiMode = "default",
+  wikiMode: WikiMode = "llmwikirpg",
   signal?: AbortSignal,
 ): Promise<{ writtenPaths: string[]; warnings: string[]; hardFailures: string[]; reviewItems: Omit<ReviewItem, "id" | "resolved" | "createdAt">[] }> {
   const { blocks, warnings: parseWarnings } = parseFileBlocks(text)
@@ -1279,6 +1293,23 @@ async function writeFileBlocks(
     let relativePath = rawRelativePath
     if (sourceSummaryPath && relativePath.startsWith("wiki/sources/")) {
       relativePath = sourceSummaryPath
+    }
+    if (isLegacyWikiPath(relativePath)) {
+      const msg = `Rejected legacy llm_wiki FILE block "${relativePath}". llmWikiRPG only writes RPG runtime directories; use wiki/sources/, wiki/world/, wiki/characters/, wiki/player/, wiki/locations/, wiki/factions/, wiki/items/, wiki/plot-arcs/, wiki/events/, wiki/current-scene/, wiki/relationships/, wiki/style/, wiki/rules/, wiki/quests/, or wiki/memory/.`
+      console.warn(`[ingest] ${msg}`)
+      warnings.push(msg)
+      reviewItems.push({
+        type: "suggestion",
+        title: "RPG extraction lint: legacy path rejected",
+        description: msg,
+        sourcePath: sourceFileName ?? undefined,
+        affectedPages: [relativePath],
+        options: [
+          { label: "Inspect", action: "Inspect" },
+          { label: "Dismiss", action: "Dismiss" },
+        ],
+      })
+      continue
     }
     const storageStrategy = wikiStorageStrategyForPath(relativePath)
     relativePath = storageStrategy.path
@@ -1319,15 +1350,11 @@ async function writeFileBlocks(
     // Language guard: reject individual FILE blocks whose body contradicts
     // the user-set target language. Skip:
     // - log.md (structural, short)
-    // - /sources/ and /entities/ pages: these legitimately cite cross-
-    //   language proper nouns (a German philosophy source summary naturally
-    //   quotes Russian philosophers) which confuses naive script-based
-    //   detection. Keep the check for /concepts/ pages, which should be
-    //   authoritative content in the target language.
+    // - /sources/ and RPG pages: these legitimately cite cross-language
+    //   proper nouns, speaker labels, titles, or source excerpts, which can
+    //   confuse naive script-based detection.
     const isLog = isLogPath(relativePath)
-    const isEntityOrSource =
-      relativePath.startsWith("wiki/entities/") ||
-      relativePath.includes("/entities/") ||
+    const isSourceOrRpg =
       relativePath.startsWith("wiki/sources/") ||
       relativePath.includes("/sources/") ||
       isRpgWikiPath(relativePath)
@@ -1335,7 +1362,7 @@ async function writeFileBlocks(
       targetLang &&
       targetLang !== "auto" &&
       !isLog &&
-      !isEntityOrSource &&
+      !isSourceOrRpg &&
       !contentMatchesTargetLanguage(content, targetLang)
     ) {
       const msg = `Dropped "${relativePath}" --body language doesn't match target ${targetLang}.`
@@ -1355,7 +1382,7 @@ async function writeFileBlocks(
 
     const fullPath = `${projectPath}/${relativePath}`
     try {
-      if (updateStrategy === "legacy-log") {
+      if (updateStrategy === "log") {
         const existing = await tryReadFile(fullPath)
         const appended = existing ? `${existing}\n\n${content.trim()}` : content.trim()
         await writeFile(fullPath, appended)
@@ -1373,9 +1400,7 @@ async function writeFileBlocks(
       } else if (updateStrategy === "overwrite") {
         await writeFile(fullPath, content)
       } else {
-        // Content pages (legacy entities / concepts / queries / synthesis /
-        // comparisons / source summaries, plus RPG merge/cautious-merge
-        // directories): if a page with this path already exists on disk,
+        // Content pages: if a page with this path already exists on disk,
         // merge old + new instead of clobbering. The merge has three layers:
         //   1. Frontmatter array fields (sources, tags, related)
         //      are union-merged at the application layer.
@@ -1568,11 +1593,10 @@ export function buildAnalysisPrompt(
   purpose: string,
   index: string,
   sourceContent: string = "",
-  wikiMode: WikiMode = "default",
+  wikiMode: WikiMode = "llmwikirpg",
 ): string {
-  return isRpgWikiMode(wikiMode)
-    ? buildRpgAnalysisPrompt(purpose, index, sourceContent)
-    : buildDefaultAnalysisPrompt(purpose, index, sourceContent)
+  void wikiMode
+  return buildRpgAnalysisPrompt(purpose, index, sourceContent)
 }
 
 export function buildGenerationPrompt(
@@ -1583,12 +1607,11 @@ export function buildGenerationPrompt(
   overview?: string,
   sourceContent: string = "",
   sourceSummaryPath?: string,
-  wikiMode: WikiMode = "default",
+  wikiMode: WikiMode = "llmwikirpg",
   stage1Analysis?: string,
 ): string {
-  return isRpgWikiMode(wikiMode)
-    ? buildRpgGenerationPrompt(schema, purpose, index, sourceFileName, overview, sourceContent, sourceSummaryPath, stage1Analysis)
-    : buildDefaultGenerationPrompt(schema, purpose, index, sourceFileName, overview, sourceContent, sourceSummaryPath)
+  void wikiMode
+  return buildRpgGenerationPrompt(schema, purpose, index, sourceFileName, overview, sourceContent, sourceSummaryPath, stage1Analysis)
 }
 /**
  * 构建审阅建议 prompt：让 LLM 在 Stage 2 生成完成后，识别值得人工关注的
@@ -2030,15 +2053,15 @@ function buildChunkAnalysisSystemPrompt(
     // 块分析：简明摘要、实体、概念、主张、证据、矛盾、开放问题
     "## Chunk Analysis",
     "- Concise summary of the main chunk",
-    "- New or updated entities",
-    "- New or updated concepts",
-    "- Claims, findings, evidence, contradictions",
+    "- New or updated RPG objects, scenes, relationships, or state",
+    "- Routing decisions for RPG runtime directories",
+    "- Claims, evidence, contradictions, and uncertainties",
     "- Open questions or research gaps",
     "",
     // 更新的全局摘要：整合当前块并保留跨块上下文
     "## Updated Global Digest",
     "A compact document-level digest that incorporates this chunk and preserves prior cross-chunk context.",
-    "Keep this digest structured under: Summary, Entities, Concepts, Claims, Evidence, Contradictions, Open Questions, Cross-Chunk Relations.",
+    "Keep this digest structured under: Summary, RPG Objects, Scene/State Notes, Claims, Evidence, Contradictions, Open Questions, Cross-Chunk Relations.",
     "",
     // 稳定的项目上下文（背景）
     "Stable project context follows. It changes rarely and should be treated as background:",
@@ -2504,7 +2527,7 @@ export async function startIngest(
     `I'm ingesting the following source file into my wiki: **${sourceIdentity}**`,
     "",
     // 请仔细阅读并展示关键收获、重要概念和有价值的信息
-    "Please read it carefully and present the key takeaways, important concepts, and information that would be valuable to capture in the wiki. Highlight anything that relates to the wiki's purpose and schema.",
+    "Please read it carefully and present the key takeaways, RPG-relevant objects, scene/state details, relationships, tensions, and information that would be valuable to capture in the runtime wiki. Highlight anything that relates to the wiki's purpose and schema.",
     "",
     "---",
     `**File: ${sourceIdentity}**`,

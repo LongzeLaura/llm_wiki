@@ -35,11 +35,7 @@ const WEIGHTS = {
 } as const
 
 const TYPE_AFFINITY: Record<string, Record<string, number>> = {
-  entity: { concept: 1.2, entity: 0.8, source: 1.0, synthesis: 1.0, query: 0.8 },
-  concept: { entity: 1.2, concept: 0.8, source: 1.0, synthesis: 1.2, query: 1.0 },
-  source: { entity: 1.0, concept: 1.0, source: 0.5, query: 0.8, synthesis: 1.0 },
-  query: { concept: 1.0, entity: 0.8, synthesis: 1.0, source: 0.8, query: 0.5 },
-  synthesis: { concept: 1.2, entity: 1.0, source: 1.0, query: 1.0, synthesis: 0.8 },
+  source: { source: 0.5, world: 1.0, characters: 1.0, locations: 1.0, factions: 1.0, items: 1.0, events: 0.9, "plot-arcs": 0.9, relationships: 0.9 },
   world: { characters: 1.0, locations: 1.0, factions: 1.0, items: 0.8, "plot-arcs": 0.9, events: 0.8 },
   characters: { player: 1.1, relationships: 1.3, events: 1.1, "current-scene": 1.2, locations: 0.9, factions: 0.9, items: 0.8, "plot-arcs": 1.0 },
   player: { characters: 1.1, relationships: 1.2, events: 1.0, "current-scene": 1.3, items: 1.0, locations: 0.9, "plot-arcs": 1.0 },

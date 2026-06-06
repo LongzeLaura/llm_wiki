@@ -6,17 +6,17 @@ import {
 } from "./wiki-type-style"
 
 describe("getWikiTypeStyle", () => {
-  it("returns the entity style for 'entity'", () => {
-    expect(getWikiTypeStyle("entity")).toBe(WIKI_TYPE_STYLES.entity)
+  it("returns the RPG character style", () => {
+    expect(getWikiTypeStyle("characters")).toBe(WIKI_TYPE_STYLES.characters)
   })
 
   it("is case-insensitive", () => {
-    expect(getWikiTypeStyle("ENTITY")).toBe(WIKI_TYPE_STYLES.entity)
-    expect(getWikiTypeStyle("Concept")).toBe(WIKI_TYPE_STYLES.concept)
+    expect(getWikiTypeStyle("CHARACTERS")).toBe(WIKI_TYPE_STYLES.characters)
+    expect(getWikiTypeStyle("Current-Scene")).toBe(WIKI_TYPE_STYLES["current-scene"])
   })
 
   it("trims surrounding whitespace", () => {
-    expect(getWikiTypeStyle("  query  ")).toBe(WIKI_TYPE_STYLES.query)
+    expect(getWikiTypeStyle("  memory  ")).toBe(WIKI_TYPE_STYLES.memory)
   })
 
   it("returns fallback for null", () => {
@@ -37,10 +37,10 @@ describe("getWikiTypeStyle", () => {
 
   it("covers every documented page type", () => {
     const expected = [
-      "entity", "concept", "query", "source",
-      "thesis", "finding", "methodology", "event", "overview",
+      "source", "event", "overview",
       "world", "characters", "player", "locations", "factions",
       "items", "plot-arcs", "events", "current-scene", "relationships",
+      "style", "rules", "quests", "memory",
     ]
     for (const t of expected) {
       const style = getWikiTypeStyle(t)

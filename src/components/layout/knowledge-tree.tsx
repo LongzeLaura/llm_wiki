@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from "react"
 import {
-  FileText, Users, User, Lightbulb, BookOpen, HelpCircle, GitMerge, BarChart3, TrendingUp, Target, ChevronRight, ChevronDown, Layout, Globe, Trash2, MapPinned, Shield, Package, Calendar, Eye, Link2,
+  FileText, Users, User, BookOpen, GitMerge, Target, ChevronRight, ChevronDown, Layout, Globe, Trash2, MapPinned, Shield, Package, Calendar, Eye, Link2,
 } from "lucide-react"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { Button } from "@/components/ui/button"
@@ -32,15 +32,22 @@ const TYPE_CONFIG: Record<string, { icon: typeof FileText; label: string; color:
   factions:    { icon: Shield,      label: "Factions",     color: "text-sky-500",    order: 9 },
   items:       { icon: Package,     label: "Items",        color: "text-orange-500", order: 10 },
   source:      { icon: BookOpen,    label: "Sources",      color: "text-orange-500", order: 11 },
-  entity:      { icon: Users,       label: "Entities",     color: "text-blue-500",   order: 20 },
-  concept:     { icon: Lightbulb,   label: "Concepts",     color: "text-purple-500", order: 21 },
-  synthesis:   { icon: GitMerge,    label: "Synthesis",    color: "text-red-500",    order: 22 },
-  finding:     { icon: TrendingUp,  label: "Findings",     color: "text-purple-500", order: 23 },
-  thesis:      { icon: Target,      label: "Theses",       color: "text-rose-500",   order: 24 },
-  methodology: { icon: BookOpen,    label: "Methodologies",color: "text-teal-500",   order: 25 },
-  comparison:  { icon: BarChart3,   label: "Comparisons",  color: "text-emerald-500",order: 26 },
-  query:       { icon: HelpCircle,  label: "Queries",      color: "text-green-500",  order: 27 },
+  style:       { icon: FileText,    label: "Style",        color: "text-purple-500", order: 12 },
+  rules:       { icon: BookOpen,    label: "Rules",        color: "text-teal-500",   order: 13 },
+  quests:      { icon: Target,      label: "Quests",       color: "text-yellow-500", order: 14 },
+  memory:      { icon: FileText,    label: "Memory",       color: "text-stone-500",  order: 15 },
 }
+
+const HIDDEN_LEGACY_DIRS = new Set([
+  "entities",
+  "concepts",
+  "queries",
+  "comparisons",
+  "synthesis",
+  "findings",
+  "thesis",
+  "methodology",
+])
 
 function typeConfig(type: string): { icon: typeof FileText; label: string; color: string; order: number } {
   return TYPE_CONFIG[type] ?? { icon: FileText, label: wikiTypeLabel(type), color: "text-muted-foreground", order: 99 }
@@ -73,6 +80,7 @@ export function KnowledgeTree() {
       for (const file of mdFiles) {
         // Skip index.md and log.md
         if (file.name === "index.md" || file.name === "log.md") continue
+        if (isHiddenLegacyWikiPath(file.path)) continue
         try {
           const content = await readFile(file.path)
           const info = parsePageInfo(file.path, file.name, content)
@@ -251,6 +259,12 @@ export function KnowledgeTree() {
       </div>
     </ScrollArea>
   )
+}
+
+function isHiddenLegacyWikiPath(path: string): boolean {
+  const normalized = path.replace(/\\/g, "/").toLowerCase()
+  const match = normalized.match(/(?:^|\/)wiki\/([^/]+)\//)
+  return Boolean(match?.[1] && HIDDEN_LEGACY_DIRS.has(match[1]))
 }
 
 function RawSourcesSection() {

@@ -79,8 +79,8 @@ export function buildFrontmatterRules(sourceFileName: string): string {
     // 完整、可解析页面的具体示例：
     "",
     "    ---",
-    "    type: entity",
-    "    title: Example Entity",
+    "    type: characters",
+    "    title: Example Character",
     "    created: 2026-04-29",
     "    updated: 2026-04-29",
     "    tags: [example, demo]",
@@ -88,7 +88,7 @@ export function buildFrontmatterRules(sourceFileName: string): string {
     `    sources: ["${sourceFileName}"]`,
     "    ---",
     "",
-    "    # Example Entity",
+    "    # Example Character",
     "",
     "    Body content goes here. Use [[wikilink]] syntax in the body for cross-references.",
     // 正文内容写在这里。请在正文中使用 [[wikilink]] 语法进行交叉引用。
@@ -117,9 +117,9 @@ export function buildReviewBlockRules(): string {
     "After all FILE blocks, optionally emit REVIEW blocks for anything that needs human judgment:",
     "",
     "- contradiction: the analysis found conflicts with existing wiki content",
-    "- duplicate: an entity/concept might already exist under a different name in the index",
-    "- missing-page: an important concept is referenced but has no dedicated page",
-    "- suggestion: ideas for further research, related sources to look for, or connections worth exploring",
+    "- duplicate: an RPG page might already exist under a different name in the index",
+    "- missing-page: an important character, location, faction, item, event, relationship, world fact, or plot arc is referenced but still lacks a dedicated page",
+    "- suggestion: ideas for further RPG source review, relationship/tension derivation, related sources to look for, or connections worth exploring",
     // REVIEW 块类型
     // 在所有 FILE 块之后，可以按需输出 REVIEW 块，用于需要人工判断的事项：
     // - contradiction：分析发现与现有 wiki 内容存在冲突

@@ -2,11 +2,8 @@ import type { LucideIcon } from "lucide-react"
 import {
   User,
   Users,
-  Lightbulb,
-  HelpCircle,
   FileText,
   Target,
-  TrendingUp,
   BookOpen,
   Calendar,
   Hash,
@@ -37,47 +34,11 @@ export interface WikiTypeStyle {
 }
 
 export const WIKI_TYPE_STYLES: Record<string, WikiTypeStyle> = {
-  entity: {
-    label: "Entity",
-    icon: User,
-    chipClass: "bg-blue-500/15 text-blue-700 dark:text-blue-300",
-    dotClass: "bg-blue-500",
-  },
-  concept: {
-    label: "Concept",
-    icon: Lightbulb,
-    chipClass: "bg-emerald-500/15 text-emerald-700 dark:text-emerald-300",
-    dotClass: "bg-emerald-500",
-  },
-  query: {
-    label: "Query",
-    icon: HelpCircle,
-    chipClass: "bg-amber-500/15 text-amber-700 dark:text-amber-300",
-    dotClass: "bg-amber-500",
-  },
   source: {
     label: "Source",
     icon: FileText,
     chipClass: "bg-slate-500/15 text-slate-700 dark:text-slate-300",
     dotClass: "bg-slate-500",
-  },
-  thesis: {
-    label: "Thesis",
-    icon: Target,
-    chipClass: "bg-rose-500/15 text-rose-700 dark:text-rose-300",
-    dotClass: "bg-rose-500",
-  },
-  finding: {
-    label: "Finding",
-    icon: TrendingUp,
-    chipClass: "bg-purple-500/15 text-purple-700 dark:text-purple-300",
-    dotClass: "bg-purple-500",
-  },
-  methodology: {
-    label: "Methodology",
-    icon: BookOpen,
-    chipClass: "bg-teal-500/15 text-teal-700 dark:text-teal-300",
-    dotClass: "bg-teal-500",
   },
   world: {
     label: "World",
@@ -150,6 +111,30 @@ export const WIKI_TYPE_STYLES: Record<string, WikiTypeStyle> = {
     icon: BookOpen,
     chipClass: "bg-indigo-500/15 text-indigo-700 dark:text-indigo-300",
     dotClass: "bg-indigo-500",
+  },
+  style: {
+    label: "Style",
+    icon: FileText,
+    chipClass: "bg-purple-500/15 text-purple-700 dark:text-purple-300",
+    dotClass: "bg-purple-500",
+  },
+  rules: {
+    label: "Rules",
+    icon: BookOpen,
+    chipClass: "bg-teal-500/15 text-teal-700 dark:text-teal-300",
+    dotClass: "bg-teal-500",
+  },
+  quests: {
+    label: "Quests",
+    icon: Target,
+    chipClass: "bg-yellow-500/15 text-yellow-700 dark:text-yellow-300",
+    dotClass: "bg-yellow-500",
+  },
+  memory: {
+    label: "Memory",
+    icon: FileText,
+    chipClass: "bg-stone-500/15 text-stone-700 dark:text-stone-300",
+    dotClass: "bg-stone-500",
   },
 }
 

@@ -49,7 +49,7 @@ export function ReviewView() {
       if (item) {
         const llmConfig = useWikiStore.getState().llmConfig
         // Use pre-generated search queries if available, otherwise fall back to title
-        const topic = item.title.replace(/^(Save to Wiki|Create|Research)[:\s]*/i, "").trim() || item.description.split("\n")[0]
+        const topic = item.title.replace(/^(Save to Memory|Save to Wiki|Create|Research)[:\s]*/i, "").trim() || item.description.split("\n")[0]
         queueResearch(pp, topic, llmConfig, searchConfig, item.searchQueries)
         resolveItem(id, "Queued for research")
       } else {
@@ -71,25 +71,25 @@ export function ReviewView() {
           .trimEnd()
 
         // Generate filename
-        const firstLine = cleanContent.split("\n").find((l) => l.trim() && !l.startsWith("<!--"))?.replace(/^#+\s*/, "").trim() ?? "Saved Query"
+        const firstLine = cleanContent.split("\n").find((l) => l.trim() && !l.startsWith("<!--"))?.replace(/^#+\s*/, "").trim() ?? "Saved Memory"
         const title = firstLine.slice(0, 60)
-        const slug = title.toLowerCase().replace(/[^a-z0-9\s-]/g, "").trim().replace(/\s+/g, "-").slice(0, 50)
+        const slug = title.toLowerCase().replace(/[^a-z0-9\s-]/g, "").trim().replace(/\s+/g, "-").slice(0, 50) || "saved-memory"
         const date = new Date().toISOString().slice(0, 10)
         const fileName = `${slug}-${date}.md`
-        const filePath = `${pp}/wiki/queries/${fileName}`
+        const filePath = `${pp}/wiki/memory/${fileName}`
 
-        const frontmatter = `---\ntype: query\ntitle: "${title.replace(/"/g, '\\"')}"\ncreated: ${date}\ntags: []\n---\n\n`
+        const frontmatter = `---\ntype: memory\ntitle: "${title.replace(/"/g, '\\"')}"\ncreated: ${date}\ntags: []\n---\n\n`
         await writeFile(filePath, frontmatter + cleanContent)
 
         // Update index
         const indexPath = `${pp}/wiki/index.md`
         let indexContent = ""
         try { indexContent = await readFile(indexPath) } catch { indexContent = "# Wiki Index\n" }
-        const entry = `- [[queries/${slug}-${date}|${title}]]`
-        if (indexContent.includes("## Queries")) {
-          indexContent = indexContent.replace(/(## Queries\n)/, `$1${entry}\n`)
+        const entry = `- [[memory/${slug}-${date}|${title}]]`
+        if (indexContent.includes("## Memory")) {
+          indexContent = indexContent.replace(/(## Memory\n)/, `$1${entry}\n`)
         } else {
-          indexContent = indexContent.trimEnd() + "\n\n## Queries\n" + entry + "\n"
+          indexContent = indexContent.trimEnd() + "\n\n## Memory\n" + entry + "\n"
         }
         await writeFile(indexPath, indexContent)
 
@@ -97,13 +97,13 @@ export function ReviewView() {
         const logPath = `${pp}/wiki/log.md`
         let logContent = ""
         try { logContent = await readFile(logPath) } catch { logContent = "# Wiki Log\n" }
-        await writeFile(logPath, logContent.trimEnd() + `\n- ${date}: Saved query page \`${fileName}\`\n`)
+        await writeFile(logPath, logContent.trimEnd() + `\n- ${date}: Saved memory note \`${fileName}\`\n`)
 
         // Refresh tree
         const tree = await listDirectory(pp)
         setFileTree(tree)
 
-        resolveItem(id, "Saved to Wiki")
+        resolveItem(id, "Saved to Memory")
       } catch (err) {
         console.error("Failed to save to wiki from review:", err)
         resolveItem(id, "Save failed")
@@ -175,12 +175,12 @@ export function ReviewView() {
       if (item) {
         try {
           const title = item.title.replace(/^(Create|Save|Add)[:\s]*/i, "").trim() || "Untitled"
-          const slug = title.toLowerCase().replace(/[^a-z0-9\s-]/g, "").trim().replace(/\s+/g, "-").slice(0, 50)
+          const slug = title.toLowerCase().replace(/[^a-z0-9\s-]/g, "").trim().replace(/\s+/g, "-").slice(0, 50) || "review-note"
           const date = new Date().toISOString().slice(0, 10)
 
-          // Determine page type from review type or action text
-          const pageType = detectPageType(realAction, item.type)
-          const dir = pageType === "query" ? "queries" : pageType === "entity" ? "entities" : pageType === "concept" ? "concepts" : "queries"
+          void realAction
+          const pageType = "memory"
+          const dir = "memory"
           const fileName = `${slug}-${date}.md`
           const filePath = `${pp}/wiki/${dir}/${fileName}`
 
@@ -205,7 +205,7 @@ export function ReviewView() {
           const logPath = `${pp}/wiki/log.md`
           let logContent = ""
           try { logContent = await readFile(logPath) } catch { logContent = "# Wiki Log\n" }
-          await writeFile(logPath, logContent.trimEnd() + `\n- ${date}: Created ${pageType} page \`${fileName}\` from review\n`)
+          await writeFile(logPath, logContent.trimEnd() + `\n- ${date}: Created ${pageType} note \`${fileName}\` from review\n`)
 
           // Refresh
           const tree = await listDirectory(pp)
@@ -407,16 +407,3 @@ function actionLooksLikeCreate(action: string): boolean {
   return !actionIsDismissal(action)
 }
 
-/** Infer wiki page type from action text and review item type */
-function detectPageType(action: string, reviewType: string): string {
-  const lower = action.toLowerCase()
-  if (lower.includes("entity") || lower.includes("实体")) return "entity"
-  if (lower.includes("concept") || lower.includes("概念")) return "concept"
-  if (lower.includes("comparison") || lower.includes("compare") || lower.includes("比较")) return "comparison"
-  if (lower.includes("synthesis") || lower.includes("综合")) return "synthesis"
-  if (reviewType === "missing-page") return "concept"
-  if (reviewType === "contradiction") return "query"
-  if (reviewType === "suggestion") return "query"
-  // Default: research/investigate/create → query
-  return "query"
-}

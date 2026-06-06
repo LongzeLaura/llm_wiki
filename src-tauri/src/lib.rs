@@ -165,7 +165,7 @@ pub fn run() {
                         use tauri_plugin_dialog::DialogExt;
                         let confirmed = app
                             .dialog()
-                            .message("Are you sure you want to quit LLM Wiki?")
+                            .message("Are you sure you want to quit llmWikiRPG?")
                             .title("Confirm Exit")
                             .kind(tauri_plugin_dialog::MessageDialogKind::Warning)
                             .blocking_show();

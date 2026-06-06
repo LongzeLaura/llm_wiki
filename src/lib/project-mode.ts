@@ -1,16 +1,9 @@
 import { createDirectory, readFile, writeFile } from "@/commands/fs"
 import { normalizePath } from "@/lib/path-utils"
 
-export type ProjectMode = "default" | "llmwikirpg"
+export type ProjectMode = "llmwikirpg"
 
 export const DEFAULT_PROJECT_MODE: ProjectMode = "llmwikirpg"
-export const LEGACY_PROJECT_MODE: ProjectMode = "default"
-
-export interface ProjectModeOption {
-  id: ProjectMode
-  label: string
-  description: string
-}
 
 export interface ProjectModeBootstrap {
   schema: string
@@ -27,26 +20,17 @@ interface ProjectMetadata {
   mode?: string
 }
 
-export const PROJECT_MODE_OPTIONS: readonly ProjectModeOption[] = [
-  {
-    id: "llmwikirpg",
-    label: "llmWikiRPG",
-    description: "RPG wiki directories, prompts, and extraction semantics.",
-  },
-  {
-    id: "default",
-    label: "Legacy Default",
-    description: "Legacy llm_wiki entities / concepts / sources workflow.",
-  },
-] as const
-
 const LLMWIKIRPG_EXTRA_DIRS = [
   "wiki/world",
   "wiki/characters",
+  "wiki/characters/runtime",
   "wiki/player",
   "wiki/locations",
+  "wiki/locations/runtime",
   "wiki/factions",
+  "wiki/factions/runtime",
   "wiki/items",
+  "wiki/items/runtime",
   "wiki/plot-arcs",
   "wiki/events",
   "wiki/current-scene",
@@ -64,7 +48,6 @@ function projectMetadataPath(projectPath: string): string {
 export function normalizeProjectMode(mode?: string | null): ProjectMode | null {
   if (!mode) return null
   const normalized = mode.trim().toLowerCase()
-  if (normalized === "default") return "default"
   if (normalized === "rpg" || normalized === "llmwikirpg") return "llmwikirpg"
   return null
 }
@@ -95,48 +78,86 @@ export async function writeProjectMode(projectPath: string, mode: ProjectMode): 
   )
 }
 
-export function getProjectModeBootstrap(mode: ProjectMode): ProjectModeBootstrap | null {
-  if (mode !== "llmwikirpg") return null
-
+export function getProjectModeBootstrap(): ProjectModeBootstrap {
   return {
     schema: [
       "wikiMode: llmwikirpg",
       "",
       "# Wiki Schema - llmWikiRPG",
       "",
-      "## Core Extraction Directories",
+      "## Project Boundary",
       "",
-      "| Type | Directory | Purpose |",
-      "|------|-----------|---------|",
-      "| source | wiki/sources/ | Source summaries, imported material provenance, and document-level notes |",
-      "| world | wiki/world/ | Stable world facts, lore, history, social rules, and setting systems |",
-      "| characters | wiki/characters/ | NPCs and major character profiles plus meaningful current state |",
-      "| player | wiki/player/ | Player character identity, abilities, inventory, goals, and accepted state |",
-      "| locations | wiki/locations/ | Places, scene locations, spatial relationships, and location state |",
-      "| factions | wiki/factions/ | Groups, organizations, agendas, influence, and resources |",
-      "| items | wiki/items/ | Important objects, clues, equipment, ownership, and condition |",
-      "| plot-arcs | wiki/plot-arcs/ | Ongoing arcs, unresolved conflicts, foreshadowing, and future pressure |",
-      "| events | wiki/events/ | Confirmed events that already happened and their consequences |",
-      "| current-scene | wiki/current-scene/ | Latest scene snapshot only; overwrite instead of append |",
-      "| relationships | wiki/relationships/ | Relationship state, trust, tension, dependency, and change |",
-      "| overview | wiki/overview.md | High-level campaign overview |",
+      "- This project schema supports only `llmwikirpg`.",
+      "- Legacy directories rejected: `wiki/entities/`, `wiki/concepts/`, `wiki/queries/`, `wiki/comparisons/`, `wiki/synthesis/`, `wiki/methodology/`, `wiki/findings/`, `wiki/thesis/`.",
+      "- Existing legacy files may remain on disk, but they are not valid product schema directories or write targets.",
       "",
-      "## Auxiliary Directories",
+      "## Runtime Wiki Directories",
       "",
-      "| Directory | Purpose |",
-      "|-----------|---------|",
-      "| wiki/style/ | Tone, narration style, voice, and presentation conventions |",
-      "| wiki/rules/ | House rules, system rulings, and play constraints |",
-      "| wiki/quests/ | Task lists, mission boards, or explicit objective tracking |",
-      "| wiki/memory/ | Working notes, reminders, and temporary campaign memory aids |",
+      "| Path | Layer | Write policy | Contract |",
+      "|------|-------|--------------|----------|",
+      "| `wiki/sources/` | Evidence | ingest merge/append | Source evidence layer, imported material summaries, provenance, and document-level notes. |",
+      "| `wiki/world/` | Stable base | ingest/manual merge; runtime blocked | Stable setting, lore, history, social rules, and world systems. |",
+      "| `wiki/characters/` | Stable base | ingest/manual merge; runtime must not rewrite base pages | Base character models, canon facts, portrayal rules, and source-supported stable traits. |",
+      "| `wiki/characters/runtime/` | Runtime overlay | runtime merge | Current campaign status overlays for characters: condition, intent, temporary resources, and scene-relevant changes. |",
+      "| `wiki/player/` | Runtime/base state | runtime/manual merge | Player character identity, abilities, inventory, goals, knowledge, and accepted state. |",
+      "| `wiki/locations/` | Stable base | ingest/manual merge; runtime must not rewrite base pages | Base location setting, layout, access rules, residents, and stable hooks. |",
+      "| `wiki/locations/runtime/` | Runtime overlay | runtime merge | Current location status overlays: danger, access, occupants, damage, clues, and temporary atmosphere. |",
+      "| `wiki/factions/` | Stable base | ingest/manual merge; runtime must not rewrite base pages | Base faction identity, agenda, members, resources, and durable relationships. |",
+      "| `wiki/factions/runtime/` | Runtime overlay | runtime merge | Current faction stance/resource overlays for campaign-time pressure and temporary moves. |",
+      "| `wiki/items/` | Stable base | ingest/manual merge; runtime must not rewrite base pages | Base item identity, capabilities, history, constraints, and plot function. |",
+      "| `wiki/items/runtime/` | Runtime overlay | runtime merge | Current holder, location, condition, consumption, loss, damage, or other runtime item state. |",
+      "| `wiki/plot-arcs/` | Dynamic derived | derivation/runtime merge | Unresolved conflicts, foreshadowing, possible developments, future pressure, and constraints. |",
+      "| `wiki/events/` | Timeline | append/create only | Confirmed events that already happened; never store hypothetical future outcomes as history. |",
+      "| `wiki/current-scene/scene_state.md` | Snapshot | overwrite | Latest immediate scene snapshot only. |",
+      "| `wiki/relationships/` | Dynamic derived | derivation/runtime merge | Relationship state, trust, tension, dependency, conflict, and relationship-change pressure. |",
+      "| `wiki/style/` | Manual control | manual only | Tone, narration style, voice, variables, and presentation conventions. |",
+      "| `wiki/rules/` | Manual control | manual only | House rules, system rulings, safety boundaries, and runtime constraints. |",
+      "| `wiki/quests/` | Objective tracking | manual/runtime merge | Goals, missions, tasks, blockers, and explicit objective tracking. |",
+      "| `wiki/memory/` | Explicit memory | explicit user action only | User-approved memory and reminders; do not infer or write automatically. |",
+      "| `wiki/overview.md` | Summary | manual/ingest merge | High-level campaign overview. |",
+      "| `wiki/index.md` | Navigation | generated/manual refresh | Navigation index for the RPG wiki. |",
+      "",
+      "## Overlay Resolution",
+      "",
+      "- For `characters`, `locations`, `factions`, and `items`, resolve the base page first, then apply the matching `runtime/` overlay by slug.",
+      "- Example: `wiki/characters/rin.md` supplies the stable model; `wiki/characters/runtime/rin.md` supplies current campaign state.",
+      "- Runtime agents may merge overlay pages, but base pages are runtime blocked and should only receive ingest/manual stable facts.",
+      "- If base and overlay disagree, prefer the overlay for immediate play state and keep the base as the stable/source-supported contract.",
       "",
       "## Dynamic Update Rules",
       "",
-      "- `wiki/current-scene/scene_state.md` is a snapshot and should be replaced on each meaningful scene advance.",
-      "- `wiki/events/` is append-oriented history for confirmed happened events only.",
+      "- Static ingest output for `characters`, `locations`, `factions`, and `items` writes stable facts to base directories; runtime state writes to the matching `runtime/` overlay.",
+      "- `wiki/current-scene/scene_state.md` is a snapshot and should be overwritten on each accepted scene advance.",
+      "- `wiki/events/` is append/create-only history for confirmed happened events.",
       "- `wiki/plot-arcs/` may contain foreshadowing, unresolved questions, and future pressure, but must not invent events as already happened.",
-      "- `wiki/player/`, `wiki/characters/`, and `wiki/relationships/` should merge durable facts while updating current state carefully.",
+      "- `wiki/player/`, `wiki/relationships/`, `wiki/quests/`, and runtime overlays should merge accepted state without treating unchosen options as facts.",
+      "- Avoid current-state pollution in historical `events`, and avoid writing unresolved future pressure as completed history.",
       "- Preserve `sources:` frontmatter provenance on every generated page.",
+      "",
+      "## Derived Content Frontmatter",
+      "",
+      "```yaml",
+      "---",
+      "type: relationships",
+      "title: \"Rin and Player\"",
+      "derived: true",
+      "derivation_source: runtime",
+      "sources: []",
+      "related: []",
+      "---",
+      "```",
+      "",
+      "## Generated Page Frontmatter",
+      "",
+      "```yaml",
+      "---",
+      "type: characters",
+      "title: \"Tohsaka Rin\"",
+      "sources: []",
+      "related: []",
+      "tags: []",
+      "---",
+      "```",
     ].join("\n"),
     purpose: [
       "# Project Purpose - llmWikiRPG",
@@ -164,7 +185,7 @@ export function getProjectModeBootstrap(mode: ProjectMode): ProjectModeBootstrap
       "## Mode Notes",
       "",
       "- This project runs in `llmwikirpg` mode.",
-      "- Prefer RPG directories over legacy `entities` / `concepts` for new extracted content.",
+      "- Use RPG runtime directories only; legacy `entities`, `concepts`, and `queries` are not supported.",
     ].join("\n"),
     index: [
       "# Wiki Index",

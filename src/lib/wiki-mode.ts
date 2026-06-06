@@ -1,6 +1,6 @@
 import { RPG_CATEGORIES } from "./rpg-categories"
 
-export type WikiMode = "default" | "llmwikirpg"
+export type WikiMode = "llmwikirpg"
 
 export function isRpgWikiMode(mode: WikiMode): mode is "llmwikirpg" {
   return mode === "llmwikirpg"
@@ -48,7 +48,7 @@ export function detectExplicitWikiMode(...texts: Array<string | undefined>): Wik
     if (!text) continue
     const match = text.match(EXPLICIT_WIKI_MODE_REGEX)
     if (match?.[1] === "default") {
-      return "default"
+      throw new Error("Legacy default llm_wiki projects are no longer supported. Open an llmWikiRPG project instead.")
     }
     if (match?.[1] === "rpg" || match?.[1] === "llmwikirpg") {
       return "llmwikirpg"
@@ -64,13 +64,21 @@ export function detectWikiMode({
   paths = [],
   projectMeta = "",
 }: DetectWikiModeInput): WikiMode {
+  let parsedProjectMeta: { mode?: string } | null = null
   try {
-    const parsed = JSON.parse(projectMeta) as { mode?: string }
-    const metadataMode = parsed?.mode ? normalizeWikiModeValue(parsed.mode) : ""
-    if (metadataMode === "default") return "default"
-    if (metadataMode === "rpg" || metadataMode === "llmwikirpg") return "llmwikirpg"
+    parsedProjectMeta = projectMeta ? JSON.parse(projectMeta) as { mode?: string } : null
   } catch {
-    // Non-JSON text falls through to the existing marker and heuristic logic.
+    if (projectMeta.trim().startsWith("{")) {
+      throw new Error("Invalid .llm-wiki/project.json; cannot verify this as an llmWikiRPG project.")
+    }
+  }
+
+  if (parsedProjectMeta) {
+    const metadataMode = parsedProjectMeta.mode ? normalizeWikiModeValue(parsedProjectMeta.mode) : ""
+    if (metadataMode === "default") {
+      throw new Error("Legacy default llm_wiki projects are no longer supported. Open an llmWikiRPG project instead.")
+    }
+    if (metadataMode === "rpg" || metadataMode === "llmwikirpg") return "llmwikirpg"
   }
 
   const explicit = detectExplicitWikiMode(projectMeta, schema, purpose, index)
@@ -91,5 +99,7 @@ export function detectWikiMode({
     }
   }
 
-  return matchedRpgDirs.size >= 3 ? "llmwikirpg" : "default"
+  if (matchedRpgDirs.size >= 3) return "llmwikirpg"
+
+  throw new Error("This project is not an llmWikiRPG project. Legacy llm_wiki mode has been removed.")
 }

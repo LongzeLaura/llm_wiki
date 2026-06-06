@@ -5,6 +5,8 @@ import { RPG_WIKI_SCHEMA, getRpgWikiSchemaEntry, rpgSchemaCategoryIdsMatchRegist
 describe("RPG_WIKI_SCHEMA", () => {
   it("keeps schema category ids aligned with the RPG category registry", () => {
     expect(RPG_WIKI_SCHEMA.map((entry) => entry.categoryId)).toEqual(RPG_CATEGORIES.map((category) => category.id))
+    expect(RPG_WIKI_SCHEMA).toHaveLength(RPG_CATEGORIES.length)
+    expect(RPG_WIKI_SCHEMA.some((entry) => entry.categoryId.includes("runtime"))).toBe(false)
     expect(rpgSchemaCategoryIdsMatchRegistry()).toBe(true)
   })
 
@@ -121,5 +123,24 @@ describe("RPG_WIKI_SCHEMA", () => {
     expect(factions?.extractionGoal).toContain("secondary scan")
     expect(factions?.recommendedGranularity).toContain("short stub")
     expect(factions?.recommendedGranularity).toContain("limited-source")
+  })
+
+  it("keeps current campaign state in runtime overlays for stable base categories", () => {
+    const expectRuntimeOverlayBoundary = (categoryId: "characters" | "locations" | "factions" | "items") => {
+      const entry = getRpgWikiSchemaEntry(categoryId)
+      const combinedText = [
+        entry?.extractionGoal,
+        entry?.recommendedGranularity,
+        ...(entry?.fields.map((field) => field.description) ?? []),
+        ...(entry?.exclude ?? []),
+      ].join("\n")
+
+      expect(combinedText).toMatch(/runtime|overlay/)
+    }
+
+    expectRuntimeOverlayBoundary("characters")
+    expectRuntimeOverlayBoundary("locations")
+    expectRuntimeOverlayBoundary("factions")
+    expectRuntimeOverlayBoundary("items")
   })
 })

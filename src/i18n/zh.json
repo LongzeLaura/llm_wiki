@@ -1,10 +1,11 @@
 {
   "app": {
-    "title": "LLM Wiki",
+    "title": "llmWikiRPG",
     "subtitle": "用 LLM 构建和维护你的个人知识库"
   },
   "nav": {
     "wiki": "Wiki",
+    "play": "Play",
     "sources": "原始资料",
     "search": "搜索",
     "graph": "关系图",
@@ -344,7 +345,7 @@
       },
       "webSearch": {
         "title": "外部信息源",
-        "description": "配置 LLM Wiki 可以使用的外部信息来源。",
+        "description": "配置 llmWikiRPG 可以使用的外部信息来源。",
         "deepResearchSources": "深度研究来源模式",
         "deepResearchSourcesHint": "网页搜索使用当前选中的在线搜索 Provider。AnyTXT 会通过本机 ATGUI.exe 的本地索引搜索文件内容。",
         "sourceWeb": "网页搜索",
@@ -496,7 +497,11 @@
       },
       "maintenance": {
         "title": "维护",
-        "description": "清理 wiki 的工具 —— 检测并合并 LLM 在多次再导入时用不同名字创建的重复实体 / 概念。",
+        "description": "这里后续只放 RPG runtime 维护工具。旧实体/概念重复清理入口已经隐藏。",
+        "rpgOnly": {
+          "title": "RPG runtime 维护",
+          "description": "llmWikiRPG 不再暴露 legacy llm_wiki 清理动作。后续维护操作应面向 current-scene、events、relationships、memory 等 RPG runtime 目录。"
+        },
         "noProject": "请先打开一个项目。",
         "noLlm": "请先配置 LLM 服务。",
         "dedup": {

@@ -1,270 +1,372 @@
 import type { IngestScenario } from "./types"
 
-/**
- * Ingest scenarios drive autoIngest end-to-end. Two LLM responses per
- * scenario (stage 1 analysis, stage 2 generation with FILE + REVIEW blocks).
- *
- * FILE block format (what stage 2 must emit to write a wiki file):
- *   ---FILE: wiki/path/to/page.md---
- *   (file content, usually with YAML frontmatter)
- *   ---END FILE---
- *
- * REVIEW block format (what stage 2 emits to inject a review item):
- *   ---REVIEW: missing-page | Short title---
- *   Description.
- *   OPTIONS: Approve | Skip
- *   PAGES: page1.md, page2.md
- *   ---END REVIEW---
- *
- * Stage 2 may emit arbitrary prose around blocks — the parser only
- * cares about the delimited blocks.
- */
+const RPG_PROJECT_META = JSON.stringify({ mode: "llmwikirpg" }, null, 2)
 
-const BASIC_PURPOSE = `# Purpose
+const RPG_SCHEMA = `# llmWikiRPG Schema
 
-This wiki tracks deep-learning research concepts.
+wikiMode: llmwikirpg
+
+## RPG directories
+- wiki/sources/
+- wiki/world/
+- wiki/characters/
+- wiki/player/
+- wiki/locations/
+- wiki/factions/
+- wiki/items/
+- wiki/plot-arcs/
+- wiki/events/
+- wiki/current-scene/
+- wiki/relationships/
+- wiki/memory/
 `
 
-const BASIC_INDEX = `# Index
+const RPG_PURPOSE = `# Purpose
 
-## Concepts
-- [[attention]]
+This runtime wiki tracks setting facts, player state, scenes, relationships, and turn-relevant memory for an RPG campaign.
 `
 
-const BASIC_SCHEMA = `# Schema
+const RPG_INDEX = `# Index
 
-## wiki/sources/
-Each ingested source has a summary page here.
+## Sources
 
-## wiki/concepts/
-Each concept gets its own page.
+## World
+
+## Characters
+
+## Locations
+
+## Relationships
 `
+
+const BASE_INITIAL_WIKI = {
+  ".llm-wiki/project.json": RPG_PROJECT_META,
+  "purpose.md": RPG_PURPOSE,
+  "schema.md": RPG_SCHEMA,
+  "wiki/index.md": RPG_INDEX,
+  "wiki/overview.md": "# Overview\n",
+}
 
 export const ingestScenarios: IngestScenario[] = [
-  // 1. basic-new-source — new concept wiki page + source summary, no reviews
   {
-    name: "basic-new-source",
+    name: "basic-rpg-source",
     description:
-      "Stage 2 emits a single concept page + a source summary page. No " +
-      "REVIEW blocks. The runner must see both files on disk and zero " +
-      "reviews in the store.",
-    initialWiki: {
-      "purpose.md": BASIC_PURPOSE,
-      "schema.md": BASIC_SCHEMA,
-      "wiki/index.md": BASIC_INDEX,
-    },
+      "Stage 2 emits RPG world, location, and source pages. No legacy directories or reviews should be created.",
+    initialWiki: BASE_INITIAL_WIKI,
     source: {
-      path: "raw/sources/rope-paper.md",
+      path: "raw/sources/moonwell-lore.md",
       content: [
-        "# Rotary Position Embedding",
+        "# Moonwell Lore",
         "",
-        "Rotary Position Embedding (RoPE) encodes positional information by",
-        "rotating pairs of dimensions in query and key vectors. It naturally",
-        "supports variable-length contexts and is now standard in LLMs.",
+        "The Moonwell oath binds every harbor bell to the tide calendar.",
+        "The Old Bell Tower stores the public tide records used by pilots.",
       ].join("\n"),
     },
     analysisResponse: [
-      "## Key Concepts",
-      "- Rotary Position Embedding (RoPE): rotates pairs of dimensions",
+      "## Source Profile",
+      "- source_kind: setting_encyclopedia",
+      "- live_input_marker: none",
+      "- dominant_focus: harbor oath and a location",
+      "- needed_categories: [world, locations]",
+      "- suppressed_categories: [current-scene, player]",
+      "- live_scene_allowed: false",
+      "- event_extraction_mode: none",
       "",
-      "## Main Arguments",
-      "- RoPE naturally supports variable-length contexts",
-      "",
-      "## Recommendations",
-      "- Create wiki/concepts/rope.md",
-      "- Create wiki/sources/rope-paper.md",
+      "## Candidate Objects",
+      "- Name: Moonwell oath",
+      "  - object_type: world_fact",
+      "  - suggested_route: wiki/world/",
+      "  - action: create",
+      "  - evidence_summary: The oath binds bells to tide records.",
+      "  - brief_inference: This is stable setting knowledge.",
+      "  - confidence: high",
+      "  - uncertainty: none",
+      "- Name: Old Bell Tower",
+      "  - object_type: location",
+      "  - suggested_route: wiki/locations/",
+      "  - action: create",
+      "  - evidence_summary: It stores public tide records.",
+      "  - brief_inference: This is a reusable campaign location.",
+      "  - confidence: high",
+      "  - uncertainty: none",
     ].join("\n"),
     generationResponse: [
-      "I'll create one concept page and the source summary.",
-      "",
-      "---FILE: wiki/concepts/rope.md---",
+      "---FILE: wiki/world/moonwell-oath.md---",
       "---",
-      "title: Rotary Position Embedding",
-      "tags: [positional-encoding]",
-      "sources: [rope-paper.md]",
+      'type: "world"',
+      'title: "Moonwell Oath"',
+      'sources: ["raw/sources/moonwell-lore.md"]',
+      "tags: []",
+      "related: []",
       "---",
       "",
-      "# Rotary Position Embedding",
+      "# Moonwell Oath",
       "",
-      "RoPE rotates pairs of dimensions in [[attention]] queries and keys",
-      "to encode absolute position while preserving relative-position invariance.",
+      "The Moonwell oath binds harbor bells to the tide calendar.",
       "---END FILE---",
       "",
-      "---FILE: wiki/sources/rope-paper.md---",
+      "---FILE: wiki/locations/old-bell-tower.md---",
       "---",
-      "title: \"Source: rope-paper.md\"",
-      "sources: [rope-paper.md]",
+      'type: "locations"',
+      'title: "Old Bell Tower"',
+      'sources: ["raw/sources/moonwell-lore.md"]',
+      "tags: []",
+      "related: [moonwell-oath]",
       "---",
       "",
-      "# Source: rope-paper.md",
+      "# Old Bell Tower",
       "",
-      "Paper introducing [[Rotary Position Embedding]].",
+      "The Old Bell Tower stores public tide records used by pilots.",
+      "---END FILE---",
+      "",
+      "---FILE: wiki/sources/moonwell-lore.md---",
+      "---",
+      'type: "source"',
+      'title: "Source: moonwell-lore.md"',
+      'sources: ["raw/sources/moonwell-lore.md"]',
+      "---",
+      "",
+      "# Source: moonwell-lore.md",
+      "",
+      "Source notes for the Moonwell oath and Old Bell Tower.",
       "---END FILE---",
     ].join("\n"),
     expected: {
       writtenPaths: [
-        "wiki/concepts/rope.md",
-        "wiki/sources/rope-paper.md",
+        "wiki/world/moonwell-oath.md",
+        "wiki/locations/old-bell-tower.md",
+        "wiki/sources/moonwell-lore.md",
       ],
       fileContains: {
-        "wiki/concepts/rope.md": [
-          "title: Rotary Position Embedding",
-          "[[attention]]",
-        ],
-        "wiki/sources/rope-paper.md": ["rope-paper.md"],
+        "wiki/world/moonwell-oath.md": ["Moonwell oath binds harbor bells"],
+        "wiki/locations/old-bell-tower.md": ["public tide records"],
+        "wiki/sources/moonwell-lore.md": ["moonwell-lore.md"],
       },
       reviewsCreated: [],
     },
   },
-
-  // 2. generates-review-items — REVIEW blocks in generation become store items
   {
     name: "generates-review-items",
     description:
-      "Stage 2 emits one FILE and two REVIEW blocks (missing-page + " +
-      "suggestion). Both reviews must appear in the store after ingest.",
-    initialWiki: {
-      "purpose.md": BASIC_PURPOSE,
-      "schema.md": BASIC_SCHEMA,
-      "wiki/index.md": BASIC_INDEX,
-    },
+      "Stage 2 emits a source page plus REVIEW blocks. Reviews should still appear in the review store.",
+    initialWiki: BASE_INITIAL_WIKI,
     source: {
-      path: "raw/sources/flash-attention.md",
-      content:
-        "# FlashAttention\n\nFlashAttention is an IO-aware exact attention algorithm.\n",
+      path: "raw/sources/amber-guild-note.md",
+      content: "The Amber Guild appears in a rumor, but its agenda is unclear.",
     },
-    analysisResponse: "## Key Concepts\n- FlashAttention\n",
+    analysisResponse: [
+      "## Source Profile",
+      "- source_kind: mixed",
+      "- live_input_marker: none",
+      "- dominant_focus: unclear faction rumor",
+      "- needed_categories: []",
+      "- suppressed_categories: [factions]",
+      "- live_scene_allowed: false",
+      "- event_extraction_mode: none",
+      "",
+      "## Candidate Objects",
+      "- Name: Amber Guild",
+      "  - object_type: faction",
+      "  - suggested_route: wiki/factions/",
+      "  - action: ignore",
+      "  - evidence_summary: Only a rumor names the faction.",
+      "  - brief_inference: Evidence is too thin for a canonical page.",
+      "  - confidence: low",
+      "  - uncertainty: agenda unknown",
+    ].join("\n"),
     generationResponse: [
-      "---FILE: wiki/sources/flash-attention.md---",
+      "---FILE: wiki/sources/amber-guild-note.md---",
       "---",
-      "title: \"Source: flash-attention.md\"",
-      "sources: [flash-attention.md]",
+      'type: "source"',
+      'title: "Source: amber-guild-note.md"',
+      'sources: ["raw/sources/amber-guild-note.md"]',
       "---",
       "",
-      "# Source: flash-attention.md",
+      "# Source: amber-guild-note.md",
       "",
-      "FlashAttention is mentioned here.",
+      "A rumor mentions the Amber Guild, but does not establish its agenda.",
       "---END FILE---",
       "",
-      "---REVIEW: missing-page | FlashAttention---",
-      "The source introduces FlashAttention but no dedicated page exists.",
-      "OPTIONS: Create page | Skip",
-      "PAGES: wiki/sources/flash-attention.md",
+      "---REVIEW: missing-page | Amber Guild evidence---",
+      "The Amber Guild may need a faction page once stronger evidence exists.",
+      "OPTIONS: Create Page | Skip",
+      "PAGES: wiki/sources/amber-guild-note.md",
       "---END REVIEW---",
       "",
-      "---REVIEW: suggestion | Add IO-aware algorithms survey---",
-      "Consider a survey page grouping IO-aware attention variants.",
+      "---REVIEW: suggestion | Track faction rumors---",
+      "Consider a memory note for unresolved faction rumors.",
       "---END REVIEW---",
     ].join("\n"),
     expected: {
-      writtenPaths: ["wiki/sources/flash-attention.md"],
+      writtenPaths: ["wiki/sources/amber-guild-note.md"],
       reviewsCreated: [
-        { type: "missing-page", titleContains: "FlashAttention" },
-        { type: "suggestion", titleContains: "IO-aware" },
+        { type: "missing-page", titleContains: "Amber Guild" },
+        { type: "suggestion", titleContains: "faction rumors" },
       ],
     },
   },
-
-  // 3. references-existing-wikilinks — generated pages link to existing pages
   {
-    name: "references-existing-wikilinks",
+    name: "references-existing-rpg-pages",
     description:
-      "The generated wiki page must include [[attention]] — linking back " +
-      "to a page that already exists in the wiki. Runner asserts substring.",
+      "Generated relationship pages can link to existing RPG character pages without using legacy concepts.",
     initialWiki: {
-      "purpose.md": BASIC_PURPOSE,
-      "schema.md": BASIC_SCHEMA,
-      "wiki/index.md": BASIC_INDEX,
-      "wiki/attention.md":
-        "---\ntitle: Attention\n---\n\n# Attention\n\nThe attention mechanism.\n",
+      ...BASE_INITIAL_WIKI,
+      "wiki/characters/mira-vale.md": [
+        "---",
+        'type: "characters"',
+        'title: "Mira Vale"',
+        "---",
+        "",
+        "# Mira Vale",
+        "",
+        "A pilot who watches the tide calendar closely.",
+      ].join("\n"),
     },
     source: {
-      path: "raw/sources/multi-head.md",
-      content: "# Multi-Head Attention\n\nParallel attention heads.\n",
+      path: "raw/sources/mira-trust.md",
+      content: "Mira Vale trusts the player after they returned the lantern key.",
     },
-    analysisResponse:
-      "## Connections to Existing Wiki\n" +
-      "- Multi-head attention is a variant of attention — existing [[attention]] page should be linked.\n",
+    analysisResponse: [
+      "## Source Profile",
+      "- source_kind: plot_character_analysis",
+      "- live_input_marker: none",
+      "- dominant_focus: relationship state",
+      "- needed_categories: [relationships]",
+      "- suppressed_categories: [current-scene]",
+      "- live_scene_allowed: false",
+      "- event_extraction_mode: none",
+      "",
+      "## Candidate Objects",
+      "- Name: Player and Mira trust",
+      "  - object_type: relationship",
+      "  - suggested_route: wiki/relationships/",
+      "  - action: create",
+      "  - evidence_summary: Mira trusts the player after the lantern key was returned.",
+      "  - brief_inference: This is relationship tension/state.",
+      "  - confidence: high",
+      "  - uncertainty: none",
+    ].join("\n"),
     generationResponse: [
-      "---FILE: wiki/concepts/multi-head-attention.md---",
+      "---FILE: wiki/relationships/player-mira-trust.md---",
       "---",
-      "title: Multi-Head Attention",
+      'type: "relationships"',
+      'title: "Player and Mira Trust"',
+      'sources: ["raw/sources/mira-trust.md"]',
+      "tags: []",
+      "related: [mira-vale]",
       "---",
       "",
-      "# Multi-Head Attention",
+      "# Player and Mira Trust",
       "",
-      "Multi-head [[attention]] runs several attention layers in parallel.",
+      "[[Mira Vale]] trusts the player because the lantern key was returned.",
       "---END FILE---",
       "",
-      "---FILE: wiki/sources/multi-head.md---",
+      "---FILE: wiki/sources/mira-trust.md---",
       "---",
-      "title: \"Source: multi-head.md\"",
+      'type: "source"',
+      'title: "Source: mira-trust.md"',
+      'sources: ["raw/sources/mira-trust.md"]',
       "---",
       "",
-      "# Source: multi-head.md",
+      "# Source: mira-trust.md",
       "",
-      "Source for multi-head [[attention]].",
+      "Relationship source for [[Mira Vale]].",
       "---END FILE---",
     ].join("\n"),
     expected: {
       writtenPaths: [
-        "wiki/concepts/multi-head-attention.md",
-        "wiki/sources/multi-head.md",
+        "wiki/relationships/player-mira-trust.md",
+        "wiki/sources/mira-trust.md",
       ],
       fileContains: {
-        "wiki/concepts/multi-head-attention.md": ["[[attention]]"],
+        "wiki/relationships/player-mira-trust.md": ["[[Mira Vale]]"],
       },
+      reviewsCreated: [],
     },
   },
-
-  // 4. chinese-source — Chinese content flows through to Chinese wiki pages
   {
-    name: "chinese-source",
+    name: "rejects-legacy-file-blocks",
     description:
-      "Chinese-language source document; LLM responses in Chinese. " +
-      "UTF-8 round-trip through file write must be clean.",
-    initialWiki: {
-      "purpose.md": "# 用途\n\n深度学习研究笔记。\n",
-      "schema.md": BASIC_SCHEMA,
-      "wiki/index.md": "# 索引\n\n- [[注意力机制]]\n",
-    },
+      "If a model response still emits legacy llm_wiki FILE blocks, the writer refuses them and only keeps RPG source output.",
+    initialWiki: BASE_INITIAL_WIKI,
     source: {
-      path: "raw/sources/transformer-survey.md",
-      content: "# Transformer 综述\n\nTransformer 是一种基于注意力机制的神经网络架构。\n",
+      path: "raw/sources/legacy-noise.md",
+      content: "This source should not produce entities, concepts, or queries in RPG-only mode.",
     },
-    analysisResponse: "## 核心概念\n- Transformer：基于注意力机制的架构\n",
+    analysisResponse: [
+      "## Source Profile",
+      "- source_kind: mixed",
+      "- live_input_marker: none",
+      "- dominant_focus: legacy routing regression",
+      "- needed_categories: []",
+      "- suppressed_categories: []",
+      "- live_scene_allowed: false",
+      "- event_extraction_mode: none",
+      "",
+      "## Candidate Objects",
+      "- Name: legacy noise",
+      "  - object_type: wiki_noise",
+      "  - suggested_route: ignore",
+      "  - action: ignore",
+      "  - evidence_summary: Regression fixture.",
+      "  - brief_inference: Legacy output should be rejected.",
+      "  - confidence: high",
+      "  - uncertainty: none",
+    ].join("\n"),
     generationResponse: [
-      "---FILE: wiki/concepts/transformer.md---",
+      "---FILE: wiki/entities/old-entity.md---",
       "---",
-      "title: Transformer",
+      'type: "entity"',
+      'title: "Old Entity"',
       "---",
       "",
-      "# Transformer",
+      "# Old Entity",
       "",
-      "Transformer 是一种基于 [[注意力机制]] 的神经网络架构。",
+      "This must not be written.",
       "---END FILE---",
       "",
-      "---FILE: wiki/sources/transformer-survey.md---",
+      "---FILE: wiki/concepts/old-concept.md---",
       "---",
-      "title: \"Source: transformer-survey.md\"",
+      'type: "concept"',
+      'title: "Old Concept"',
       "---",
       "",
-      "# Source: transformer-survey.md",
+      "# Old Concept",
       "",
-      "关于 [[Transformer]] 的综述。",
+      "This must not be written.",
+      "---END FILE---",
+      "",
+      "---FILE: wiki/queries/old-query.md---",
+      "---",
+      'type: "query"',
+      'title: "Old Query"',
+      "---",
+      "",
+      "# Old Query",
+      "",
+      "This must not be written.",
+      "---END FILE---",
+      "",
+      "---FILE: wiki/sources/legacy-noise.md---",
+      "---",
+      'type: "source"',
+      'title: "Source: legacy-noise.md"',
+      'sources: ["raw/sources/legacy-noise.md"]',
+      "---",
+      "",
+      "# Source: legacy-noise.md",
+      "",
+      "Legacy routing regression fixture.",
       "---END FILE---",
     ].join("\n"),
     expected: {
-      writtenPaths: [
-        "wiki/concepts/transformer.md",
-        "wiki/sources/transformer-survey.md",
-      ],
+      writtenPaths: ["wiki/sources/legacy-noise.md"],
       fileContains: {
-        "wiki/concepts/transformer.md": [
-          "title: Transformer",
-          "[[注意力机制]]",
-        ],
+        "wiki/sources/legacy-noise.md": ["Legacy routing regression fixture"],
       },
+      reviewsCreated: [
+        { type: "suggestion", titleContains: "legacy path rejected" },
+      ],
     },
   },
 ]

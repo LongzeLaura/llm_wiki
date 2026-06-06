@@ -1,8 +1,8 @@
 import { useState, useEffect, useRef, useCallback } from "react"
 import {
   ChevronUp, ChevronDown, Loader2, CheckCircle2, AlertCircle,
-  FileText, Users, Lightbulb, BookOpen, GitMerge, BarChart3, HelpCircle, Layout,
-  RotateCcw, X, Clock, TrendingUp, Target,
+  FileText, Users, User, BookOpen, GitMerge, Layout,
+  RotateCcw, X, Clock, TrendingUp, Target, Globe, MapPinned, Shield, Package, Eye, Link2,
 } from "lucide-react"
 import { useActivityStore, type ActivityItem } from "@/stores/activity-store"
 import { useWikiStore } from "@/stores/wiki-store"
@@ -27,27 +27,39 @@ import { inferWikiTypeFromPath, wikiTypeLabel } from "@/lib/wiki-page-types"
 
 const FILE_TYPE_ICONS: Record<string, typeof FileText> = {
   sources: BookOpen,
-  entities: Users,
-  concepts: Lightbulb,
-  queries: HelpCircle,
-  synthesis: GitMerge,
-  comparisons: BarChart3,
-  findings: TrendingUp,
-  thesis: Target,
-  methodology: BookOpen,
+  world: Globe,
+  characters: Users,
+  player: User,
+  locations: MapPinned,
+  factions: Shield,
+  items: Package,
+  "plot-arcs": GitMerge,
+  events: TrendingUp,
+  "current-scene": Eye,
+  relationships: Link2,
+  style: FileText,
+  rules: BookOpen,
+  quests: Target,
+  memory: FileText,
   overview: Layout,
 }
 
 const WIKI_TYPE_ICON_KEYS: Record<string, keyof typeof FILE_TYPE_ICONS> = {
-  entity: "entities",
-  concept: "concepts",
   source: "sources",
-  query: "queries",
-  synthesis: "synthesis",
-  comparison: "comparisons",
-  finding: "findings",
-  thesis: "thesis",
-  methodology: "methodology",
+  world: "world",
+  characters: "characters",
+  player: "player",
+  locations: "locations",
+  factions: "factions",
+  items: "items",
+  "plot-arcs": "plot-arcs",
+  events: "events",
+  "current-scene": "current-scene",
+  relationships: "relationships",
+  style: "style",
+  rules: "rules",
+  quests: "quests",
+  memory: "memory",
   overview: "overview",
 }
 

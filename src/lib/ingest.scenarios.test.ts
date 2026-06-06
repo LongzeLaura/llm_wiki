@@ -114,6 +114,14 @@ async function setup(scenario: IngestScenario): Promise<Ctx> {
   return { tmp }
 }
 
+async function writeRpgProjectFiles(projectPath: string): Promise<void> {
+  await writeFileRaw(`${projectPath}/.llm-wiki/project.json`, JSON.stringify({ mode: "llmwikirpg" }))
+  await writeFileRaw(`${projectPath}/schema.md`, "wikiMode: llmwikirpg\n")
+  await writeFileRaw(`${projectPath}/purpose.md`, "")
+  await writeFileRaw(`${projectPath}/wiki/index.md`, "# Index\n")
+  await writeFileRaw(`${projectPath}/wiki/overview.md`, "# Overview\n")
+}
+
 afterEach(async () => {
   if (ctx) {
     await ctx.tmp.cleanup()
@@ -270,10 +278,7 @@ describe("ingest scenarios (fixture-driven)", () => {
     ctx = { tmp: await createTempProject("ingest-duplicate-source-basenames") }
     const projectPath = ctx.tmp.path
 
-    await writeFileRaw(`${projectPath}/schema.md`, "")
-    await writeFileRaw(`${projectPath}/purpose.md`, "")
-    await writeFileRaw(`${projectPath}/wiki/index.md`, "# Index\n")
-    await writeFileRaw(`${projectPath}/wiki/overview.md`, "")
+    await writeRpgProjectFiles(projectPath)
     await writeFileRaw(`${projectPath}/raw/sources/project-a/config.yaml`, "name: project-a\n")
     await writeFileRaw(`${projectPath}/raw/sources/project-b/config.yaml`, "name: project-b\n")
 
@@ -358,9 +363,7 @@ describe("ingest scenarios (fixture-driven)", () => {
     ctx = { tmp: await createTempProject("ingest-rpg-current-scene") }
     const projectPath = ctx.tmp.path
 
-    await writeFileRaw(`${projectPath}/schema.md`, "")
-    await writeFileRaw(`${projectPath}/purpose.md`, "")
-    await writeFileRaw(`${projectPath}/wiki/index.md`, "# Index\n")
+    await writeRpgProjectFiles(projectPath)
     await writeFileRaw(`${projectPath}/raw/sources/turn-1.md`, "[RPG-LIVE]\nturn one")
     await writeFileRaw(`${projectPath}/raw/sources/turn-2.md`, "[RPG-LIVE]\nturn two")
 
@@ -420,9 +423,7 @@ describe("ingest scenarios (fixture-driven)", () => {
     ctx = { tmp: await createTempProject("ingest-rpg-static-current-scene-block") }
     const projectPath = ctx.tmp.path
 
-    await writeFileRaw(`${projectPath}/schema.md`, "")
-    await writeFileRaw(`${projectPath}/purpose.md`, "")
-    await writeFileRaw(`${projectPath}/wiki/index.md`, "# Index\n")
+    await writeRpgProjectFiles(projectPath)
     await writeFileRaw(
       `${projectPath}/raw/sources/fate-ending.md`,
       "HF True End flower-viewing ending. Years later, Shirou and Saber reunite beneath the cherry blossoms. This is an ending summary and route recap.",
@@ -477,9 +478,7 @@ describe("ingest scenarios (fixture-driven)", () => {
     ctx = { tmp: await createTempProject("ingest-rpg-explicit-current-scene") }
     const projectPath = ctx.tmp.path
 
-    await writeFileRaw(`${projectPath}/schema.md`, "")
-    await writeFileRaw(`${projectPath}/purpose.md`, "")
-    await writeFileRaw(`${projectPath}/wiki/index.md`, "# Index\n")
+    await writeRpgProjectFiles(projectPath)
     await writeFileRaw(
       `${projectPath}/raw/sources/current-scene.md`,
       "[RPG-LIVE]\nCurrent scene: the player stands at the church gate in Fuyuki City while the GM describes lamplight inside the church.",
@@ -523,9 +522,7 @@ describe("ingest scenarios (fixture-driven)", () => {
     ctx = { tmp: await createTempProject("ingest-rpg-unmarked-current-scene-block") }
     const projectPath = ctx.tmp.path
 
-    await writeFileRaw(`${projectPath}/schema.md`, "")
-    await writeFileRaw(`${projectPath}/purpose.md`, "")
-    await writeFileRaw(`${projectPath}/wiki/index.md`, "# Index\n")
+    await writeRpgProjectFiles(projectPath)
     await writeFileRaw(
       `${projectPath}/raw/sources/current-scene.md`,
       "Current scene: the player stands at the church gate in Fuyuki City.\nGM: Candlelight moves behind the door.\nPlayer: I prepare to enter.",
@@ -666,9 +663,7 @@ describe("ingest scenarios (fixture-driven)", () => {
     ctx = { tmp: await createTempProject("ingest-rpg-events") }
     const projectPath = ctx.tmp.path
 
-    await writeFileRaw(`${projectPath}/schema.md`, "")
-    await writeFileRaw(`${projectPath}/purpose.md`, "")
-    await writeFileRaw(`${projectPath}/wiki/index.md`, "# Index\n")
+    await writeRpgProjectFiles(projectPath)
     await writeFileRaw(`${projectPath}/raw/sources/turn-1.md`, "turn one")
     await writeFileRaw(`${projectPath}/raw/sources/turn-2.md`, "turn two")
 
@@ -725,9 +720,7 @@ describe("ingest scenarios (fixture-driven)", () => {
     ctx = { tmp: await createTempProject("ingest-rpg-event-pollution-guard") }
     const projectPath = ctx.tmp.path
 
-    await writeFileRaw(`${projectPath}/schema.md`, "")
-    await writeFileRaw(`${projectPath}/purpose.md`, "")
-    await writeFileRaw(`${projectPath}/wiki/index.md`, "# Index\n")
+    await writeRpgProjectFiles(projectPath)
     await writeFileRaw(`${projectPath}/raw/sources/turn-1.md`, "turn one")
 
     useWikiStore.setState({

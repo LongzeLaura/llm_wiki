@@ -1,7 +1,7 @@
 import { invoke } from "@tauri-apps/api/core"
 import type { FileNode, WikiProject } from "@/types/wiki"
 import { ensureProjectId, upsertProjectInfo } from "@/lib/project-identity"
-import { DEFAULT_PROJECT_MODE, writeProjectMode, type ProjectMode } from "@/lib/project-mode"
+import { DEFAULT_PROJECT_MODE, writeProjectMode } from "@/lib/project-mode"
 
 /** Raw shape returned by the Rust commands — id is attached client-side. */
 interface RawProject {
@@ -93,12 +93,11 @@ export async function readFileAsBase64(path: string): Promise<FileBase64> {
 export async function createProject(
   name: string,
   path: string,
-  mode: ProjectMode = DEFAULT_PROJECT_MODE,
 ): Promise<WikiProject> {
   const raw = await invoke<RawProject>("create_project", { name, path })
   const id = await ensureProjectId(raw.path)
   await upsertProjectInfo(id, raw.path, raw.name)
-  await writeProjectMode(raw.path, mode)
+  await writeProjectMode(raw.path, DEFAULT_PROJECT_MODE)
   return { id, name: raw.name, path: raw.path }
 }
 

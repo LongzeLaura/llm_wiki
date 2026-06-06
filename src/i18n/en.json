@@ -1,10 +1,11 @@
 {
   "app": {
-    "title": "LLM Wiki",
-    "subtitle": "Build and maintain your personal knowledge base with LLMs"
+    "title": "llmWikiRPG",
+    "subtitle": "Run an RPG knowledge base for sources, scenes, state, relationships, and turn memory"
   },
   "nav": {
     "wiki": "Wiki",
+    "play": "Play",
     "sources": "Sources",
     "search": "Search",
     "graph": "Graph",
@@ -122,7 +123,7 @@
   "chat": {
     "placeholder": "Ask about your wiki...",
     "ingestPlaceholder": "Discuss the source or ask follow-up questions...",
-    "saveToWiki": "Save to Wiki",
+    "saveToWiki": "Save to Memory",
     "saving": "Saving...",
     "saved": "Saved!",
     "writeToWiki": "Write to Wiki",
@@ -344,7 +345,7 @@
       },
       "webSearch": {
         "title": "External Information Sources",
-        "description": "Configure external information sources that LLM Wiki can use.",
+        "description": "Configure external information sources that llmWikiRPG can use.",
         "deepResearchSources": "Deep Research source mode",
         "deepResearchSourcesHint": "Web Search uses the selected online provider. AnyTXT searches local indexed files through ATGUI.exe on this machine.",
         "sourceWeb": "Web Search",
@@ -496,7 +497,11 @@
       },
       "maintenance": {
         "title": "Maintenance",
-        "description": "Tools for cleaning up the wiki — detect and merge duplicate entities/concepts that the LLM created under different names across re-ingests.",
+        "description": "RPG-only maintenance tools will appear here. Legacy entity/concept duplicate cleanup is no longer exposed.",
+        "rpgOnly": {
+          "title": "RPG runtime maintenance",
+          "description": "llmWikiRPG keeps legacy llm_wiki cleanup actions hidden. Future maintenance actions should operate on RPG runtime directories such as current-scene, events, relationships, and memory."
+        },
         "noProject": "Open a project first.",
         "noLlm": "Configure an LLM provider first.",
         "dedup": {

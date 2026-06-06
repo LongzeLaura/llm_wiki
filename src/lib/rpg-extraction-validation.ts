@@ -31,6 +31,17 @@ const DEFAULT_REVIEW_OPTIONS: ReviewItem["options"] = [
   { label: "Dismiss", action: "Dismiss" },
 ]
 
+const LEGACY_WIKI_DIRS = new Set([
+  "entities",
+  "concepts",
+  "queries",
+  "comparisons",
+  "synthesis",
+  "methodology",
+  "findings",
+  "thesis",
+])
+
 // Small regression fixture list from observed misroutes. This is not meant
 // to be a general canon-character database.
 const HIGH_RISK_CANON_CHARACTER_TOKENS = [
@@ -104,15 +115,6 @@ const EVENT_TIME_ANCHOR_REGEXES = [
   /\b(?:day|year|chapter|episode)\s+\d+\b/giu,
   /第[一二三四五六七八九十百\d]+(?:天|日|周|月|年|章|幕)/gu,
   /(当天|当夜|次日|第二天|第三天|数日后|一周后|数月后|多年后|later|days later|weeks later|months later|years later)/giu,
-] as const
-
-const CONCEPT_TAG_TOKENS = [
-  "萌点",
-  "贫穷",
-  "电气白痴",
-  "傲娇",
-  "moe",
-  "tsundere",
 ] as const
 
 const LOCATION_REGEXES = [
@@ -227,18 +229,15 @@ export function validateRpgExtraction(
       }
     }
 
-    if (isConceptPath(block.path)) {
-      const tagMatches = findTokens(block.text, CONCEPT_TAG_TOKENS)
-      if (tagMatches.length > 0) {
-        warnings.push(
-          `Concept page "${block.title}" contains trope/community-tag wording (${tagMatches.join(", ")}); this likely belongs in a character page instead.`,
-        )
-        pushReview(
-          `RPG extraction lint: concept page looks like trope or community tag`,
-          `wiki/concepts/ should stay reusable setting or mechanism knowledge. "${block.title}" contains trope/tag wording (${tagMatches.join(", ")}), so this material likely belongs under wiki/characters/ as character portrayal detail instead.`,
-          [block.path],
-        )
-      }
+    if (isLegacyWikiPath(block.path)) {
+      warnings.push(
+        `Legacy llm_wiki path "${block.path}" is not supported in llmWikiRPG mode.`,
+      )
+      pushReview(
+        `RPG extraction lint: legacy path rejected`,
+        `llmWikiRPG no longer writes legacy llm_wiki directories. Move "${block.title}" to an RPG runtime directory such as wiki/world/, wiki/characters/, wiki/player/, wiki/locations/, wiki/factions/, wiki/items/, wiki/plot-arcs/, wiki/events/, wiki/current-scene/, wiki/relationships/, wiki/style/, wiki/rules/, wiki/quests/, or wiki/memory/.`,
+        [block.path],
+      )
     }
   }
 
@@ -339,8 +338,9 @@ function isCurrentScenePath(path: string): boolean {
   return normalizePath(path).startsWith("wiki/current-scene/")
 }
 
-function isConceptPath(path: string): boolean {
-  return normalizePath(path).startsWith("wiki/concepts/")
+function isLegacyWikiPath(path: string): boolean {
+  const match = normalizePath(path).match(/^wiki\/([^/]+)(?:\/|$)/)
+  return match ? LEGACY_WIKI_DIRS.has(match[1]) : false
 }
 
 function isLocationPath(path: string): boolean {
