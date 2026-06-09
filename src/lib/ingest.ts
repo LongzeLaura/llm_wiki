@@ -25,11 +25,28 @@ import {
 import { captionMarkdownImages, loadCaptionCache } from "@/lib/image-caption-pipeline"
 import type { MultimodalConfig } from "@/stores/wiki-store"
 import { computeContextBudget } from "@/lib/context-budget"
-import { getRpgWikiSchemaEntry, type RpgWikiUpdateStrategy } from "@/lib/rpg-wiki-schema"
+import {
+  getRpgSourceIngestForbiddenTarget,
+  getRpgWikiSchemaEntry,
+  isRpgSourceIngestAllowedTarget,
+  type RpgWikiUpdateStrategy,
+} from "@/lib/rpg-wiki-schema"
 import { prepareExistingContentForRpgDynamicMerge, validateRpgDynamicWrite } from "@/lib/rpg-dynamic-update"
 import { validateRpgExtraction, type RpgExtractionValidationBlock } from "@/lib/rpg-extraction-validation"
 import { detectWikiMode, isRpgWikiMode, type WikiMode } from "@/lib/wiki-mode"
-import { buildRpgAnalysisPrompt, buildRpgGenerationPrompt } from "@/lib/prompts/rpg-ingest"
+import {
+  buildChunkAnalysisSystemPrompt,
+  buildChunkAnalysisUserPrompt,
+  sourceIngestAnalysisInteractionSpec,
+  sourceIngestGenerationInteractionSpec,
+} from "@/lib/rpg-interactions/source-ingest"
+import { pageMergeInteractionSpec } from "@/lib/rpg-interactions/merge"
+import {
+  buildStructuredRpgSignalContext,
+  mergeRpgIngestSignals,
+  parseRpgIngestSignalsFromText,
+  type RpgIngestSignal,
+} from "@/lib/rpg-ingest-signals"
 
 const LONG_SOURCE_MIN_BUDGET = 8_000
 const LONG_SOURCE_MAX_SINGLE_PASS_BUDGET = 300_000
@@ -114,7 +131,7 @@ interface LongSourcePlan {
 }
 
 interface LongSourceCheckpoint {
-  version: 1
+  version: 2
   sourceIdentity: string
   sourceHash: string
   sourceLength: number
@@ -125,6 +142,7 @@ interface LongSourceCheckpoint {
   completedThrough: number
   globalDigest: string
   analyses: string[]
+  signals: RpgIngestSignal[]
   updatedAt: number
 }
 
@@ -719,11 +737,19 @@ async function autoIngestImpl(
   let analysis = precomputedAnalysis
 
   if (!analysis) {
+    const prompt = sourceIngestAnalysisInteractionSpec.buildPrompt({
+      purpose,
+      index,
+      sourceContent: sourceContext,
+      sourceIdentity,
+      folderContext,
+    })
+
     await streamChat(
       llmConfig,
       [
-        { role: "system", content: buildAnalysisPrompt(purpose, index, sourceContext, wikiMode) },
-        { role: "user", content: `Analyze this source document:\n\n**File:** ${sourceIdentity}${folderContext ? `\n**Folder context:** ${folderContext}` : ""}\n\n---\n\n${sourceContext}` },
+        { role: "system", content: prompt.systemPrompt },
+        { role: "user", content: prompt.userPrompt },
       ],
       {
         onToken: (token) => { analysis += token },
@@ -750,35 +776,22 @@ async function autoIngestImpl(
   activity.updateItem(activityId, { detail: "Step 2/2: Generating wiki pages..." })
 
   let generation = ""
+  const generationPrompt = sourceIngestGenerationInteractionSpec.buildPrompt({
+    schema,
+    purpose,
+    index,
+    sourceIdentity,
+    overview,
+    sourceContent: sourceContext,
+    sourceSummaryPath,
+    stage1Analysis: analysis,
+  })
 
   await streamChat(
     llmConfig,
     [
-      { role: "system", content: buildGenerationPrompt(schema, purpose, index, sourceIdentity, overview, sourceContext, sourceSummaryPath, wikiMode, analysis) },
-      {
-        role: "user",
-        content: [
-          `Source document to process: **${sourceIdentity}**`,
-          "",
-          "The Stage 1 analysis below is CONTEXT to inform your output. Do NOT echo",
-          "its tables, bullet points, or prose. Your output must be FILE/REVIEW",
-          "blocks as specified in the system prompt -- nothing else.",
-          "",
-          "## Stage 1 Analysis (context only -- do not repeat)",
-          "",
-          analysis,
-          "",
-          "## Source Context",
-          "",
-          sourceContext,
-          "",
-          "---",
-          "",
-          `Now emit the FILE blocks for the wiki files derived from **${sourceIdentity}**.`,
-          "Your response MUST begin with `---FILE:` as the very first characters.",
-          "No preamble. No analysis prose. Start immediately.",
-        ].join("\n"),
-      },
+      { role: "system", content: generationPrompt.systemPrompt },
+      { role: "user", content: generationPrompt.userPrompt },
     ],
     {
       onToken: (token) => { generation += token },
@@ -1076,6 +1089,13 @@ function isLegacyWikiPath(relativePath: string): boolean {
   return categoryId ? LEGACY_WIKI_DIRS.has(categoryId) : false
 }
 
+function sourceIngestTargetLabel(relativePath: string): string {
+  const match = normalizePath(relativePath).match(/^wiki\/([^/]+)(?:\/([^/]+))?/)
+  if (!match) return "unsupported"
+  if (match[2] === "runtime") return `${match[1]}/runtime`
+  return match[1]
+}
+
 /**
  * 根据路径确定写入策略（追加/覆盖/合并等）。
  * 为什么需要：不同类型的页面有不同的写入语义——
@@ -1090,7 +1110,7 @@ function wikiStorageStrategyForPath(relativePath: string): WikiStorageStrategy {
   if (!schemaEntry) return { path: relativePath, updateStrategy: "merge" }
 
   if (schemaEntry.categoryId === "current-scene") {
-    return { path: "wiki/current-scene/scene_state.md", updateStrategy: schemaEntry.updateStrategy }
+    return { path: relativePath, updateStrategy: schemaEntry.updateStrategy }
   }
 
   return { path: relativePath, updateStrategy: schemaEntry.updateStrategy }
@@ -1288,6 +1308,7 @@ async function writeFileBlocks(
 
   const targetLang = useWikiStore.getState().outputLanguage
   const preparedBlocks: Array<RpgExtractionValidationBlock & { updateStrategy: ReturnType<typeof wikiStorageStrategyForPath>["updateStrategy"] }> = []
+  const rpgMode = isRpgWikiMode(wikiMode)
 
   for (const { path: rawRelativePath, content: rawContent } of blocks) {
     let relativePath = rawRelativePath
@@ -1295,12 +1316,52 @@ async function writeFileBlocks(
       relativePath = sourceSummaryPath
     }
     if (isLegacyWikiPath(relativePath)) {
-      const msg = `Rejected legacy llm_wiki FILE block "${relativePath}". llmWikiRPG only writes RPG runtime directories; use wiki/sources/, wiki/world/, wiki/characters/, wiki/player/, wiki/locations/, wiki/factions/, wiki/items/, wiki/plot-arcs/, wiki/events/, wiki/current-scene/, wiki/relationships/, wiki/style/, wiki/rules/, wiki/quests/, or wiki/memory/.`
+      const msg = `Rejected legacy llm_wiki FILE block "${relativePath}". Ordinary llmWikiRPG Source Ingest writes only wiki/sources/, wiki/world/, wiki/characters/, fixed wiki/player/ slots when the source explicitly declares the current PC, wiki/locations/, wiki/factions/, wiki/items/, wiki/plot-arcs/, wiki/events/, wiki/relationships/, plus wiki/index.md, wiki/overview.md, and wiki/log.md.`
       console.warn(`[ingest] ${msg}`)
       warnings.push(msg)
       reviewItems.push({
         type: "suggestion",
         title: "RPG extraction lint: legacy path rejected",
+        description: msg,
+        sourcePath: sourceFileName ?? undefined,
+        affectedPages: [relativePath],
+        options: [
+          { label: "Inspect", action: "Inspect" },
+          { label: "Dismiss", action: "Dismiss" },
+        ],
+      })
+      continue
+    }
+    if (rpgMode) {
+      const forbiddenTarget = getRpgSourceIngestForbiddenTarget(relativePath)
+      if (forbiddenTarget) {
+        const recommendedModeText = forbiddenTarget.recommendedMode === "review_only"
+          ? "keep it as REVIEW until a dedicated mode owns it"
+          : `use ${forbiddenTarget.recommendedMode}`
+        const msg = `Skipped ordinary Source Ingest FILE block "${relativePath}" because ${forbiddenTarget.reason} Recommended action: ${recommendedModeText}.`
+        console.warn(`[ingest] ${msg}`)
+        warnings.push(msg)
+        reviewItems.push({
+          type: "suggestion",
+          title: `RPG Source Ingest boundary: ${sourceIngestTargetLabel(relativePath)} target skipped`,
+          description: msg,
+          sourcePath: sourceFileName ?? undefined,
+          affectedPages: [relativePath],
+          options: [
+            { label: "Inspect", action: "Inspect" },
+            { label: "Dismiss", action: "Dismiss" },
+          ],
+        })
+        continue
+      }
+    }
+    if (rpgMode && !isRpgSourceIngestAllowedTarget(relativePath)) {
+      const msg = `Skipped ordinary Source Ingest FILE block "${relativePath}" because it is not an allowed source-ingest target. Use wiki/sources/, wiki/world/, wiki/characters/, fixed wiki/player/ slots, wiki/locations/, wiki/factions/, wiki/items/, wiki/plot-arcs/, wiki/events/, wiki/relationships/, or structural wiki/index.md, wiki/overview.md, wiki/log.md.`
+      console.warn(`[ingest] ${msg}`)
+      warnings.push(msg)
+      reviewItems.push({
+        type: "suggestion",
+        title: `RPG Source Ingest boundary: ${sourceIngestTargetLabel(relativePath)} target skipped`,
         description: msg,
         sourcePath: sourceFileName ?? undefined,
         affectedPages: [relativePath],
@@ -1333,7 +1394,7 @@ async function writeFileBlocks(
     })
   }
 
-  if (isRpgWikiMode(wikiMode)) {
+  if (rpgMode) {
     const extractionValidation = validateRpgExtraction(
       preparedBlocks.map(({ path, content }) => ({ path, content })),
       {
@@ -1404,9 +1465,9 @@ async function writeFileBlocks(
         // merge old + new instead of clobbering. The merge has three layers:
         //   1. Frontmatter array fields (sources, tags, related)
         //      are union-merged at the application layer.
-        //   2. If body content differs, an LLM call produces a
-        //      coherent merged body --preserves contributions from
-        //      every source document.
+        //   2. If body content differs, an LLM call produces an
+        //      RPG-aware merged body using page-path semantics rather
+        //      than encyclopedia-style fact accumulation.
         //   3. Locked frontmatter fields (type, title, created)
         //      are forced back to the existing values; updated is
         //      stamped today.
@@ -1596,7 +1657,12 @@ export function buildAnalysisPrompt(
   wikiMode: WikiMode = "llmwikirpg",
 ): string {
   void wikiMode
-  return buildRpgAnalysisPrompt(purpose, index, sourceContent)
+  return sourceIngestAnalysisInteractionSpec.buildPrompt({
+    purpose,
+    index,
+    sourceContent,
+    sourceIdentity: "",
+  }).systemPrompt
 }
 
 export function buildGenerationPrompt(
@@ -1611,7 +1677,16 @@ export function buildGenerationPrompt(
   stage1Analysis?: string,
 ): string {
   void wikiMode
-  return buildRpgGenerationPrompt(schema, purpose, index, sourceFileName, overview, sourceContent, sourceSummaryPath, stage1Analysis)
+  return sourceIngestGenerationInteractionSpec.buildPrompt({
+    schema,
+    purpose,
+    index,
+    sourceIdentity: sourceFileName,
+    overview,
+    sourceContent,
+    sourceSummaryPath,
+    stage1Analysis,
+  }).systemPrompt
 }
 /**
  * 构建审阅建议 prompt：让 LLM 在 Stage 2 生成完成后，识别值得人工关注的
@@ -1952,7 +2027,7 @@ function isCompatibleLongSourceCheckpoint(
     chunkTotal: number
   },
 ): boolean {
-  return checkpoint.version === 1
+  return checkpoint.version === 2
     && checkpoint.sourceIdentity === params.sourceIdentity
     && checkpoint.sourceHash === params.sourceHash
     && checkpoint.sourceLength === params.sourceLength
@@ -1964,6 +2039,7 @@ function isCompatibleLongSourceCheckpoint(
     && checkpoint.completedThrough <= params.chunkTotal
     && Array.isArray(checkpoint.analyses)
     && checkpoint.analyses.length === checkpoint.completedThrough
+    && Array.isArray(checkpoint.signals)
 }
 
 /**
@@ -2025,85 +2101,6 @@ function extractMarkedSection(raw: string, heading: string): string {
 }
 
 /**
- * 构建长文档分块分析的系统 prompt：用于超长源文档的分块处理。
- * 为什么需要：当源文档超过上下文预算时，需要将文档切分为语义块，逐块分析。
- * 此 prompt 要求 LLM 分析当前块并更新全局摘要。
- */
-function buildChunkAnalysisSystemPrompt(
-  purpose: string,
-  schema: string,
-  index: string,
-  sourceContent: string,
-): string {
-  return [
-    // 系统角色：分析长源文档
-    "You are analyzing a long source document for a personal wiki.",
-    // 禁止输出思维链
-    "Do not output chain-of-thought, hidden reasoning, or a thinking transcript.",
-    // 只分析当前主块，用重叠和摘要做上下文
-    "Analyze only the current MAIN CHUNK. Use overlap and digest for context only.",
-    // 保持与已有 wiki 和之前的摘要一致的命名
-    "Keep stable names consistent with the existing wiki and prior digest.",
-    "",
-    languageRule(sourceContent),
-    "",
-    // 输出恰好两个 markdown 部分
-    "Output exactly two markdown sections:",
-    "",
-    // 块分析：简明摘要、实体、概念、主张、证据、矛盾、开放问题
-    "## Chunk Analysis",
-    "- Concise summary of the main chunk",
-    "- New or updated RPG objects, scenes, relationships, or state",
-    "- Routing decisions for RPG runtime directories",
-    "- Claims, evidence, contradictions, and uncertainties",
-    "- Open questions or research gaps",
-    "",
-    // 更新的全局摘要：整合当前块并保留跨块上下文
-    "## Updated Global Digest",
-    "A compact document-level digest that incorporates this chunk and preserves prior cross-chunk context.",
-    "Keep this digest structured under: Summary, RPG Objects, Scene/State Notes, Claims, Evidence, Contradictions, Open Questions, Cross-Chunk Relations.",
-    "",
-    // 稳定的项目上下文（背景）
-    "Stable project context follows. It changes rarely and should be treated as background:",
-    purpose ? `## Wiki Purpose\n${purpose}` : "",
-    schema ? `## Wiki Schema\n${schema}` : "",
-    index ? `## Current Wiki Index\n${trimLongText(index, 40_000)}` : "",
-  ].filter(Boolean).join("\n")
-}
-
-/**
- * 构建长文档分块分析的用户 prompt：为每个语义块提供该块的文本、全局摘要和重叠上下文。
- * 为什么需要：与 buildChunkAnalysisSystemPrompt 配对使用，提供具体的块内容。
- */
-function buildChunkAnalysisUserPrompt(
-  sourceIdentity: string,
-  folderContext: string | undefined,
-  chunk: SourceChunk,
-  globalDigest: string,
-): string {
-  return [
-    `Source file: ${sourceIdentity}`,
-    folderContext ? `Folder context: ${folderContext}` : "",
-    `Chunk: ${chunk.index}/${chunk.total}`,
-    chunk.headingPath ? `Heading path: ${chunk.headingPath}` : "",
-    "",
-    // 当前全局摘要
-    "## Current Global Digest",
-    globalDigest || "(No prior digest yet.)",
-    "",
-    // 前一块的重叠上下文
-    chunk.overlapBefore ? "## Previous Overlap Context\n" + chunk.overlapBefore : "",
-    "",
-    // 要分析的主块
-    "## MAIN CHUNK TO ANALYZE",
-    chunk.main,
-    "",
-    // 只返回两个请求的部分，不要重复仅出现在重叠中的事实
-    "Return only the two requested sections. Do not repeat overlap-only facts unless the main chunk supports them.",
-  ].filter(Boolean).join("\n")
-}
-
-/**
  * 对超长源文档进行分块分析：将源文档按语义边界切分，逐块调用 LLM 分析。
  * 为什么需要：当源文档超过上下文预算时，无法一次性发送给 LLM。
  * 此函数将文档分块，每块附带前一块的上下文重叠，维护全局摘要，
@@ -2146,6 +2143,7 @@ async function analyzeLongSourceInChunks(
   const checkpoint = await loadLongSourceCheckpoint(checkpointPath, checkpointParams)
   let globalDigest = checkpoint?.globalDigest ?? ""
   const analyses: string[] = checkpoint?.analyses ? [...checkpoint.analyses] : []
+  let signalAccumulator: RpgIngestSignal[] = checkpoint?.signals ? [...checkpoint.signals] : []
   let completedThrough = checkpoint?.completedThrough ?? 0
 
   if (completedThrough > 0) {
@@ -2193,11 +2191,14 @@ async function analyzeLongSourceInChunks(
     if (hadError) throw new Error("Chunk analysis stream failed")
 
     const chunkAnalysis = extractMarkedSection(raw, "Chunk Analysis") || raw.trim()
+    const chunkSignals = parseRpgIngestSignalsFromText(raw, { sourceChunkId: chunk.id })
     const nextDigest = extractMarkedSection(raw, "Updated Global Digest")
     analyses.push([
       `## Chunk ${chunk.index}/${chunk.total}${chunk.headingPath ? ` -- ${chunk.headingPath}` : ""}`,
       trimLongText(chunkAnalysis, LONG_SOURCE_CHUNK_ANALYSIS_MAX),
+      chunkSignals.length > 0 ? `\nParsed structured RP runtime signals: ${chunkSignals.length}` : "\nParsed structured RP runtime signals: 0",
     ].join("\n"))
+    signalAccumulator = mergeRpgIngestSignals([...signalAccumulator, ...chunkSignals])
 
     globalDigest = trimLongText(
       nextDigest || [globalDigest, chunkAnalysis].filter(Boolean).join("\n\n"),
@@ -2205,16 +2206,23 @@ async function analyzeLongSourceInChunks(
     )
     completedThrough = chunk.index
     await saveLongSourceCheckpoint(checkpointPath, {
-      version: 1,
+      version: 2,
       ...checkpointParams,
       completedThrough,
       globalDigest,
       analyses,
+      signals: signalAccumulator,
       updatedAt: Date.now(),
     })
   }
 
+  const structuredSignalContext = buildStructuredRpgSignalContext(signalAccumulator, {
+    sourceIdentity,
+  })
+
   const analysis = [
+    structuredSignalContext,
+    "",
     "# Consolidated Long-Document Analysis",
     "",
     "## Final Global Digest",
@@ -2228,6 +2236,9 @@ async function analyzeLongSourceInChunks(
     `# Long Source Context: ${sourceIdentity}`,
     "",
     `The original source was analyzed in ${chunks.length} semantic chunks with paragraph/section boundaries and overlap. Use this consolidated context instead of assuming the raw document ended early.`,
+    "Do not use raw chunk summaries as direct page-generation material when structured signals are present; use the utility-scored signal sections below as the generation gate.",
+    "",
+    structuredSignalContext,
     "",
     "## Final Global Digest",
     globalDigest || "(No digest produced.)",
@@ -2242,53 +2253,17 @@ async function analyzeLongSourceInChunks(
 /**
  * 为给定的 LLM 配置构建一个 MergeFn（页面合并函数）。
  * 为什么需要：当同一 wiki 页面已存在且新 ingest 产生同一页面的新版本时，
- * 需要 LLM 智能合并两个版本——保留双方的事实主张、消除冗余、重组结构——
- * 而非简单覆盖或拼接。page-merge.ts 负责健全性检查和回退路径。
+ * 需要 LLM 按 RPG 运行时语义智能合并两个版本——保留可运行信号、替换过期状态、
+ * 压缩百科噪声、重组结构——而非简单覆盖或拼接。page-merge.ts 负责健全性检查和回退路径。
  */
 function buildPageMerger(llmConfig: LlmConfig): MergeFn {
-  return async (existingContent, incomingContent, sourceFileName, signal) => {
-    // 合并系统 prompt：你是合并两个版本的同一 wiki 页面
-    const systemPrompt = [
-      "You are merging two versions of the same wiki page into one coherent document.",
-      // 两个版本描述同一实体/概念；一个已在磁盘上，另一个刚从不同源生成
-      "Both versions describe the same entity / concept; one is already on disk,",
-      "the other was just generated from a different source document.",
-      "",
-      // 输出一个合并版本，要求：
-      "Output ONE merged version that:",
-      "- Preserves every factual claim from both versions (do not drop content)",  // 保留双方所有事实主张
-      "- Eliminates redundancy when both versions state the same fact",           // 消除重复
-      "- Reorganizes sections so the structure is logical for the merged topic,", // 重组结构
-      "  not just a concatenation of the two inputs",
-      "- Uses consistent markdown structure (headings, tables, lists, callouts)",  // 一致的 markdown 结构
-      "- Keeps `[[wikilink]]` references intact",                                 // 保持 wikilink 引用完整
-      "",
-      // 输出要求
-      "Output requirements:",
-      "- The FIRST character of your response MUST be `-` (the opening of `---`)", // 第一个字符必须是 `-`
-      "- Output the COMPLETE file: YAML frontmatter + body",                       // 输出完整文件
-      "- No preamble (no \"Here is the merged version:\"), no analysis prose",     // 无前言
-      "- The caller will overwrite `sources`/`tags`/`related`/`updated` with",   // 调用方会覆盖这些字段
-      "  deterministic values -- your job is the body and any other fields",
-    ].join("\n")
-
-    // 用户消息：已有的磁盘版本 + 新生成的版本
-    const userMessage = [
-      `## Existing version on disk`,
-      "",
+  return async (existingContent, incomingContent, context) => {
+    const prompt = pageMergeInteractionSpec.buildPrompt({
       existingContent,
-      "",
-      "---",
-      "",
-      `## Newly generated version (from ${sourceFileName})`,
-      "",
       incomingContent,
-      "",
-      "---",
-      "",
-      // 现在输出合并后的文件
-      "Now output the merged file. Start with `---` on the first line.",
-    ].join("\n")
+      pagePath: context.pagePath,
+      sourceFileName: context.sourceFileName,
+    })
 
     let result = ""
     let streamError: Error | null = null
@@ -2296,8 +2271,8 @@ function buildPageMerger(llmConfig: LlmConfig): MergeFn {
       streamChat(
         llmConfig,
         [
-          { role: "system", content: systemPrompt },
-          { role: "user", content: userMessage },
+          { role: "system", content: prompt.systemPrompt },
+          { role: "user", content: prompt.userPrompt },
         ],
         {
           onToken: (token) => {
@@ -2309,7 +2284,7 @@ function buildPageMerger(llmConfig: LlmConfig): MergeFn {
             resolve()
           },
         },
-        signal,
+        context.signal,
         { temperature: 0.1 },
       ).catch((err) => {
         // 防御性处理：streamChat 返回 Promise<void>，如果它 reject 而非走 onError，也捕获

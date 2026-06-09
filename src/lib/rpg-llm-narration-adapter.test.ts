@@ -4,6 +4,9 @@ import { streamChat } from "./llm-client"
 import {
   createLlmRpgNarrationAdapter,
   type RpgNarrationPrompt,
+} from "./rpg-interactions/runtime"
+import {
+  type CompactStoryBrief,
   type RpgTurnResult,
 } from "./rpg-runtime"
 
@@ -91,7 +94,9 @@ describe("LLM RPG Narration Adapter", () => {
       }),
     )
 
-    await expect(generateFromMockedStream()).rejects.toThrow(/invalid RpgTurnResult/i)
+    await expect(generateFromMockedStream({ brief: sampleBrief() })).rejects.toThrow(
+      /RPG narration interaction received invalid RpgTurnResult/i,
+    )
   })
 
   it("reports streaming errors clearly", async () => {
@@ -103,8 +108,8 @@ describe("LLM RPG Narration Adapter", () => {
   })
 })
 
-async function generateFromMockedStream(): Promise<RpgTurnResult> {
-  return createLlmRpgNarrationAdapter({ llmConfig: sampleLlmConfig() }).generateTurn(samplePrompt())
+async function generateFromMockedStream(promptInput?: { brief: CompactStoryBrief }): Promise<RpgTurnResult> {
+  return createLlmRpgNarrationAdapter({ llmConfig: sampleLlmConfig() }).generateTurn(samplePrompt(), promptInput)
 }
 
 function mockStreamOutput(output: string | string[]): void {
@@ -130,6 +135,33 @@ function sampleLlmConfig(): LlmConfig {
     ollamaUrl: "http://localhost:11434",
     customEndpoint: "",
     maxContextSize: 204800,
+  }
+}
+
+function sampleBrief(): CompactStoryBrief {
+  return {
+    submittedAction: {
+      id: "freeform-1",
+      text: "Check the glowing sigil before opening the gate.",
+      source: "freeform",
+    },
+    currentScene: "Iven and Mira face the canal gate.",
+    playerState: "Iven carries a brass lantern key.",
+    hardFacts: [],
+    activeConstraints: [],
+    presentCharacters: [],
+    relationshipTensions: [],
+    activePlotPressure: [],
+    outlineNotes: [],
+    activeQuests: [],
+    relevantLocations: [],
+    relevantFactions: [],
+    relevantItems: [],
+    styleRules: [],
+    ruleNotes: [],
+    memoryNotes: [],
+    forbiddenContradictions: [],
+    references: ["wiki/current-scene/scene_state.md"],
   }
 }
 

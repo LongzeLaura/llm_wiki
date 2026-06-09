@@ -13,7 +13,7 @@ export function MaintenanceSection() {
         <p className="mt-1 text-sm text-muted-foreground">
           {t("settings.sections.maintenance.description", {
             defaultValue:
-              "RPG-only maintenance tools will appear here. Legacy entity/concept duplicate cleanup is no longer exposed.",
+              "RPG-only maintenance tools will appear here as runtime audits are added.",
           })}
         </p>
       </div>
@@ -30,7 +30,7 @@ export function MaintenanceSection() {
         <p className="text-xs leading-relaxed text-muted-foreground">
           {t("settings.sections.maintenance.rpgOnly.description", {
             defaultValue:
-              "llmWikiRPG keeps legacy llm_wiki cleanup actions hidden. Future maintenance actions should operate on RPG runtime directories such as current-scene, events, relationships, and memory.",
+              "Future maintenance actions should operate on RPG runtime directories such as current-scene, events, relationships, and memory.",
           })}
         </p>
       </div>

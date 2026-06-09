@@ -289,12 +289,6 @@ function App() {
     } catch (err) {
       console.error("Failed to restore ingest queue:", err)
     }
-    // Same handshake for the dedup-merge queue.
-    import("@/lib/dedup-queue").then(({ restoreQueue }) => {
-      restoreQueue(proj.id, proj.path).catch((err) =>
-        console.error("Failed to restore dedup queue:", err)
-      )
-    })
     // Load per-project scheduled import config
     try {
       const savedScheduledImport = await loadScheduledImportConfig(proj.path)

@@ -70,6 +70,7 @@ describe("mergePageContent — fast paths", () => {
 
 describe("mergePageContent — LLM merge", () => {
   it("calls the merger when bodies differ and uses the merged output", async () => {
+    const abortController = new AbortController()
     const existing = PAGE(
       'type: entity\ntitle: Accumulibacter\ncreated: 2026-04-09\ntags: [microbiology, ebpr]\nrelated: [dpao, vfa]\nsources: ["doc-A.pdf"]',
       "## Anaerobic Phase\n\nDescription from doc A.\n\n## Denitrification\n\nMore from doc A.",
@@ -86,9 +87,17 @@ describe("mergePageContent — LLM merge", () => {
         mergedBody,
       ),
     )
-    const out = await mergePageContent(incoming, existing, merger, baseOpts)
+    const out = await mergePageContent(incoming, existing, merger, {
+      ...baseOpts,
+      signal: abortController.signal,
+    })
 
     expect(merger).toHaveBeenCalledOnce()
+    expect(merger.mock.calls[0]?.[2]).toEqual({
+      sourceFileName: "doc-B.pdf",
+      pagePath: "wiki/entities/foo.md",
+      signal: abortController.signal,
+    })
 
     // Body uses LLM-merged version
     expect(out).toContain("Anaerobic Phase")
@@ -168,6 +177,203 @@ describe("mergePageContent — LLM failure fallback", () => {
     // Should fall back to incoming (array-merged) — not the tiny LLM output
     expect(out).not.toContain("tiny merged body")
     expect(out).toContain("incoming body that is also pretty long")
+  })
+
+  it("allows stronger RPG runtime compression for relationship pages", async () => {
+    const longRelationshipBody = "old biography detail without playable tension. ".repeat(20)
+    const existing = PAGE("type: relationships\ntitle: Rin and Shirou", longRelationshipBody)
+    const incoming = PAGE("type: relationships\ntitle: Rin and Shirou", "incoming duplicate character biography. ".repeat(20))
+    const compressedRuntimeBody = [
+      "## Runtime Capsule",
+      "",
+      "- Trust is brittle and shifts when the player reveals secrets.",
+      "- The useful lever is defensive banter under pressure, not biography recap.",
+      "",
+      "## Current Tension",
+      "",
+      "- New confirmed relationship pressure replaces stale profile detail.",
+      "- Escalation requires earned vulnerability rather than abrupt confession.",
+      "",
+    ].join("\n")
+    const merger = vi.fn().mockResolvedValue(
+      PAGE("type: relationships\ntitle: Rin and Shirou", compressedRuntimeBody),
+    )
+
+    const out = await mergePageContent(incoming, existing, merger, {
+      ...baseOpts,
+      pagePath: "wiki/relationships/rin-shirou.md",
+    })
+
+    expect(out).toContain("Trust is brittle")
+    expect(out).toContain("updated: 2026-04-30")
+  })
+
+  it("falls back to array-merged incoming when RPG merge lint rejects the LLM output", async () => {
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {})
+    const existing = PAGE(
+      'type: events\ntitle: Bridge Incident\nsources: ["a.md"]',
+      "## Runtime Capsule\n\n- The old confirmed incident happened at the bridge.\n\n## Confirmed Event\n\n" + "Old confirmed consequence. ".repeat(20),
+    )
+    const incoming = PAGE(
+      'type: events\ntitle: Bridge Incident\nsources: ["b.md"]',
+      "## Runtime Capsule\n\n- The incoming confirmed event changed the bridge guard's stance.\n\n## Confirmed Event\n\n" + "Incoming confirmed consequence. ".repeat(20),
+    )
+    const rejectedBody = [
+      "## Runtime Capsule",
+      "",
+      "- The incident happened, but the page also records future options.",
+      "",
+      "## Confirmed Event",
+      "",
+      "The bridge guard withdrew after the accepted exchange.",
+      "",
+      "## Next Steps",
+      "",
+      "Possible future: if the player chooses, an ambush may happen later.",
+      "",
+      "Confirmed consequence detail. ".repeat(30),
+    ].join("\n")
+    const backup = vi.fn().mockResolvedValue(undefined)
+    const merger = vi.fn().mockResolvedValue(
+      PAGE('type: events\ntitle: Bridge Incident\nsources: ["b.md"]', rejectedBody),
+    )
+
+    const out = await mergePageContent(incoming, existing, merger, {
+      ...baseOpts,
+      pagePath: "wiki/events/bridge-incident.md",
+      backup,
+    })
+
+    expect(out).toContain("Incoming confirmed consequence")
+    expect(out).not.toContain("Possible future")
+    expect(out).toMatch(/sources:\s*\[\s*"a.md",\s*"b.md"\s*\]/)
+    expect(backup).toHaveBeenCalledWith(existing)
+    expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining("event-future-or-option-contamination"))
+    warnSpy.mockRestore()
+  })
+
+  it("accepts LLM merge output when RPG merge lint only warns", async () => {
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {})
+    const existing = PAGE(
+      "type: characters\ntitle: Rin",
+      "## Behavior Rules\n\nOld pressure behavior.",
+    )
+    const incoming = PAGE(
+      "type: characters\ntitle: Rin",
+      "## Behavior Rules\n\nIncoming pressure behavior.",
+    )
+    const warningOnlyBody = [
+      "## Behavior Rules",
+      "",
+      "- Keeps control through sharp bargaining.",
+      "- Tests the player's claims before trusting them.",
+      "",
+      "## Dialogue Style",
+      "",
+      "- Precise, clipped, and defensive under pressure.",
+      "",
+    ].join("\n")
+    const merger = vi.fn().mockResolvedValue(
+      PAGE("type: characters\ntitle: Rin", warningOnlyBody),
+    )
+
+    const out = await mergePageContent(incoming, existing, merger, {
+      ...baseOpts,
+      pagePath: "wiki/characters/rin.md",
+    })
+
+    expect(out).toContain("Tests the player's claims")
+    expect(out).toContain("updated: 2026-04-30")
+    expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining("missing-runtime-capsule"))
+    warnSpy.mockRestore()
+  })
+
+  it("runs section-aware merge before lint so an incoming Runtime Capsule can be restored", async () => {
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {})
+    const existing = PAGE(
+      "type: characters\ntitle: Rin",
+      "## Runtime Capsule\n\n- Older capsule.\n\n## Behavior Rules\n\n- Old behavior.",
+    )
+    const incoming = PAGE(
+      "type: characters\ntitle: Rin",
+      "## Runtime Capsule\n\n- Incoming capsule keeps the next-turn social pressure visible.\n\n## Behavior Rules\n\n- Incoming behavior.",
+    )
+    const llmBody = [
+      "## Behavior Rules",
+      "",
+      "- Incoming behavior.",
+      "- Old behavior.",
+      "",
+      "## Dialogue Style",
+      "",
+      "- Sharp under pressure.",
+    ].join("\n")
+    const merger = vi.fn().mockResolvedValue(PAGE("type: characters\ntitle: Rin", llmBody))
+
+    const out = await mergePageContent(incoming, existing, merger, {
+      ...baseOpts,
+      pagePath: "wiki/characters/rin.md",
+    })
+
+    expect(out).toContain("## Runtime Capsule")
+    expect(out).toContain("Incoming capsule keeps the next-turn social pressure visible")
+    expect(out).toContain("## Behavior Rules")
+    expect(out).toContain("updated: 2026-04-30")
+    expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining("RPG section merge"))
+    expect(warnSpy).not.toHaveBeenCalledWith(expect.stringContaining("missing-runtime-capsule"))
+    warnSpy.mockRestore()
+  })
+
+  it("does not preserve stale Current State beside incoming runtime state", async () => {
+    const existing = PAGE(
+      "type: player\ntitle: Player Status",
+      "## Runtime Capsule\n\n- Player state affects the next turn.\n\n## Current State\n\n- The player is still in the tavern.",
+    )
+    const incoming = PAGE(
+      "type: player\ntitle: Player Status",
+      "## Runtime Capsule\n\n- Player state affects the next turn.\n\n## Current State\n\n- The player is at the sealed canal gate.",
+    )
+    const llmBody = [
+      "## Runtime Capsule",
+      "",
+      "- Player state affects the next turn.",
+      "",
+      "## Known Information",
+      "",
+      "- The canal gate is locked.",
+    ].join("\n")
+    const merger = vi.fn().mockResolvedValue(PAGE("type: player\ntitle: Player Status", llmBody))
+
+    const out = await mergePageContent(incoming, existing, merger, {
+      ...baseOpts,
+      pagePath: "wiki/player/status.md",
+    })
+
+    expect(out).toContain("The player is at the sealed canal gate")
+    expect(out).not.toContain("still in the tavern")
+  })
+
+  it("does not let deterministic section merge bring back deleted low-value sections", async () => {
+    const existing = PAGE(
+      "type: characters\ntitle: Rin",
+      "## Runtime Capsule\n\n- Tests player honesty.\n\n## Trivia\n\n- Birthday metadata.\n\n## Voice Actor\n\n- Cast note.",
+    )
+    const incoming = PAGE(
+      "type: characters\ntitle: Rin",
+      "## Runtime Capsule\n\n- Tests player honesty.\n\n## Release Metadata\n\n- Platform note.",
+    )
+    const llmBody = "## Runtime Capsule\n\n- Tests player honesty.\n\n## Behavior Rules\n\n- Demands proof before trust."
+    const merger = vi.fn().mockResolvedValue(PAGE("type: characters\ntitle: Rin", llmBody))
+
+    const out = await mergePageContent(incoming, existing, merger, {
+      ...baseOpts,
+      pagePath: "wiki/characters/rin.md",
+    })
+
+    expect(out).toContain("Demands proof before trust")
+    expect(out).not.toContain("## Trivia")
+    expect(out).not.toContain("## Voice Actor")
+    expect(out).not.toContain("## Release Metadata")
   })
 
   it("rejects LLM output that has no frontmatter at all", async () => {

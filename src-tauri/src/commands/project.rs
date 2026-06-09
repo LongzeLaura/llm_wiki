@@ -34,10 +34,13 @@ fn create_project_impl(name: String, path: String) -> Result<WikiProject, String
         "wiki/factions/runtime",
         "wiki/items",
         "wiki/items/runtime",
+        "wiki/outlines",
         "wiki/plot-arcs",
+        "wiki/plot-arcs/runtime",
         "wiki/events",
         "wiki/current-scene",
         "wiki/relationships",
+        "wiki/relationships/runtime",
         "wiki/style",
         "wiki/rules",
         "wiki/quests",
@@ -58,6 +61,9 @@ fn create_project_impl(name: String, path: String) -> Result<WikiProject, String
         &format!("# Campaign Log\n\n## {today}\n\n- Project created in llmWikiRPG mode\n"),
     )?;
     write_file_inner(root.join("wiki/overview.md"), RPG_OVERVIEW)?;
+    for (relative_path, contents) in RPG_SCHEMA_SLOT_TEMPLATES {
+        write_file_inner(root.join(relative_path), contents)?;
+    }
 
     fs::create_dir_all(root.join(".obsidian"))
         .map_err(|e| format!("Failed to create .obsidian: {}", e))?;
@@ -238,6 +244,77 @@ fn write_file_inner(path: std::path::PathBuf, contents: &str) -> Result<(), Stri
         .map_err(|e| format!("Failed to write file '{}': {}", path.display(), e))
 }
 
+const RPG_SCHEMA_SLOT_TEMPLATES: &[(&str, &str)] = &[
+    (
+        "wiki/outlines/main.md",
+        "# Main Outline\n\n## Runtime Capsule\n\n<!-- Author/GM-side future outline. Keep empty until explicitly filled. -->\n\n## Act Structure\n\n<!-- Planned beats, reveal order, and branch conditions. -->\n",
+    ),
+    (
+        "wiki/outlines/progress.md",
+        "# Outline Progress\n\n## Runtime Capsule\n\n<!-- Runtime-reviewed progress relative to the main outline. -->\n\n## Current Stage\n\n<!-- Current act, beat, completed beats, skipped beats, and divergence notes. -->\n",
+    ),
+    (
+        "wiki/rules/core.md",
+        "# Core Rules\n\n## Runtime Capsule\n\n<!-- Core action, safety, success, failure, and constraint rules. -->\n",
+    ),
+    (
+        "wiki/rules/world.md",
+        "# World Rules\n\n## Runtime Capsule\n\n<!-- World operation rules that constrain what can happen during play. -->\n",
+    ),
+    (
+        "wiki/rules/table.md",
+        "# Table Rules\n\n## Runtime Capsule\n\n<!-- Table procedures, boundaries, and play conventions. -->\n",
+    ),
+    (
+        "wiki/style/narration.md",
+        "# Narration Style\n\n## Runtime Capsule\n\n<!-- Global narration voice, pacing, point of view, and descriptive priorities. -->\n",
+    ),
+    (
+        "wiki/style/dialogue.md",
+        "# Dialogue Style\n\n## Runtime Capsule\n\n<!-- Global dialogue principles. Character-specific voice belongs in character or relationship pages. -->\n",
+    ),
+    (
+        "wiki/style/forbidden.md",
+        "# Forbidden Style\n\n## Runtime Capsule\n\n<!-- Words, patterns, reveals, or presentation choices to avoid. -->\n",
+    ),
+    (
+        "wiki/memory/player-preferences.md",
+        "# Player Preferences\n\n## Runtime Capsule\n\n<!-- Player preferences, safety boundaries, and long-term experience requirements. -->\n",
+    ),
+    (
+        "wiki/memory/long-term.md",
+        "# Long-Term Memory\n\n## Runtime Capsule\n\n<!-- Long-term context notes that do not yet belong in a more specific wiki directory. -->\n",
+    ),
+    (
+        "wiki/memory/session-notes.md",
+        "# Session Notes\n\n## Runtime Capsule\n\n<!-- Recent manual notes or material waiting to be sorted into concrete wiki directories. -->\n",
+    ),
+    (
+        "wiki/current-scene/scene_state.md",
+        "# Current Scene\n\n## Runtime Capsule\n\n<!-- Latest immediate scene snapshot for the next turn. Overwrite through reviewed runtime apply. -->\n",
+    ),
+    (
+        "wiki/player/player.md",
+        "# Player\n\n## Runtime Capsule\n\n<!-- Current PC identity, background, stable facts, and current status summary. -->\n",
+    ),
+    (
+        "wiki/player/abilities.md",
+        "# Player Abilities\n\n## Runtime Capsule\n\n<!-- Player abilities, skills, limits, costs, and current availability. -->\n",
+    ),
+    (
+        "wiki/player/inventory.md",
+        "# Player Inventory\n\n## Runtime Capsule\n\n<!-- Current held items, quantities, equipped state, and consumption state. -->\n",
+    ),
+    (
+        "wiki/player/goals.md",
+        "# Player Goals\n\n## Runtime Capsule\n\n<!-- PC subjective goals, promises, priorities, and motivations. -->\n",
+    ),
+    (
+        "wiki/player/known_information.md",
+        "# Player Known Information\n\n## Runtime Capsule\n\n<!-- Information the player/PC knows, suspects, misunderstands, or must not yet know. -->\n",
+    ),
+];
+
 const RPG_SCHEMA: &str = r#"wikiMode: llmwikirpg
 
 # Wiki Schema - llmWikiRPG
@@ -263,20 +340,53 @@ const RPG_SCHEMA: &str = r#"wikiMode: llmwikirpg
 | `wiki/factions/runtime/` | Runtime overlay | runtime merge | Current faction stance/resource overlays for campaign-time pressure and temporary moves. |
 | `wiki/items/` | Stable base | ingest/manual merge; runtime must not rewrite base pages | Base item identity, capabilities, history, constraints, and plot function. |
 | `wiki/items/runtime/` | Runtime overlay | runtime merge | Current holder, location, condition, consumption, loss, damage, or other runtime item state. |
+| `wiki/outlines/main.md` | Manual control | manual_or_review_only | Author/GM-side main outline, future beats, reveal order, and branch conditions. |
+| `wiki/outlines/progress.md` | Runtime progress | runtime merge through pending/review | Current progress relative to the main outline: active beat, completed/skipped beats, and divergence notes. |
 | `wiki/plot-arcs/` | Dynamic derived | derivation/runtime merge | Unresolved conflicts, foreshadowing, possible developments, future pressure, and constraints. |
+| `wiki/plot-arcs/runtime/` | Runtime overlay | runtime merge | Current campaign changes to plot arcs, triggered/skipped beats, and pressure changes. |
 | `wiki/events/` | Timeline | append/create only | Confirmed events that already happened; never store hypothetical future outcomes as history. |
 | `wiki/current-scene/scene_state.md` | Snapshot | overwrite | Latest immediate scene snapshot only. |
 | `wiki/relationships/` | Dynamic derived | derivation/runtime merge | Relationship state, trust, tension, dependency, conflict, and relationship-change pressure. |
-| `wiki/style/` | Manual control | manual only | Tone, narration style, voice, variables, and presentation conventions. |
-| `wiki/rules/` | Manual control | manual only | House rules, system rulings, safety boundaries, and runtime constraints. |
-| `wiki/quests/` | Objective tracking | manual/runtime merge | Goals, missions, tasks, blockers, and explicit objective tracking. |
-| `wiki/memory/` | Explicit memory | explicit user action only | User-approved memory and reminders; do not infer or write automatically. |
+| `wiki/relationships/runtime/` | Runtime overlay | runtime merge | Current campaign relationship deltas, trust changes, recent conflicts, and new misunderstandings. |
+| `wiki/style/` | Manual control | manual_or_review_only | Tone, narration style, dialogue style, forbidden patterns, variables, and presentation conventions. |
+| `wiki/rules/` | Manual control | manual_or_review_only | Core rules, world operation rules, table rules, safety boundaries, and runtime constraints. |
+| `wiki/quests/` | Objective tracking | manual/runtime merge | Goals, missions, tasks, blockers, completion state, and accepted runtime objective changes. |
+| `wiki/memory/` | Explicit memory | manual_or_review_only for player preferences; explicit review for other memory | User-approved memory and reminders; do not infer or write automatically. |
 | `wiki/overview.md` | Summary | manual/ingest merge | High-level campaign overview. |
 | `wiki/index.md` | Navigation | generated/manual refresh | Navigation index for the RPG wiki. |
+
+## Fixed Schema Slots
+
+New projects must create these fixed slot files. Missing slots mean the project structure is incomplete, not a legacy project compatibility case.
+
+| slotId | path | owner | write policy |
+|---|---|---|---|
+| `main_outline` | `wiki/outlines/main.md` | control_doc | manual_or_review_only |
+| `outline_progress` | `wiki/outlines/progress.md` | runtime | merge through pending/review |
+| `rules_core` | `wiki/rules/core.md` | control_doc | manual_or_review_only |
+| `rules_world` | `wiki/rules/world.md` | control_doc | manual_or_review_only |
+| `rules_table` | `wiki/rules/table.md` | control_doc | manual_or_review_only |
+| `style_narration` | `wiki/style/narration.md` | control_doc | manual_or_review_only |
+| `style_dialogue` | `wiki/style/dialogue.md` | control_doc | manual_or_review_only |
+| `style_forbidden` | `wiki/style/forbidden.md` | control_doc | manual_or_review_only |
+| `memory_player_preferences` | `wiki/memory/player-preferences.md` | control_doc | manual_or_review_only |
+| `memory_long_term` | `wiki/memory/long-term.md` | control_doc | manual_or_review_only |
+| `memory_session_notes` | `wiki/memory/session-notes.md` | control_doc | manual_or_review_only |
+| `current_scene` | `wiki/current-scene/scene_state.md` | runtime | overwrite |
+| `player_main` | `wiki/player/player.md` | campaign_setup | merge |
+| `player_abilities` | `wiki/player/abilities.md` | campaign_setup | merge |
+| `player_inventory` | `wiki/player/inventory.md` | campaign_setup | merge |
+| `player_goals` | `wiki/player/goals.md` | campaign_setup | merge |
+| `player_known_information` | `wiki/player/known_information.md` | campaign_setup | merge |
+
+- `rules/`, `style/`, `wiki/memory/player-preferences.md`, and `wiki/outlines/main.md` are manual_or_review_only control files.
+- `wiki/outlines/progress.md` is the runtime outline progress slot; runtime may merge it only inside the pending/review apply boundary.
+- `wiki/player/` is a fixed slot set. Do not create arbitrary player files; merge extra player subtopics into the five fixed player slots.
 
 ## Overlay Resolution
 
 - For `characters`, `locations`, `factions`, and `items`, resolve the base page first, then apply the matching `runtime/` overlay by slug.
+- `relationships` and `plot-arcs` also use base plus `runtime/` overlay directories; broad resolver expansion can be refined in a later stage.
 - Example: `wiki/characters/rin.md` supplies the stable model; `wiki/characters/runtime/rin.md` supplies current campaign state.
 - Runtime agents may merge overlay pages, but base pages are runtime blocked and should only receive ingest/manual stable facts.
 - If base and overlay disagree, prefer the overlay for immediate play state and keep the base as the stable/source-supported contract.
@@ -287,7 +397,8 @@ const RPG_SCHEMA: &str = r#"wikiMode: llmwikirpg
 - `wiki/current-scene/scene_state.md` is a snapshot and should be overwritten on each accepted scene advance.
 - `wiki/events/` is append/create-only history for confirmed happened events.
 - `wiki/plot-arcs/` may contain foreshadowing, unresolved questions, and future pressure, but must not invent events as already happened.
-- `wiki/player/`, `wiki/relationships/`, `wiki/quests/`, and runtime overlays should merge accepted state without treating unchosen options as facts.
+- `wiki/player/` updates must target only fixed player slots.
+- `wiki/relationships/`, `wiki/quests/`, `wiki/outlines/progress.md`, and runtime overlays should merge accepted state without treating unchosen options as facts.
 - Avoid current-state pollution in historical `events`, and avoid writing unresolved future pressure as completed history.
 - Preserve `sources:` frontmatter provenance on every generated page.
 
@@ -361,6 +472,8 @@ const RPG_INDEX: &str = r#"# Wiki Index
 
 ## Items
 
+## Outlines
+
 ## Plot Arcs
 
 ## Events
@@ -389,3 +502,43 @@ related: []
 
 <!-- Summarize the campaign world, active conflicts, party situation, and current trajectory. -->
 "#;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    #[test]
+    fn create_project_writes_required_rpg_schema_slots_and_runtime_dirs() {
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("system clock should be after epoch")
+            .as_nanos();
+        let temp_root = std::env::temp_dir().join(format!("llmwikirpg-project-test-{unique}"));
+        fs::create_dir_all(&temp_root).expect("temp root should be created");
+
+        let result = create_project_impl(
+            "stage-d-project".to_string(),
+            temp_root.to_string_lossy().to_string(),
+        )
+        .expect("project should be created");
+        let root = Path::new(&result.path);
+
+        for dir in [
+            "wiki/outlines",
+            "wiki/relationships/runtime",
+            "wiki/plot-arcs/runtime",
+        ] {
+            assert!(root.join(dir).is_dir(), "missing required dir: {dir}");
+        }
+
+        for (relative_path, _contents) in RPG_SCHEMA_SLOT_TEMPLATES {
+            assert!(
+                root.join(relative_path).is_file(),
+                "missing required slot file: {relative_path}"
+            );
+        }
+
+        fs::remove_dir_all(&temp_root).expect("temp root should be removed");
+    }
+}

@@ -1,8 +1,8 @@
 /**
  * Merge a wiki page that the LLM just generated with whatever's
- * already on disk. Solves silent data loss across re-ingests where
- * a second source contributes content to the same entity / concept
- * page.
+ * already on disk. Solves silent data loss across re-ingests while
+ * keeping llmWikiRPG pages aligned to their runtime layer instead of
+ * blindly accumulating encyclopedia facts.
  *
  * Architecture: pure logic, LLM call injected as a parameter.
  * Production wires this up against `streamChat`; tests use mocks.
@@ -12,8 +12,8 @@
  *      union-merged at the application layer regardless of whether
  *      the LLM is involved. Zero-cost, deterministic.
  *   2. Body — if old and new bodies differ, ask the LLM to produce
- *      a coherent merge. Sanity-checked on length and structure
- *      before accepting.
+ *      an RPG-policy-aware merge. Sanity-checked on structure and a
+ *      path-specific length threshold before accepting.
  *   3. Locked frontmatter fields (type / title / created) — even if
  *      the LLM rewrote them, the existing values are forced back.
  *      type/title shifting breaks wikilinks; created is a one-time
@@ -24,6 +24,9 @@
  * an optional backup of the existing content for user recovery.
  */
 import { parseFrontmatter } from "./frontmatter"
+import { getRpgMergePolicy } from "./rpg-interactions/merge"
+import { lintRpgMergedPage } from "./rpg-merge-lint"
+import { mergeRpgSections } from "./rpg-section-merge"
 import { mergeArrayFieldsIntoContent } from "./sources-merge"
 
 /** Frontmatter array fields unioned across re-ingests. */
@@ -44,13 +47,21 @@ const UNION_FIELDS = ["sources", "tags", "related"] as const
 const LOCKED_FIELDS = ["type", "title", "created"] as const
 
 /**
- * Body length safety threshold. If the LLM's merged body is shorter
- * than 70% of the longer of (existing body, incoming body), reject
- * the merge — the LLM almost certainly stripped content rather than
- * legitimately deduplicating. 0.7 allows for ~30% legitimate dedup
- * compression while catching obvious truncation / lazy summaries.
+ * Default body length safety threshold. RPG merge policies can lower
+ * this for runtime-facing pages where deleting encyclopedia noise or
+ * replacing stale state is expected; unknown/generic pages keep the
+ * older conservative 70% behavior.
  */
 const BODY_SHRINK_THRESHOLD = 0.7
+
+export interface MergeContext {
+  /** Source filename being ingested. */
+  sourceFileName: string
+  /** Wiki-relative page path, used to select RPG merge policy. */
+  pagePath: string
+  /** Abort signal forwarded to the LLM layer. */
+  signal?: AbortSignal
+}
 
 export interface MergeFn {
   /**
@@ -62,8 +73,7 @@ export interface MergeFn {
   (
     existingContent: string,
     incomingContent: string,
-    sourceFileName: string,
-    signal?: AbortSignal,
+    context: MergeContext,
   ): Promise<string>
 }
 
@@ -71,9 +81,9 @@ export interface MergePageOptions {
   /** Source filename being ingested — passed through to the merger
    *  and used in fallback log messages. */
   sourceFileName: string
-  /** Wiki-relative page path (e.g. wiki/entities/foo.md). Used only
-   *  for log messages today; the file write itself is the caller's
-   *  responsibility. */
+  /** Wiki-relative page path (e.g. wiki/characters/foo.md). Used for
+   *  log messages and RPG merge policy selection; the file write itself
+   *  is the caller's responsibility. */
   pagePath: string
   /** Abort signal forwarded to the merger. */
   signal?: AbortSignal
@@ -122,8 +132,11 @@ export async function mergePageContent(
     llmOutput = await merger(
       existingContent,
       arrayMerged,
-      opts.sourceFileName,
-      opts.signal,
+      {
+        sourceFileName: opts.sourceFileName,
+        pagePath: opts.pagePath,
+        signal: opts.signal,
+      },
     )
   } catch (err) {
     console.warn(
@@ -145,14 +158,49 @@ export async function mergePageContent(
   }
 
   // Sanity 2: body length. Reject obvious truncation / lazy summary.
+  // RPG runtime pages are allowed to compress more aggressively than
+  // encyclopedia pages, so the threshold is selected from pagePath.
   const oldBodyLen = oldParsed.body.length
   const newBodyLen = arrayMergedParsed.body.length
   const llmBodyLen = llmParsed.body.length
-  const minThreshold = Math.max(oldBodyLen, newBodyLen) * BODY_SHRINK_THRESHOLD
+  const policy = getRpgMergePolicy(opts.pagePath)
+  const bodyShrinkThreshold = policy.bodyShrinkThreshold ?? BODY_SHRINK_THRESHOLD
+  const minThreshold = Math.max(oldBodyLen, newBodyLen) * bodyShrinkThreshold
   if (llmBodyLen < minThreshold) {
     console.warn(
-      `[page-merge] LLM merge for ${opts.pagePath} produced body ${llmBodyLen} chars, below threshold ${minThreshold.toFixed(0)} (max input was ${Math.max(oldBodyLen, newBodyLen)}) — rejecting, falling back`,
+      `[page-merge] LLM merge for ${opts.pagePath} produced body ${llmBodyLen} chars, below ${policy.kind} threshold ${minThreshold.toFixed(0)} (max input was ${Math.max(oldBodyLen, newBodyLen)}) — rejecting, falling back`,
     )
+    await tryBackup(opts, existingContent)
+    return arrayMerged
+  }
+
+  const sectionMergeResult = mergeRpgSections(llmOutput, {
+    pagePath: opts.pagePath,
+    policy,
+    existingContent,
+    incomingContent: arrayMerged,
+  })
+  if (sectionMergeResult.warnings.length > 0) {
+    console.warn(`[page-merge] RPG section merge for ${opts.pagePath}: ${sectionMergeResult.warnings.join(" | ")}`)
+  }
+  llmOutput = sectionMergeResult.content
+
+  // Sanity 3: RPG semantic lint. This never rewrites the body. Reject
+  // issues fall back to the deterministic array-merged incoming page;
+  // warnings are surfaced while still accepting the LLM merge.
+  const lintResult = lintRpgMergedPage(llmOutput, {
+    pagePath: opts.pagePath,
+    policy,
+    existingContent,
+    incomingContent: arrayMerged,
+  })
+  if (lintResult.issues.length > 0) {
+    const formattedIssues = lintResult.issues
+      .map((issue) => `${issue.severity}:${issue.code}: ${issue.message}`)
+      .join(" | ")
+    console.warn(`[page-merge] RPG merge lint for ${opts.pagePath}: ${formattedIssues}`)
+  }
+  if (lintResult.shouldReject) {
     await tryBackup(opts, existingContent)
     return arrayMerged
   }

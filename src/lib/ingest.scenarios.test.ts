@@ -243,7 +243,6 @@ describe("ingest scenarios (fixture-driven)", () => {
         "- dominant_focus: stable world rule",
         "- needed_categories: [world]",
         "- suppressed_categories: [characters]",
-        "- live_scene_allowed: false",
         "- event_extraction_mode: none",
         "",
         "## Candidate Objects",
@@ -359,13 +358,13 @@ describe("ingest scenarios (fixture-driven)", () => {
     expect(projectB).toContain("analysis for project B")
   })
 
-  it("overwrites current-scene snapshots into a single RPG state file", async () => {
+  it("blocks ordinary ingest current-scene snapshots instead of normalizing or writing them", async () => {
     ctx = { tmp: await createTempProject("ingest-rpg-current-scene") }
     const projectPath = ctx.tmp.path
 
     await writeRpgProjectFiles(projectPath)
-    await writeFileRaw(`${projectPath}/raw/sources/turn-1.md`, "[RPG-LIVE]\nturn one")
-    await writeFileRaw(`${projectPath}/raw/sources/turn-2.md`, "[RPG-LIVE]\nturn two")
+    await writeFileRaw(`${projectPath}/raw/sources/turn-1.md`, "turn one")
+    await writeFileRaw(`${projectPath}/raw/sources/turn-2.md`, "turn two")
 
     useWikiStore.setState({
       project: {
@@ -410,13 +409,10 @@ describe("ingest scenarios (fixture-driven)", () => {
     const firstWritten = await autoIngest(projectPath, `${projectPath}/raw/sources/turn-1.md`, cfg)
     const secondWritten = await autoIngest(projectPath, `${projectPath}/raw/sources/turn-2.md`, cfg)
 
-    expect(firstWritten).toContain("wiki/current-scene/scene_state.md")
-    expect(secondWritten).toContain("wiki/current-scene/scene_state.md")
+    expect(firstWritten).not.toContain("wiki/current-scene/scene_state.md")
+    expect(secondWritten).not.toContain("wiki/current-scene/scene_state.md")
     expect(await fileExists(`${projectPath}/wiki/current-scene/state.md`)).toBe(false)
-
-    const scene = await readFileRaw(`${projectPath}/wiki/current-scene/scene_state.md`)
-    expect(scene).toContain("Second scene replaces the first.")
-    expect(scene).not.toContain("First scene only.")
+    expect(await fileExists(`${projectPath}/wiki/current-scene/scene_state.md`)).toBe(false)
   })
 
   it("blocks current-scene writes from static ending or encyclopedia material", async () => {
@@ -474,14 +470,14 @@ describe("ingest scenarios (fixture-driven)", () => {
     expect(await fileExists(`${projectPath}/wiki/plot-arcs/heavens-feel-ending.md`)).toBe(true)
   })
 
-  it("allows current-scene writes when the source explicitly states the live current scene", async () => {
+  it("blocks current-scene writes even when an ordinary source states the current scene", async () => {
     ctx = { tmp: await createTempProject("ingest-rpg-explicit-current-scene") }
     const projectPath = ctx.tmp.path
 
     await writeRpgProjectFiles(projectPath)
     await writeFileRaw(
       `${projectPath}/raw/sources/current-scene.md`,
-      "[RPG-LIVE]\nCurrent scene: the player stands at the church gate in Fuyuki City while the GM describes lamplight inside the church.",
+      "Current scene: the player stands at the church gate in Fuyuki City while the GM describes lamplight inside the church.",
     )
 
     useWikiStore.setState({
@@ -513,9 +509,8 @@ describe("ingest scenarios (fixture-driven)", () => {
 
     const written = await autoIngest(projectPath, `${projectPath}/raw/sources/current-scene.md`, cfg)
 
-    expect(written).toContain("wiki/current-scene/scene_state.md")
-    const scene = await readFileRaw(`${projectPath}/wiki/current-scene/scene_state.md`)
-    expect(scene).toContain("church gate in Fuyuki City")
+    expect(written).not.toContain("wiki/current-scene/scene_state.md")
+    expect(await fileExists(`${projectPath}/wiki/current-scene/scene_state.md`)).toBe(false)
   })
 
   it("blocks current-scene writes from unmarked live-looking input", async () => {
@@ -561,6 +556,103 @@ describe("ingest scenarios (fixture-driven)", () => {
     expect(await fileExists(`${projectPath}/wiki/current-scene/scene_state.md`)).toBe(false)
   })
 
+  it("skips other-mode Source Ingest targets and still writes ordinary source targets", async () => {
+    ctx = { tmp: await createTempProject("ingest-rpg-source-ingest-other-mode-targets") }
+    const projectPath = ctx.tmp.path
+
+    await writeRpgProjectFiles(projectPath)
+    await writeFileRaw(
+      `${projectPath}/raw/sources/mixed-import.md`,
+      "Mixed source: a world fact plus control rules, style notes, memory, outline, bootstrap scene, runtime overlay, and quest-like material.",
+    )
+
+    useWikiStore.setState({
+      project: {
+        name: "t",
+        path: projectPath,
+        createdAt: 0,
+        purposeText: "",
+        fileTree: [],
+      } as unknown as ReturnType<typeof useWikiStore.getState>["project"],
+    })
+
+    const cfg = useWikiStore.getState().llmConfig
+    pendingResponses = [
+      "analysis one",
+      [
+        "---FILE: wiki/world/harbor-law.md---",
+        "---",
+        'type: "world"',
+        'title: "Harbor Law"',
+        'sources: ["mixed-import.md"]',
+        "---",
+        "",
+        "# Harbor Law",
+        "",
+        "## Runtime Capsule",
+        "- 约束：public harbor law changes player action risk and available choices.",
+        "",
+        "Harbor bells announce lawful crossing windows.",
+        "---END FILE---",
+        "",
+        "---FILE: wiki/rules/core.md---",
+        "Rules must not be written.",
+        "---END FILE---",
+        "",
+        "---FILE: wiki/style/narration.md---",
+        "Style must not be written.",
+        "---END FILE---",
+        "",
+        "---FILE: wiki/memory/long-term.md---",
+        "Memory must not be written.",
+        "---END FILE---",
+        "",
+        "---FILE: wiki/outlines/main.md---",
+        "Outline must not be written.",
+        "---END FILE---",
+        "",
+        "---FILE: wiki/current-scene/scene_state.md---",
+        "Current scene must not be written.",
+        "---END FILE---",
+        "",
+        "---FILE: wiki/characters/runtime/mira.md---",
+        "Runtime overlay must not be written.",
+        "---END FILE---",
+        "",
+        "---FILE: wiki/quests/main.md---",
+        "Quest must not be written.",
+        "---END FILE---",
+        "",
+        "---FILE: wiki/player/custom-sheet.md---",
+        "Arbitrary player page must not be written.",
+        "---END FILE---",
+      ].join("\n"),
+    ]
+
+    const written = await autoIngest(projectPath, `${projectPath}/raw/sources/mixed-import.md`, cfg)
+
+    expect(written).toContain("wiki/world/harbor-law.md")
+    expect(await fileExists(`${projectPath}/wiki/world/harbor-law.md`)).toBe(true)
+    for (const forbiddenPath of [
+      "wiki/rules/core.md",
+      "wiki/style/narration.md",
+      "wiki/memory/long-term.md",
+      "wiki/outlines/main.md",
+      "wiki/current-scene/scene_state.md",
+      "wiki/characters/runtime/mira.md",
+      "wiki/quests/main.md",
+      "wiki/player/custom-sheet.md",
+    ]) {
+      expect(written).not.toContain(forbiddenPath)
+      expect(await fileExists(`${projectPath}/${forbiddenPath}`)).toBe(false)
+    }
+
+    const reviews = useReviewStore.getState().items
+    for (const label of ["rules", "style", "memory", "outlines", "current-scene", "characters/runtime", "quests", "player"]) {
+      expect(reviews.some((item) => item.title.includes(label))).toBe(true)
+    }
+  })
+
   it("uses RPG writer semantics for interactive ingest writes", async () => {
     ctx = { tmp: await createTempProject("interactive-rpg-writer") }
     const projectPath = ctx.tmp.path
@@ -570,7 +662,7 @@ describe("ingest scenarios (fixture-driven)", () => {
     await writeFileRaw(`${projectPath}/wiki/index.md`, "# Index\n")
     await writeFileRaw(
       `${projectPath}/raw/sources/current-scene.md`,
-      "[RPG-LIVE]\nCurrent scene: live session record. The player waits in a quiet room while the GM asks for the next action.",
+      "Current scene: live session record. The player waits in a quiet room while the GM asks for the next action.",
     )
 
     useWikiStore.setState({
@@ -647,13 +739,10 @@ describe("ingest scenarios (fixture-driven)", () => {
       useWikiStore.getState().llmConfig,
     )
 
-    expect(written).toContain(`${projectPath}/wiki/current-scene/scene_state.md`)
+    expect(written).not.toContain(`${projectPath}/wiki/current-scene/scene_state.md`)
     expect(written).toContain(`${projectPath}/wiki/events/timeline.md`)
     expect(await fileExists(`${projectPath}/wiki/current-scene/custom-name.md`)).toBe(false)
-
-    const scene = await readFileRaw(`${projectPath}/wiki/current-scene/scene_state.md`)
-    expect(scene).toContain("quiet room")
-    expect(scene).toContain('sources: ["current-scene.md"]')
+    expect(await fileExists(`${projectPath}/wiki/current-scene/scene_state.md`)).toBe(false)
 
     const reviews = useReviewStore.getState().items
     expect(reviews.some((item) => item.title.includes("event page may belong in plot-arcs"))).toBe(true)
@@ -813,7 +902,7 @@ describe("ingest scenarios (fixture-driven)", () => {
     await autoIngest(projectPath, `${projectPath}/raw/sources/fate-summary.md`, cfg)
 
     const reviews = useReviewStore.getState().items
-    expect(reviews.some((item) => item.title.includes("suspicious player page"))).toBe(true)
+    expect(reviews.some((item) => item.title.includes("player target skipped"))).toBe(true)
     expect(reviews.some((item) => item.title.includes("current-scene"))).toBe(true)
     expect(reviews.some((item) => item.title.includes("missing locations"))).toBe(true)
     expect(reviews.some((item) => item.title.includes("missing factions"))).toBe(true)
@@ -853,6 +942,10 @@ describe("ingest scenarios (fixture-driven)", () => {
         "---",
         "",
         "# Rin Tohsaka",
+        "",
+        "## Runtime Capsule",
+        "- 扮演：Rin creates trust and pressure through precise choices and conflict.",
+        "",
         "A key mage aligned with the core conflict in Fuyuki City.",
         "---END FILE---",
         "",
@@ -864,6 +957,10 @@ describe("ingest scenarios (fixture-driven)", () => {
         "---",
         "",
         "# Sakura Matou",
+        "",
+        "## Runtime Capsule",
+        "- 张力：Sakura's faction ties create relationship risk and hidden pressure.",
+        "",
         "A central character tied to multiple factions in the source summary.",
         "---END FILE---",
         "",
@@ -875,6 +972,10 @@ describe("ingest scenarios (fixture-driven)", () => {
         "---",
         "",
         "# Shirou Emiya",
+        "",
+        "## Runtime Capsule",
+        "- 行动：Shirou's protagonist role affects choices, risk, and alliances.",
+        "",
         "The original-work protagonist appears here as a canon character rather than a custom RPG role.",
         "---END FILE---",
         "",
@@ -886,6 +987,10 @@ describe("ingest scenarios (fixture-driven)", () => {
         "---",
         "",
         "# Rin Tohsaka and Shirou Emiya",
+        "",
+        "## Runtime Capsule",
+        "- 关系张力：their cooperation and conflict change trust and available choices.",
+        "",
         "They cooperate and clash as the conflict unfolds.",
         "---END FILE---",
         "",
@@ -897,6 +1002,10 @@ describe("ingest scenarios (fixture-driven)", () => {
         "---",
         "",
         "# Fuyuki City",
+        "",
+        "## Runtime Capsule",
+        "- 场景：Fuyuki City provides location hooks, risk, and investigation choices.",
+        "",
         "The main location where the Holy Grail War conflict takes place.",
         "---END FILE---",
         "",
@@ -908,6 +1017,10 @@ describe("ingest scenarios (fixture-driven)", () => {
         "---",
         "",
         "# Tohsaka Family",
+        "",
+        "## Runtime Capsule",
+        "- 压力：the family creates faction leverage, risk, and player-facing constraints.",
+        "",
         "An important mage family involved in the conflict.",
         "---END FILE---",
         "",
@@ -919,6 +1032,10 @@ describe("ingest scenarios (fixture-driven)", () => {
         "---",
         "",
         "# Matou Family",
+        "",
+        "## Runtime Capsule",
+        "- 压力：the family creates faction conflict, secrets, and risk for choices.",
+        "",
         "A second important family tied to Sakura and the ongoing conflict.",
         "---END FILE---",
       ].join("\n"),

@@ -290,7 +290,6 @@ interface WikiState {
    * one wiki-relative) still works.
    */
   pendingScrollImageSrc: string | null
-  chatExpanded: boolean
   activeView: "wiki" | "play" | "sources" | "search" | "graph" | "lint" | "review" | "settings"
   llmConfig: LlmConfig
   /** Per-provider-preset stored overrides (API key, model, endpoint, …). */
@@ -313,7 +312,6 @@ interface WikiState {
   setFileContent: (content: string) => void
   setExternalPreview: (preview: ExternalPreview | null) => void
   setPendingScrollImageSrc: (src: string | null) => void
-  setChatExpanded: (expanded: boolean) => void
   setActiveView: (view: WikiState["activeView"]) => void
   setLlmConfig: (config: LlmConfig) => void
   setProviderConfigs: (configs: ProviderConfigs) => void
@@ -336,7 +334,6 @@ export const useWikiStore = create<WikiState>((set) => ({
   fileContent: "",
   externalPreview: null,
   pendingScrollImageSrc: null,
-  chatExpanded: false,
   activeView: "wiki",
   llmConfig: {
     provider: "openai",
@@ -359,7 +356,6 @@ export const useWikiStore = create<WikiState>((set) => ({
   setFileContent: (fileContent) => set({ fileContent }),
   setExternalPreview: (externalPreview) => set({ externalPreview }),
   setPendingScrollImageSrc: (pendingScrollImageSrc) => set({ pendingScrollImageSrc }),
-  setChatExpanded: (chatExpanded) => set({ chatExpanded }),
   setActiveView: (activeView) => set({ activeView }),
   searchApiConfig: {
     provider: "none",

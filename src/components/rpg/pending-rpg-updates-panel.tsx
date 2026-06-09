@@ -156,6 +156,11 @@ export function PendingRpgUpdatesPanel({
           <div className="font-medium text-foreground">Last apply result</div>
           <div className="mt-2 space-y-2 text-muted-foreground">
             <ResultList
+              label="Affected paths"
+              emptyLabel="Affected paths: none"
+              items={getAffectedPaths(applyResult)}
+            />
+            <ResultList
               label="Applied updates"
               emptyLabel="Applied updates: none"
               items={applyResult.appliedUpdates.map((update) => `${update.id}: ${update.targetPath}`)}
@@ -163,7 +168,7 @@ export function PendingRpgUpdatesPanel({
             <ResultList
               label="Skipped updates"
               emptyLabel="Skipped updates: none"
-              items={applyResult.skippedUpdates.map((update) => `${update.id}: ${update.reason}`)}
+              items={applyResult.skippedUpdates.map((update) => `${update.id}: ${update.targetPath} - ${update.reason}`)}
             />
             <ResultList label="Warnings" emptyLabel="Warnings: none" items={applyResult.warnings} />
           </div>
@@ -188,6 +193,16 @@ function ResultList({ label, emptyLabel, items }: { label: string; emptyLabel: s
       </ul>
     </div>
   )
+}
+
+function getAffectedPaths(applyResult: ApplyRpgPendingUpdatesResult): string[] {
+  return [
+    ...new Set(
+      applyResult.appliedUpdates
+        .map((update) => update.targetPath.trim().replace(/\\/g, "/").replace(/\/+/g, "/"))
+        .filter(Boolean),
+    ),
+  ]
 }
 
 function countStatus(updates: PendingRpgUpdate[], status: PendingRpgUpdate["status"]): number {

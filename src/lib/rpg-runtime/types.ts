@@ -25,6 +25,8 @@ export interface CompactStoryBrief {
   presentCharacters: string[]
   relationshipTensions: string[]
   activePlotPressure: string[]
+  outlineNotes: string[]
+  activeQuests: string[]
   relevantLocations: string[]
   relevantFactions: string[]
   relevantItems: string[]

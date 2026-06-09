@@ -117,6 +117,8 @@ describe("PendingRpgUpdatesPanel", () => {
     )
 
     expect(html).toContain("Last apply result")
+    expect(html).toContain("Affected paths")
+    expect(html).toContain("wiki/current-scene/scene_state.md")
     expect(html).toContain("Applied updates")
     expect(html).toContain("update-scene: wiki/current-scene/scene_state.md")
     expect(html).toContain("Skipped updates")

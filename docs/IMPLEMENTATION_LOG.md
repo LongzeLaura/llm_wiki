@@ -1,5 +1,2490 @@
 # Implementation Log
 
+## 2026-06-09 - RPG LLM Interaction Consolidation Phase 4-5
+
+### Stage
+
+`RPG_LLM_INTERACTION_CONSOLIDATION_PLAN.md` Phase 4-5: Import Mode Contract Alignment and Remove Old Prompt Islands.
+
+### Changed files
+
+- Added `src/lib/rpg-interactions/control-doc/canonicalization-interaction.ts`
+- Added `src/lib/rpg-interactions/control-doc/import-contract.ts`
+- Added `src/lib/rpg-interactions/control-doc/index.ts`
+- Added `src/lib/rpg-interactions/campaign-setup/setup-contract.ts`
+- Added `src/lib/rpg-interactions/campaign-setup/index.ts`
+- Moved `src/lib/prompts/shared-ingest.ts` to `src/lib/rpg-interactions/source-ingest/shared-ingest-contract.ts`
+- Deleted `src/lib/rpg-interactions/control-doc-canonicalization-interaction.ts`
+- Updated `src/lib/rpg-interactions/source-ingest/analysis-interaction.ts`
+- Updated `src/lib/rpg-interactions/source-ingest/chunk-analysis-interaction.ts`
+- Updated `src/lib/rpg-interactions/source-ingest/generation-interaction.ts`
+- Updated `src/lib/rpg-interactions/source-ingest/index.ts`
+- Updated `src/lib/rpg-interactions/interaction-spec.ts`
+- Updated `src/lib/rpg-interactions/index.ts`
+- Updated `src/lib/rpg-interactions/registry.ts`
+- Updated `src/lib/rpg-interactions.test.ts`
+- Updated `src/lib/rpg-import/control-doc-import.ts`
+- Updated `src/lib/rpg-import/campaign-setup-import.ts`
+- Updated `docs/CURRENT_STATE.md`
+- Updated `docs/IMPLEMENTATION_LOG.md`
+- Updated `docs/RPG_LLM_INTERACTION_CONSOLIDATION_PLAN.md`
+
+### Summary
+
+- Moved the control-doc canonicalization interaction spec under `src/lib/rpg-interactions/control-doc/` and removed the old top-level file without a wrapper.
+- Added `control-doc/import-contract.ts` as the deterministic control document import contract source for supported slots, target paths, write policies, review policies, and canonicalization notes.
+- Added `campaign-setup/setup-contract.ts` as the deterministic campaign setup import contract source for supported slots, dynamic target path resolution, write policies, review policies, canonicalization/bootstrap notes, future-pressure filtering, ability-like input review, and current-scene explicit bootstrap rules.
+- Rewired `src/lib/rpg-import/control-doc-import.ts` and `src/lib/rpg-import/campaign-setup-import.ts` so contract data comes from `rpg-interactions/control-doc` and `rpg-interactions/campaign-setup`; import modules still own source reading, raw source anchor writing, safe wiki path checks, manual confirmation, target file writes, and review item generation.
+- Added `campaign_setup_import_contract` to `RpgInteractionKind` and the interaction registry as an implemented deterministic contract for stage `campaign_setup_import`.
+- Marked registry `control_doc_canonicalization` as `usesLlm: false`; its prompt spec remains only as a model contract boundary / future optional entrypoint, not the current default import behavior.
+- Moved the remaining source-ingest shared prompt/protocol helper into `src/lib/rpg-interactions/source-ingest/shared-ingest-contract.ts`, so FILE/REVIEW output-format, frontmatter, source-file, and language-rule helpers live under the interaction boundary.
+- Strengthened `src/lib/rpg-interactions.test.ts` so implemented deterministic import contracts are covered and old import/prompt islands cannot quietly return.
+
+### Actual differences / baseline notes
+
+- The plan called this import-mode work model-related rather than LLM behavior. The implementation follows that: no import path now calls an LLM, and `campaign_setup_generation` remains a planned future kind.
+- `src/lib/rpg-import/ui-import-options.ts` still defines UI option exposure order, but the supported slot contracts used by import behavior now live under `src/lib/rpg-interactions/`.
+- The original Phase 4-5 implementation treated `src/lib/prompts/shared-ingest.ts` as the plan's allowed shared-helper exception. Follow-up review found it still contained RPG-specific REVIEW wording, so it was moved into the source-ingest interaction contract boundary and the old path is now guarded absent.
+- The broad scan still finds `Runtime Capsule` in deterministic helpers such as `rpg-merge-lint.ts`, `rpg-section-merge.ts`, `rpg-extraction-validation.ts`, `rpg-ingest-signals.ts`, `rpg-post-ingest-distiller.ts`, and tests. These are heading/policy/lint/distill checks, not duplicate prompt builders.
+
+### Validation
+
+- `rg --encoding utf-8 "control-doc-canonicalization-interaction" src` returned no results.
+- `rg --encoding utf-8 "prompts/shared-ingest|src/lib/prompts/shared-ingest|shared-ingest.ts" src` only finds the guarded absence assertion in `src/lib/rpg-interactions.test.ts`.
+- `rg --encoding utf-8 "You are an RPG|llmWikiRPG narration runtime|RPG wiki extraction|rpg-wiki-update|Runtime Capsule" src/lib` shows source ingest / narration / runtime update prompt/protocol text under `src/lib/rpg-interactions/`; `Runtime Capsule` also appears in deterministic non-prompt helpers and tests as noted above.
+- `npx.cmd vitest run src/lib/rpg-interactions.test.ts src/lib/rpg-import/control-doc-import.test.ts src/lib/rpg-import/campaign-setup-import.test.ts src/lib/rpg-import/runtime-update-apply.test.ts src/lib/rpg-import/ui-import-options.test.ts` passed: 5 files, 88 tests.
+- `npx.cmd vitest run src/lib/ingest.prompt.test.ts src/lib/rpg-runtime-controller.test.ts src/lib/rpg-narration-prompts.test.ts src/lib/rpg-runtime-update-validation.test.ts` passed: 4 files, 72 tests.
+- `npx.cmd vitest run src/lib/rpg-interactions.test.ts src/lib/ingest.prompt.test.ts` passed after the shared-ingest move: 2 files, 84 tests.
+- `npm.cmd run typecheck` passed.
+
+### Scope notes
+
+- Did not change import mode behavior, target write behavior, manual confirmation behavior, raw source anchor behavior, safe path behavior, or review item generation.
+- Did not connect real LLM import behavior.
+- Did not add legacy/default compatibility, migration, fallback, or old-path preservation behavior.
+- No `git commit` or `git push` was performed.
+
+## 2026-06-09 - RPG LLM Interaction Consolidation Phase 3
+
+### Stage
+
+`RPG_LLM_INTERACTION_CONSOLIDATION_PLAN.md` Phase 3: Runtime Interaction Cleanup.
+
+### Changed files
+
+- Added `src/lib/rpg-interactions/runtime/index.ts`
+- Added `src/lib/rpg-interactions/runtime/runtime-update-protocol.ts`
+- Moved `src/lib/rpg-interactions/narration-interaction.ts` to `src/lib/rpg-interactions/runtime/narration-interaction.ts`
+- Moved `src/lib/rpg-interactions/runtime-update-interaction.ts` to `src/lib/rpg-interactions/runtime/runtime-update-interaction.ts`
+- Moved `src/lib/rpg-interactions/runtime-update-adapter.ts` to `src/lib/rpg-interactions/runtime/runtime-update-adapter.ts`
+- Moved `src/lib/rpg-interactions/llm-runtime-update-adapter.ts` to `src/lib/rpg-interactions/runtime/llm-runtime-update-adapter.ts`
+- Moved `src/lib/rpg-interactions/runtime-update-validation.ts` to `src/lib/rpg-interactions/runtime/runtime-update-validation.ts`
+- Moved `src/lib/rpg-interactions/wiki-update-policy.ts` to `src/lib/rpg-interactions/runtime/wiki-update-policy.ts`
+- Moved `src/lib/rpg-runtime/narration-adapter.ts` to `src/lib/rpg-interactions/runtime/narration-adapter.ts`
+- Moved `src/lib/rpg-runtime/llm-narration-adapter.ts` to `src/lib/rpg-interactions/runtime/llm-narration-adapter.ts`
+- Deleted `src/lib/rpg-runtime/narration-prompts.ts`
+- Updated `src/lib/rpg-interactions/index.ts`
+- Updated `src/lib/rpg-interactions/registry.ts`
+- Updated `src/lib/rpg-interactions.test.ts`
+- Updated `src/lib/rpg-runtime/index.ts`
+- Updated `src/lib/rpg-runtime/turn-orchestrator.ts`
+- Updated `src/lib/rpg-runtime/runtime-controller.ts`
+- Updated `src/lib/rpg-runtime/state-extractor.ts`
+- Updated `src/lib/rpg-runtime/write-policy.ts`
+- Updated `src/lib/rpg-import/runtime-update-apply.ts`
+- Updated `src/components/rpg/rpg-runtime-panel.tsx`
+- Updated `src/components/rpg/rpg-runtime-panel.test.tsx`
+- Updated `src/lib/rpg-narration-prompts.test.ts`
+- Updated `src/lib/rpg-llm-narration-adapter.test.ts`
+- Updated `src/lib/rpg-runtime-controller.test.ts`
+- Updated `src/lib/rpg-turn-orchestrator.test.ts`
+- Updated `docs/CURRENT_STATE.md`
+- Updated `docs/IMPLEMENTATION_LOG.md`
+
+### Summary
+
+- Created `src/lib/rpg-interactions/runtime/` as the runtime interaction contract boundary.
+- Moved narration prompt construction, narration parse/validation usage, fixture narration adapter, LLM narration adapter, runtime update prompt construction, runtime update adapter, runtime update validation, target policy, and runtime update protocol marker into that boundary.
+- Kept `src/lib/rpg-runtime/` focused on runtime state extraction, orchestration, persistence, write policy, controller, and runtime preview.
+- Removed the old `src/lib/rpg-runtime/narration-prompts.ts` wrapper completely; `buildRpgNarrationPrompt()` is now exported from `src/lib/rpg-interactions/runtime`.
+- Updated controller, orchestrator, UI, import framework, and focused tests to consume runtime prompt/adapter/validation contracts from `rpg-interactions/runtime`.
+- Updated runtime guardrails so the old prompt/adapter paths cannot quietly return.
+
+### Actual differences / baseline notes
+
+- `src/lib/rpg-runtime/state-extractor.ts` remains in runtime because Phase 3 explicitly scoped it as a runtime state extraction file. To keep the output protocol marker in the interaction boundary, it now imports the `rpg-wiki-update` regex factory from `src/lib/rpg-interactions/runtime/runtime-update-protocol.ts`.
+- The broad prompt scan still finds `Runtime Capsule` in deterministic lint, merge, extraction-validation, distiller, and test files. These are heading/policy checks rather than runtime prompt wrappers; runtime narration/update prompt text is no longer under `src/lib/rpg-runtime/`.
+
+### Validation
+
+- `rg --encoding utf-8 "narration-prompts|rpg-runtime/llm-narration-adapter|rpg-runtime/narration-adapter" src` returned no results.
+- `rg --encoding utf-8 "llmWikiRPG narration runtime|rpg-wiki-update|Runtime Capsule" src/lib` shows runtime narration/update prompt/protocol entries under `src/lib/rpg-interactions/runtime/`; `Runtime Capsule` also appears in deterministic non-prompt helpers and tests as noted above.
+- `npx.cmd vitest run src/lib/rpg-interactions.test.ts src/lib/rpg-runtime-controller.test.ts src/lib/rpg-turn-orchestrator.test.ts src/lib/rpg-narration-prompts.test.ts src/lib/rpg-llm-narration-adapter.test.ts src/lib/rpg-runtime-update-validation.test.ts src/components/rpg/rpg-runtime-panel.test.tsx` passed: 7 files, 114 tests.
+- `npm.cmd run typecheck` passed.
+- After the runtime barrel changes, the Phase 2 merge bundle was re-run and passed: `npx.cmd vitest run src/lib/rpg-interactions.test.ts src/lib/page-merge.test.ts src/lib/rpg-merge-policy.test.ts src/lib/rpg-merge-lint.test.ts src/lib/rpg-section-merge.test.ts src/lib/rpg-merge-review.test.ts` passed with 6 files / 111 tests.
+
+### Scope notes
+
+- Did not change narration prompt semantics, runtime update prompt semantics, pending/apply behavior, write policy behavior, or UI behavior.
+- Did not move general runtime state, persistence, controller, or write policy responsibilities into `rpg-interactions`.
+- Did not run real LLM tests.
+- No `git commit` or `git push` was performed.
+
+## 2026-06-09 - RPG LLM Interaction Consolidation Phase 2
+
+### Stage
+
+`RPG_LLM_INTERACTION_CONSOLIDATION_PLAN.md` Phase 2: Page Merge Interaction Consolidation.
+
+### Changed files
+
+- Added `src/lib/rpg-interactions/merge/page-merge-interaction.ts`
+- Added `src/lib/rpg-interactions/merge/index.ts`
+- Moved `src/lib/rpg-merge-policy.ts` to `src/lib/rpg-interactions/merge/merge-policy.ts`
+- Updated `src/lib/rpg-interactions/interaction-spec.ts`
+- Updated `src/lib/rpg-interactions/registry.ts`
+- Updated `src/lib/rpg-interactions/index.ts`
+- Updated `src/lib/ingest.ts`
+- Updated `src/lib/page-merge.ts`
+- Updated `src/lib/rpg-section-merge.ts`
+- Updated `src/lib/rpg-merge-lint.ts`
+- Updated `src/lib/rpg-merge-review.ts`
+- Updated `src/lib/rpg-merge-policy.test.ts`
+- Updated `src/lib/rpg-interactions.test.ts`
+- Updated `docs/CURRENT_STATE.md`
+- Updated `docs/IMPLEMENTATION_LOG.md`
+
+### Summary
+
+- Moved the RPG merge policy and merge system prompt into `src/lib/rpg-interactions/merge/merge-policy.ts`.
+- Added `PageMergeInteractionInput` and `pageMergeInteractionSpec` under `src/lib/rpg-interactions/merge/page-merge-interaction.ts`.
+- Registered the new interaction kind `page_merge` in the interaction registry with stage `page_merge` and `usesLlm: true`.
+- Rewired `src/lib/ingest.ts` so `buildPageMerger()` delegates prompt construction to `pageMergeInteractionSpec.buildPrompt()` and only handles `streamChat()` collection.
+- Preserved `src/lib/page-merge.ts` as the deterministic safety boundary for frontmatter union, locked fields, shrink checks, section merge, lint, fallback, and backup.
+- Updated merge modules and tests to import the merge policy from `src/lib/rpg-interactions/merge`.
+- Strengthened interaction guardrails so the old top-level merge policy path is absent and old imports do not return.
+
+### Validation
+
+- `rg --encoding utf-8 "rpg-merge-policy" src` returned no results.
+- `npx.cmd vitest run src/lib/rpg-interactions.test.ts src/lib/page-merge.test.ts src/lib/rpg-merge-policy.test.ts src/lib/rpg-merge-lint.test.ts src/lib/rpg-section-merge.test.ts src/lib/rpg-merge-review.test.ts` passed: 6 files, 110 tests.
+- `npm.cmd run typecheck` passed.
+
+### Scope notes
+
+- Did not move page-merge deterministic safety logic into the interaction spec.
+- Did not change merge prompt semantics, body shrink thresholds, section merge behavior, lint behavior, fallback behavior, or backup behavior.
+- Did not run real LLM tests.
+- No `git commit` or `git push` was performed.
+
+## 2026-06-09 - RPG LLM Interaction Consolidation Phase 0-1
+
+### Stage
+
+`RPG_LLM_INTERACTION_CONSOLIDATION_PLAN.md` Phase 0 + Phase 1: registry / guardrail setup and source ingest interaction consolidation.
+
+### Changed files
+
+- Added `src/lib/rpg-interactions/registry.ts`
+- Added `src/lib/rpg-interactions/source-ingest/analysis-interaction.ts`
+- Added `src/lib/rpg-interactions/source-ingest/generation-interaction.ts`
+- Added `src/lib/rpg-interactions/source-ingest/page-guidance-contract.ts`
+- Added `src/lib/rpg-interactions/source-ingest/chunk-analysis-interaction.ts`
+- Added `src/lib/rpg-interactions/source-ingest/domain-guidance.ts`
+- Added `src/lib/rpg-interactions/source-ingest/index.ts`
+- Updated `src/lib/rpg-interactions/index.ts`
+- Updated `src/lib/ingest.ts`
+- Updated `src/lib/ingest.prompt.test.ts`
+- Updated `src/lib/rpg-interactions.test.ts`
+- Deleted `src/lib/prompts/rpg-ingest.ts`
+- Deleted `src/lib/prompts/rpg-page-guidance.ts`
+- Deleted `src/lib/prompts/domain-guidance.ts`
+- Deleted old thin wrappers `src/lib/rpg-interactions/source-ingest-analysis-interaction.ts` and `src/lib/rpg-interactions/source-ingest-generation-interaction.ts`
+- Updated `docs/CURRENT_STATE.md`
+- Updated `docs/IMPLEMENTATION_LOG.md`
+
+### Summary
+
+- Added the RPG interaction registry for currently implemented model interactions: source ingest analysis, source ingest generation, control doc canonicalization, narration, and runtime state update.
+- Kept future `RpgInteractionKind` values out of the implemented registry and listed them as planned instead of inventing prompt behavior for them.
+- Moved the real source ingest Stage 1 analysis prompt into `src/lib/rpg-interactions/source-ingest/analysis-interaction.ts`.
+- Moved the real source ingest Stage 2 generation prompt into `src/lib/rpg-interactions/source-ingest/generation-interaction.ts`.
+- Moved focused page guidance, minimal generation contract, source ingest target policy guidance, and directory boundary guidance into `src/lib/rpg-interactions/source-ingest/page-guidance-contract.ts`.
+- Moved long-source chunk analysis system/user prompt builders into `src/lib/rpg-interactions/source-ingest/chunk-analysis-interaction.ts`.
+- Moved domain-specific RPG generation guidance into `src/lib/rpg-interactions/source-ingest/domain-guidance.ts`, because the baseline import scan showed it only served RPG source ingest generation.
+- Rewired `src/lib/ingest.ts` to call source-ingest interaction specs and chunk prompt builders from the new directory while keeping ingest orchestration, token budget, chunk split/checkpointing, LLM calls, FILE/REVIEW parsing, and write behavior in place.
+- Updated prompt and interaction tests so real source-ingest prompt assertions import from `src/lib/rpg-interactions/source-ingest`.
+- Added guardrails that assert implemented registry coverage and confirm the old source-ingest prompt islands are gone after Phase 1.
+
+### Actual differences / baseline notes
+
+- Initial baseline search found existing `sourceIngestAnalysisInteractionSpec` and `sourceIngestGenerationInteractionSpec`, but they were thin wrappers importing real prompt builders from `src/lib/prompts/rpg-ingest.ts`.
+- Initial baseline search found long-source chunk prompt builders directly in `src/lib/ingest.ts`.
+- The user-provided double-quoted PowerShell `rg` import search is syntactically fragile in this shell; the equivalent single-quoted command showed the only old import result was `src/lib/prompts/rpg-ingest.ts` importing `src/lib/prompts/domain-guidance.ts`.
+- `src/lib/rpg-merge-policy.ts` was intentionally not moved in this pass and remains the explicit Phase 2 merge interaction consolidation target.
+- `src/lib/prompts/` now contains only `shared-ingest.ts`; the deleted RPG prompt files are not kept as long-lived wrappers.
+
+### Validation
+
+- Acceptance search passed with no results: `rg --encoding utf-8 "buildRpgAnalysisPrompt|buildRpgGenerationPrompt|buildFocusedRpgPageGuidance" src/lib/prompts src/lib/ingest.ts`.
+- Acceptance search passed with no results: `rg --encoding utf-8 "You are an RPG wiki extraction analyst|RPG Wiki Generation Contract|RP Runtime Signals JSON" src/lib/prompts src/lib/ingest.ts`.
+- Acceptance search passed with no results: `rg --encoding utf-8 '@/lib/prompts/rpg-ingest|@/lib/prompts/rpg-page-guidance|prompts/domain-guidance' src`.
+- `npx.cmd vitest run src/lib/rpg-interactions.test.ts src/lib/ingest.prompt.test.ts` passed: 2 files, 81 tests.
+- `npx.cmd vitest run src/lib/ingest.scenarios.test.ts src/lib/rpg-ingest-signals.test.ts` passed: 2 files, 28 tests.
+- `npm.cmd run typecheck` passed.
+
+### Scope notes
+
+- Did not change source ingest prompt semantics, output language rules, Source Profile category selection logic, FILE/REVIEW protocol, autoIngest write behavior, parser behavior, or merge policy behavior.
+- Did not move `src/lib/rpg-merge-policy.ts`; it remains the next known old RPG LLM prompt location for Phase 2.
+- Did not add legacy/default compatibility, migration, fallback, old-path preservation behavior, real LLM calls, `git commit`, or `git push`.
+
+## 2026-06-09 - RPG LLM Interaction Consolidation Plan
+
+### Stage
+
+架构评估与计划：评估 RPG prompt / LLM interaction 分散问题，并制定迁移到 `src/lib/rpg-interactions/` 的阶段方案。
+
+### Changed files
+
+- `docs/RPG_LLM_INTERACTION_CONSOLIDATION_PLAN.md`
+- `docs/CURRENT_STATE.md`
+- `docs/IMPLEMENTATION_LOG.md`
+
+### Summary
+
+- Confirmed that the current prompt sprawl is a real blocker for continued llmWikiRPG development, because source ingest, chunk analysis, page merge, narration, runtime update, control doc canonicalization, and future context/derivation/outline stages all depend on model-facing contracts.
+- Recorded that `src/lib/rpg-interactions/` already has the right foundation through `RpgInteractionSpec`, narration interaction, runtime update interaction, runtime target policy, and validation.
+- Recorded the main remaining prompt islands: `src/lib/prompts/rpg-ingest.ts`, `src/lib/prompts/rpg-page-guidance.ts`, RPG chunk prompts in `src/lib/ingest.ts`, and merge prompt policy in `src/lib/rpg-merge-policy.ts`.
+- Added a phased consolidation plan covering registry/guardrails, source ingest prompt migration, page merge interaction migration, runtime wrapper cleanup, import mode contract alignment, and old prompt island removal.
+- Recommended running this consolidation before adding more model-facing features such as Context Compiler v1, relationship derivation integration, or outline impact detection.
+
+### Scope notes
+
+- Documentation-only planning pass.
+- Did not move or edit source code.
+- Did not change runtime, ingest, merge, import, UI, or write-policy behavior.
+- Did not add legacy/default compatibility, migration, fallback, or old-path preservation behavior.
+- No `git commit` or `git push` was performed.
+
+### Validation
+
+- No tests were run because this pass only added and updated documentation.
+
+## 2026-06-09 - llmWikiRPG Redundancy Cleanup Phase 5-6 Partial
+
+### Stage
+
+冗余清理 Phase 5-6：处理悬空 RPG 原型模块，并清理历史 opencode 自动化残留。Phase 5 已完成；Phase 6 的 `.opencode/` 目录删除因审批服务 503 暂未完成。
+
+### Changed files
+
+- Deleted `src/lib/rpg-merge-evaluation.ts`
+- Deleted `src/lib/rpg-merge-evaluation.test.ts`
+- Deleted `opencode.json`
+- Deleted `scripts/run-opencode-stages.ps1`
+- `scripts/run_rpg_v02_tasks.py`
+- `docs/CURRENT_STATE.md`
+- `docs/IMPLEMENTATION_LOG.md`
+
+### Summary
+
+- Removed `rpg-merge-evaluation` because the reference scan showed it was a deterministic evaluation helper only used by its own focused test, not a product runtime/review service.
+- Kept `rpg-merge-review` and `rpg-post-ingest-distiller` because docs and code identify them as review-controlled RPG merge/distill proposal services. They remain source-only services with focused tests and no UI/runtime wiring added in this phase.
+- Kept `rpg-relationship-tension-deriver` because docs and code identify relationship/tension derivation as a later RPG runtime/import capability. It remains proposal/review-only with focused tests and no ordinary ingest/runtime/UI wiring added in this phase.
+- Removed the historical opencode root config and staged opencode PowerShell runner.
+- Kept `scripts/run_rpg_v02_tasks.py` as a Codex-capable v0.2 task runner, removed the `opencode` preset, and updated the generated task prompt so it follows the current RPG-only project boundary.
+- Confirmed `.codex/stages/` contains stage prompts `00` through `12` and preserved `scripts/run-codex-stages.ps1` as the current default stage runner.
+
+### Scope notes
+
+- The retained RPG services are not legacy llm_wiki compatibility code and were not connected to product entrypoints in this cleanup pass.
+- No RPG-only legacy directory guards, `extractRpgStateUpdates()`, chunk v2 vector code, runtime update interaction adapter path, `.codex/stages/`, or `scripts/run-codex-stages.ps1` were removed.
+- `.opencode/` was verified as historical prompts plus local dependency remnants, but recursive deletion was blocked twice by the approval service returning 503 after the path-checked delete command was submitted. No workaround deletion was attempted after rejection, so `.opencode/` remains pending deletion.
+- The working tree already contained many unrelated modified and untracked files before this phase; those were not reverted.
+- No `git commit` or `git push` was performed.
+
+### Validation
+
+- `rg --encoding utf-8 "rpg-merge-evaluation|evaluateRpgMergeSample|RpgMergeRegressionSample" src` returned no results after deletion.
+- `rg --encoding utf-8 "opencode" scripts/run_rpg_v02_tasks.py` returned no results after removing the opencode preset.
+- `Test-Path opencode.json` returned `False`.
+- `Test-Path scripts/run-opencode-stages.ps1` returned `False`.
+- `Test-Path .opencode` returned `True` because directory deletion is pending approval/retry after the 503 rejection.
+- `npm.cmd run typecheck` passed.
+- `python -m py_compile scripts/run_rpg_v02_tasks.py` passed.
+- `npx.cmd vitest run src/lib/rpg-merge-review.test.ts src/lib/rpg-post-ingest-distiller.test.ts src/lib/rpg-relationship-tension-deriver.test.ts` passed: 3 files, 22 tests.
+- `npx.cmd vitest run src/lib/rpg-merge-review.test.ts src/lib/rpg-post-ingest-distiller.test.ts src/lib/rpg-relationship-tension-deriver.test.ts src/i18n/i18n-parity.test.ts` passed: 4 files, 27 tests.
+- `npm.cmd run test:mocks` was attempted and failed: 118 files ran, 116 passed, 2 failed, with 1515 passed tests and 11 failed tests. The failures are in `src/lib/ingest-source-path-collision.test.ts` legacy project fixtures now rejected by RPG-only mode, and `src/lib/rpg-state-extractor.test.ts` expectations for base `wiki/relationships/*.md` runtime updates while current policy rejects that path.
+
+## 2026-06-09 - llmWikiRPG Redundancy Cleanup Phase 3-4
+
+### Stage
+
+冗余清理 Phase 3-4：移除旧 vector v1 per-page migration/API/UI，并移除 runtime controller 的 `legacy_narration_block` fallback。
+
+### Changed files
+
+- `src/lib/embedding.ts`
+- `src/lib/embedding.test.ts`
+- `src/components/settings/sections/embedding-section.tsx`
+- `src/i18n/en.json`
+- `src/i18n/zh.json`
+- `src-tauri/src/lib.rs`
+- `src-tauri/src/commands/vectorstore.rs`
+- `src/lib/rpg-runtime/runtime-controller.ts`
+- `src/lib/rpg-runtime/runtime-persistence.ts`
+- `src/lib/rpg-runtime-controller.test.ts`
+- `src/components/rpg/rpg-runtime-panel.tsx`
+- `docs/CURRENT_STATE.md`
+- `docs/IMPLEMENTATION_LOG.md`
+- `docs/LLMWIKIRPG_NEXT_ARCHITECTURE_STEPS.md`
+- `docs/RPG_IMPORT_MODULARIZATION_PLAN.md`
+
+### Summary
+
+- Removed frontend legacy vector migration helpers and invokes for `vector_legacy_row_count` and `vector_drop_legacy`.
+- Removed the Embedding settings legacy index prompt, legacy drop action/status, and matching English/Chinese i18n keys.
+- Removed Tauri registrations and Rust command implementations for the old vector v1 per-page API and legacy row count/drop migration commands.
+- Preserved the chunk v2 vector commands and tests: `vector_upsert_chunks`, `vector_search_chunks`, `vector_delete_page`, and `vector_count_chunks`.
+- Removed the `legacy_narration_block` runtime fallback. `RunRpgRuntimeTurnFlowInput.updateInteractionAdapter` is now required, and `runRpgRuntimeTurnFlow()` always uses the dedicated runtime update interaction path.
+- Runtime turn journal proposal source is now fixed to `interaction`.
+- Kept `extractRpgStateUpdates()` because `runtimeUpdateInteractionSpec.parseOutput()` still uses it as the fenced interaction output parser.
+
+### Scope notes
+
+- Preserved RPG-only legacy directory guards such as `entities` / `concepts` filtering, rejection, and hiding logic.
+- Did not delete RPG prototype modules such as `rpg-merge-review`, `rpg-post-ingest-distiller`, or `rpg-relationship-tension-deriver`.
+- Did not change pending review/apply semantics: controller still creates proposed/pending updates only and does not accept, reject, apply, or write wiki files.
+- The working tree already contained many unrelated modified and untracked files before this phase; those were not reverted.
+- No `git commit` or `git push` was performed.
+
+### Validation
+
+- `rg --encoding utf-8 "vector_legacy_row_count|vector_drop_legacy|getLegacyVectorRowCount|dropLegacyVectorTable" src/lib/embedding.ts src/lib/embedding.test.ts` returned no results.
+- `rg --encoding utf-8 "legacyPromptTitle|legacyPromptBody|dropLegacy|Legacy per-page index|旧版.*索引" src` returned no results.
+- `rg --encoding utf-8 "vector_upsert\\b|vector_search\\b|vector_delete\\b|vector_count\\b|vector_legacy_row_count|vector_drop_legacy" src-tauri/src/lib.rs` returned no results.
+- `rg --encoding utf-8 "legacy_narration_block|updateInteractionAdapter\\?" src/lib/rpg-runtime src/lib/rpg-interactions src/components/rpg` returned no results.
+- `extractRpgStateUpdates()` remains intentionally referenced by `src/lib/rpg-interactions/runtime-update-interaction.ts` as the interaction output parser.
+- `npm.cmd run typecheck` passed.
+- `npx.cmd vitest run src/lib/embedding.test.ts src/components/rpg/rpg-runtime-panel.test.tsx src/lib/rpg-runtime-controller.test.ts src/lib/rpg-runtime-persistence.test.ts src/lib/rpg-interactions.test.ts src/i18n/i18n-parity.test.ts` passed: 6 files, 146 tests.
+- `cargo check` was attempted in `src-tauri` and failed before crate checking because `lance-encoding v4.0.0` could not find `protoc`. This is the known local protobuf compiler prerequisite, not a cleanup compile error reached by Cargo.
+
+## 2026-06-09 - llmWikiRPG Redundancy Cleanup Phase 1-2
+
+### Stage
+
+冗余清理 Phase 1-2：删除入口不可达的旧 UI / 工具代码，并移除旧 `entities/concepts` dedup 后台链路。
+
+### Changed files
+
+- `package.json`
+- `package-lock.json`
+- `src/App.tsx`
+- `src/stores/wiki-store.ts`
+- `src/lib/reset-project-state.ts`
+- `src/components/settings/sections/maintenance-section.tsx`
+- `src/i18n/en.json`
+- `src/i18n/zh.json`
+- `src/test-helpers/scenarios/types.ts`
+- `src/test-helpers/scenarios/materialize.ts`
+- Deleted `src/components/layout/chat-bar.tsx`
+- Deleted `src/components/ui/resizable.tsx`
+- Deleted `src/components/ui/separator.tsx`
+- Deleted `src/lib/source-delete-decision.ts`
+- Deleted `src/lib/source-delete-decision.test.ts`
+- Deleted `src/lib/enrich-wikilinks.ts`
+- Deleted `src/lib/enrich-wikilinks.test.ts`
+- Deleted `src/lib/enrich-wikilinks.scenarios.test.ts`
+- Deleted `src/lib/enrich-wikilinks.real-llm.test.ts`
+- Deleted `src/test-helpers/scenarios/enrich-scenarios.ts`
+- Deleted `src/lib/dedup.ts`
+- Deleted `src/lib/dedup.test.ts`
+- Deleted `src/lib/dedup-runner.ts`
+- Deleted `src/lib/dedup-queue.ts`
+- Deleted `src/lib/dedup-queue.test.ts`
+- Deleted `src/lib/dedup-storage.ts`
+- `docs/CURRENT_STATE.md`
+- `docs/IMPLEMENTATION_LOG.md`
+
+### Summary
+
+- Removed the old folded chat bar and its stale Zustand state (`chatExpanded`, `setChatExpanded`, initial value, and setter).
+- Removed unused resizable/separator UI wrappers and uninstalled `react-resizable-panels`; `@base-ui/react` was preserved.
+- Removed the `source-delete-decision` test island; product deletion logic remains in `src/lib/source-lifecycle.ts`.
+- Removed the `enrich-wikilinks` island, its tests, and the scenario helper that was only used by those tests.
+- Removed the old `wiki/entities` / `wiki/concepts` duplicate cleanup modules, queue, storage helper, runner, and tests.
+- Removed dedup queue restore from project open and dedup queue pause/load handling from project reset.
+- Preserved ingest queue restore/pause, graph cache reset, project file sync stop, and scheduled import stop/reset behavior.
+- Cleaned Maintenance UI/i18n copy to RPG-only wording and removed `settings.sections.maintenance.dedup`.
+- Removed enrich-only test-helper type/materialization leftovers so cleanup confirmation searches do not retain dead test references.
+
+### Scope notes
+
+- Did not remove RPG-only legacy guards in `src/lib/rpg-runtime/context-compiler.ts`, `src/lib/rpg-runtime/turn-model.ts`, `src/lib/rpg-ingest-signals.ts`, `src/components/layout/knowledge-tree.tsx`, or `src/lib/ingest.ts`.
+- Did not remove the old narration-block runtime fallback in Phase 1-2; Phase 4 later removed it.
+- Did not change vector v1 migration or settings UI in Phase 1-2; Phase 3 later removed it.
+- Did not delete RPG prototype modules such as `rpg-merge-review`, `rpg-post-ingest-distiller`, or `rpg-relationship-tension-deriver`.
+- `src/lib/changelog.ts` still contains historical changelog text mentioning duplicate entities / concepts; this was intentionally retained as non-product history per the cleanup request.
+- The working tree already contained many unrelated modified and untracked files before this phase; those were not reverted.
+- No `git commit` or `git push` was performed.
+
+### Validation
+
+- `npm.cmd uninstall react-resizable-panels` passed and removed the dependency from `package.json` and `package-lock.json`.
+- `rg --encoding utf-8 "chatExpanded|setChatExpanded|ChatBar|chat-bar" src` returned no results.
+- `rg --encoding utf-8 "react-resizable-panels|ResizablePanel|ResizableHandle|components/ui/separator" src package.json package-lock.json` returned no results.
+- `rg --encoding utf-8 "source-delete-decision|decidePageFate" src` returned no results.
+- `rg --encoding utf-8 "enrich-wikilinks|enrichWithWikilinks|enrich-scenarios" src` returned no results.
+- `rg --encoding utf-8 "dedup-queue|dedup pauseQueue|Dedup Queue" src/App.tsx src/lib/reset-project-state.ts` returned no results.
+- `rg --encoding utf-8 "dedup-runner|dedup-storage|dedup-queue|extractEntitySummary|detectDuplicateGroups|mergeDuplicateGroup|runDuplicateDetection|enqueueMerge|loadNotDuplicates|addNotDuplicate" src` returned no results.
+- `rg --encoding utf-8 "settings.sections.maintenance.dedup|Detect duplicate entities|duplicate entities / concepts|notDuplicates|queueDescription" src` only returned the allowed historical `src/lib/changelog.ts` entry.
+- `rg --encoding utf-8 "react-resizable-panels" package.json package-lock.json` returned no results.
+- `npm.cmd run typecheck` passed.
+- `npx.cmd vitest run src/lib/source-lifecycle-delete.test.ts src/lib/wiki-page-delete.test.ts src/lib/project-mode.test.ts src/lib/rpg-runtime.test.ts src/lib/rpg-turn-model.test.ts src/i18n/i18n-parity.test.ts` passed: 6 test files, 45 tests.
+
+## 2026-06-09 - RPG Import Modularization Stage H Unified UI Entry
+
+### Stage
+
+RPG Import Modularization Plan 阶段 H：统一 UI 入口。
+
+### Changed files
+
+- `src/lib/rpg-import/ui-import-options.ts`
+- `src/lib/rpg-import/ui-import-options.test.ts`
+- `src/components/sources/rpg-import-dialog.tsx`
+- `src/components/sources/sources-view.tsx`
+- `src/lib/source-lifecycle.ts`
+- `src/i18n/zh.json`
+- `src/i18n/en.json`
+- `docs/RPG_IMPORT_MODULARIZATION_PLAN.md`
+- `docs/CURRENT_STATE.md`
+- `docs/IMPLEMENTATION_LOG.md`
+
+### Summary
+
+- Added a pure UI mapping layer for RPG import semantics.
+- The default UI semantic remains ordinary source material and maps to `source_ingest`.
+- The UI option list exposes only the Stage E Control Doc slots currently implemented by the framework: `main_outline`, `outline_progress`, `rules_core`, and `style_narration`.
+- The UI option list exposes only the Stage F Campaign Setup slots currently implemented by the framework: `player_main`, `current_scene`, `events_prologue`, `main_quest`, `quest`, and `player_relationship`.
+- The file import UI intentionally does not expose `runtime_update_apply`; runtime apply remains owned by Play/Pending UI.
+- Added mapping for optional quest and relationship names into `options.questName` and `options.relationshipName`.
+- Added explicit current-scene bootstrap mapping into `options.explicitBootstrap`; unchecked current-scene imports do not pass bootstrap or manual-confirm options.
+- Added explicit control document overwrite mapping into `options.manualConfirm`; unchecked control document imports keep the framework's review/manual-confirm skip behavior for meaningful existing files.
+- Added the unified `RpgImportDialog` for Sources.
+- Ordinary source material in the dialog supports multi-file selection and continues to call the existing source lifecycle import path.
+- Control Doc and Campaign Setup dialog modes are single-file v0 flows and call `runRpgImport({ mode, projectPath, sourcePath, sourceFileName, targetSlot, options })`.
+- The dialog displays grouped `warnings`, `reviewItems`, `writtenPaths`, and `skipped` results after each import.
+- Dedicated import review items are converted to ReviewStore `confirm` items with open-related-page and skip actions, making them visible in the Review panel.
+- Updated `SourcesView` so the primary import button opens the unified "Import to RPG Project" dialog.
+- Preserved the ordinary source folder import button.
+- Preserved the per-source-tree-row "Ingest" button as ordinary source ingest queue behavior.
+- Added `importSourceFilesWithReport()` so the dialog can show skipped ordinary source paths while preserving the existing `importSourceFiles()` return shape for existing callers.
+- Added matching Chinese and English i18n strings under `sources.rpgImport`.
+
+### Actual code / plan differences recorded
+
+- Ordinary source import still reports copied `raw/sources` paths as `writtenPaths`, because the existing ordinary import path copies files and queues ingest rather than synchronously returning generated wiki page paths.
+- The dialog maps Control Doc overwrite confirmation to `manualConfirm` only. It does not also set `allowOverwrite`, because Stage E treats either flag as sufficient and one explicit flag keeps the UI contract narrower.
+- `current_scene` confirmation maps to `explicitBootstrap` only. It does not set `manualConfirm`, so the current-scene bootstrap checkbox remains semantically distinct from control document overwrite.
+- Browser visual verification could not be completed in this environment: Vite foreground startup succeeded and reported `http://127.0.0.1:1420/`, but the Browser runtime exposed no available `iab` instance, and non-sandbox background server startup was not approved.
+
+### Validation
+
+- `npx.cmd vitest run src/lib/rpg-import/ui-import-options.test.ts` passed: 1 test file, 6 tests.
+- `npx.cmd vitest run src/lib/rpg-import/ui-import-options.test.ts src/lib/rpg-import/control-doc-import.test.ts src/lib/rpg-import/campaign-setup-import.test.ts src/i18n/i18n-parity.test.ts` passed: 4 test files, 37 tests.
+- `npm.cmd run typecheck` passed.
+- `npm.cmd run dev -- --host 127.0.0.1` reached Vite ready state in foreground and reported `http://127.0.0.1:1420/`.
+
+### Scope notes
+
+- Did not change Runtime Update Apply / Play panel / Pending Review behavior.
+- Did not expose `runtime_update_apply` as a file import option.
+- Did not change Control Doc Import or Campaign Setup Import write semantics.
+- Did not change ordinary per-row source ingest behavior.
+- Did not add legacy/default compatibility, migration, fallback, or old-path preservation behavior.
+- Did not call a real LLM.
+- Browser screenshot/click verification was not completed because no Browser instance was available in this session.
+- No `git commit` or `git push` was performed.
+
+## 2026-06-09 - RPG Import Modularization Stage G Runtime Update Apply Framework Integration
+
+### Stage
+
+RPG Import Modularization Plan 阶段 G：Runtime Update Apply 接入统一框架。
+
+### Changed files
+
+- `src/lib/rpg-import/runtime-update-apply.ts`
+- `src/lib/rpg-import/registry.ts`
+- `src/lib/rpg-import/index.ts`
+- `src/lib/rpg-import/runtime-update-apply.test.ts`
+- `docs/RPG_IMPORT_MODULARIZATION_PLAN.md`
+- `docs/CURRENT_STATE.md`
+- `docs/IMPLEMENTATION_LOG.md`
+
+### Summary
+
+- Implemented `runRuntimeUpdateApplyImport()` as the `runtime_update_apply` mode runner in the RPG import framework.
+- Registered `runtime_update_apply` alongside `source_ingest`, `control_doc_import`, and `campaign_setup_import`, so `runRpgImport()` can resolve it through the existing registry/pipeline.
+- Added `RuntimeUpdateApplyResult extends RpgImportResult` with `operation`, `proposedUpdates`, `pendingUpdates`, `runtimeUpdateValidation`, and optional `applyResult`.
+- Added the safe staging operation `options.operation: "stage_pending"`; omitted operation also defaults to `stage_pending`.
+- `stage_pending` can parse runtime update fenced output from `sourceText` using `runtimeUpdateInteractionSpec.parseOutput(sourceText, { turnRecord })`.
+- `stage_pending` can also stage direct `options.proposedUpdates` and parse `options.turnRecord.generatedNarrative` when no separate `sourceText` is supplied.
+- Direct `ProposedWikiUpdate[]` inputs are checked with the existing `validateRpgRuntimeUpdateTarget()` target policy before content validation, preventing direct callers from bypassing runtime path restrictions.
+- Accepted proposals are passed to the existing `validateRpgRuntimeUpdateProposals()` and then staged with `createPendingRpgUpdates()`.
+- Validation-rejected updates are reported in `runtimeUpdateValidation`, `warnings`, `reviewItems`, and `skipped`; they do not enter `pendingUpdates`.
+- Added the apply operation `options.operation: "apply_pending"` with required `options.pendingUpdates`.
+- `apply_pending` delegates to the existing `applyRpgPendingUpdates()` and derives `writtenPaths` from `applyResult.appliedUpdates`, so only actually applied target paths are reported as written.
+- Preserved existing write semantics through the apply boundary: `current-scene` overwrite, `events` append/create, fixed player slots / quests / `outlines/progress.md` / runtime overlays merge.
+- Preserved runtime target boundaries: relationship deltas can merge only under `wiki/relationships/runtime/*.md`, plot-arc runtime changes can merge only under `wiki/plot-arcs/runtime/*.md`, and base/stable/source/manual-control paths remain rejected or skipped.
+
+### Actual code / plan differences recorded
+
+- The adapter adds an explicit target-policy precheck for direct `options.proposedUpdates` because those objects do not pass through the fenced block parser in `extractRpgStateUpdates()`.
+- `options.operation` defaults to `stage_pending` when omitted, because staging is read-only and avoids accidental writes; `apply_pending` must still be explicitly requested.
+- The implementation does not add a new persistence layer for pending updates. It returns pending/review data to the caller and reuses the existing pending/apply APIs.
+
+### Validation
+
+- `npx.cmd vitest run src/lib/rpg-import/runtime-update-apply.test.ts` passed: 1 test file, 7 tests.
+- `npx.cmd vitest run src/lib/rpg-import/runtime-update-apply.test.ts src/lib/rpg-runtime-update-validation.test.ts src/lib/rpg-interactions.test.ts src/lib/rpg-runtime-controller.test.ts src/lib/rpg-runtime-persistence.test.ts src/lib/rpg-runtime.test.ts` passed: 6 test files, 100 tests.
+- `npm.cmd run typecheck` passed.
+
+### Scope notes
+
+- Did not implement Stage H UI.
+- Did not change `runRpgRuntimeTurnFlow()`, runtime controller behavior, narration behavior, or the existing "do not automatically accept/reject/apply pending updates" behavior.
+- Did not remove the old narration-block transition path during Stage G; Redundancy Cleanup Phase 4 later removed it.
+- Did not change ordinary `source_ingest`, `control_doc_import`, or `campaign_setup_import` semantics.
+- Did not add legacy/default compatibility, migration, fallback, or old-path preservation behavior.
+- Did not automatically accept, reject, or apply pending updates during `stage_pending`.
+- No `git commit` or `git push` was performed.
+
+## 2026-06-08 - RPG Import Modularization Stage F Campaign Setup Import v0
+
+### Stage
+
+RPG Import Modularization Plan 阶段 F：Campaign Setup Import v0。
+
+### Changed files
+
+- `src/lib/rpg-import/campaign-setup-import.ts`
+- `src/lib/rpg-import/registry.ts`
+- `src/lib/rpg-import/index.ts`
+- `src/lib/rpg-import/campaign-setup-import.test.ts`
+- `docs/RPG_IMPORT_MODULARIZATION_PLAN.md`
+- `docs/CURRENT_STATE.md`
+- `docs/IMPLEMENTATION_LOG.md`
+
+### Summary
+
+- Implemented `runCampaignSetupImport()` as the first `campaign_setup_import` mode runner in the RPG import framework.
+- Registered `campaign_setup_import` alongside `source_ingest` and `control_doc_import`, so `runRpgImport({ mode: "campaign_setup_import", ... })` resolves through the existing registry/pipeline.
+- Required `targetSlot`, rejected unsupported slots before writing anything, and required either `sourceText` or `sourcePath`.
+- Gave `sourceText` precedence over `sourcePath` when both are supplied, while still recording `source_path` and `source_file_name`.
+- Added Stage F target slots: `player_main`, `current_scene`, `events_prologue`, `main_quest`, `quest`, and `player_relationship`.
+- Enforced fixed required-slot paths: `player_main -> wiki/player/player.md` and `current_scene -> wiki/current-scene/scene_state.md`.
+- Enforced optional scoped paths: `events_prologue -> wiki/events/prologue.md`, `main_quest -> wiki/quests/main.md`, `quest -> wiki/quests/<safe-name>.md`, and `player_relationship -> wiki/relationships/player-<safe-name>.md`.
+- Wrote raw source provenance to `wiki/sources/imports/<safe-source-name>--campaign_setup--<slot>.md`.
+- Wrote canonical campaign setup documents with frontmatter metadata for import mode, slot id, source filename/path/anchor/import path, timestamp, write policy, review policy, canonicalization policy, source origin, source-text priority, campaign bootstrap marker, and explicit bootstrap marker.
+- Added explicit current-scene bootstrap semantics: `current_scene` is skipped unless `options.explicitBootstrap === true` or `options.manualConfirm === true`; the raw source anchor is still saved for traceability.
+- Kept `player_main` fixed to `wiki/player/player.md`; no arbitrary `wiki/player/*.md` file can be generated by Stage F.
+- Added warnings/review items when source text appears to contain player abilities, skills, limits, costs, or availability so callers can review `wiki/player/abilities.md`; Stage F does not route those details to `wiki/rules/`.
+- Filtered non-happened guidance / future pressure from canonical target files and especially from `wiki/events/prologue.md`; raw anchors preserve the full original source text.
+- Made `events_prologue` skip the event target if no already-happened prologue facts remain after filtering.
+- Added merge/append behavior for meaningful existing setup files within Stage F scope: fixed player/quest/relationship slots merge a new setup section, while prologue appends already-happened setup facts.
+
+### Actual code / plan differences recorded
+
+- Stage F v0 implemented the optional `events_prologue`, `main_quest` / `quest`, and `player_relationship` slots because they are fixed or safe-name constrained and covered by focused tests.
+- Stage F did not implement the full fixed player slot set (`player_abilities`, `player_inventory`, `player_goals`, `player_known_information`). Ability-like source content currently returns warnings/review items for the next step rather than writing `wiki/player/abilities.md`.
+- The implementation uses deterministic local canonicalization only. It does not add or call a `campaign_setup_generation` interaction spec or any LLM.
+- Future pressure is not auto-routed to `wiki/plot-arcs/`; Stage F only prevents it from polluting current-scene/events/quest/player/relationship targets and reports review guidance.
+- `current_scene` uses the explicit bootstrap/manual-confirm boundary requested in this stage and does not share Runtime Update Apply's completed-turn pending/apply path.
+
+### Validation
+
+- `npx.cmd vitest run src/lib/rpg-import/source-ingest.test.ts src/lib/rpg-import/control-doc-import.test.ts src/lib/rpg-import/campaign-setup-import.test.ts src/lib/rpg-interactions.test.ts src/lib/rpg-wiki-schema.test.ts` passed: 5 test files, 92 tests.
+- `npm.cmd run typecheck` passed.
+
+### Scope notes
+
+- Did not implement Stage G or H.
+- Did not expose Runtime Update Apply through the import framework.
+- Did not change Runtime Update Apply write policy, pending staging, apply behavior, context compiler behavior, or runtime controller behavior.
+- Did not modify ordinary Source Ingest behavior.
+- Did not change UI.
+- Did not call a real LLM.
+- Did not add legacy/default fallback, migration, or compatibility paths.
+- No `git commit` or `git push` was performed.
+
+## 2026-06-08 - RPG Import Modularization Stage E Control Doc Import v0
+
+### Stage
+
+RPG Import Modularization Plan 阶段 E：Control Doc Import v0。
+
+### Changed files
+
+- `src/lib/rpg-import/control-doc-import.ts`
+- `src/lib/rpg-import/registry.ts`
+- `src/lib/rpg-import/index.ts`
+- `src/lib/rpg-import/control-doc-import.test.ts`
+- `src/lib/rpg-interactions/control-doc-canonicalization-interaction.ts`
+- `src/lib/rpg-interactions/index.ts`
+- `src/lib/rpg-interactions.test.ts`
+- `docs/RPG_IMPORT_MODULARIZATION_PLAN.md`
+- `docs/CURRENT_STATE.md`
+- `docs/IMPLEMENTATION_LOG.md`
+
+### Summary
+
+- Implemented `runControlDocImport()` as the first `control_doc_import` mode runner in the RPG import framework.
+- Registered `control_doc_import` alongside `source_ingest`, so `runRpgImport({ mode: "control_doc_import", ... })` resolves through the existing registry/pipeline.
+- Added the first four Stage E target slots only: `main_outline`, `outline_progress`, `rules_core`, and `style_narration`.
+- Mapped those slots to fixed schema paths: `wiki/outlines/main.md`, `wiki/outlines/progress.md`, `wiki/rules/core.md`, and `wiki/style/narration.md`.
+- Required `targetSlot`, rejected unsupported slots before writing anything, and required either `sourceText` or `sourcePath`.
+- Gave `sourceText` precedence over `sourcePath` when both are supplied, while still recording `source_path` and `source_file_name`.
+- Wrote raw source provenance to `wiki/sources/imports/<safe-source-name>--<slot>.md`.
+- Wrote canonical control documents with frontmatter metadata for import mode, slot id, source filename/path/anchor/import path, timestamp, write policy, review policy, canonicalization policy, source origin, and source-text priority.
+- Preserved the complete normalized source text in the canonical control document and in the raw source anchor file, protecting hard gates, `{{setvar::...}}`, forbidden terms, and explicit user control blocks from lossy extraction.
+- Added manual-confirm/review semantics: meaningful existing control files are skipped unless `options.manualConfirm` or `options.allowOverwrite` is explicitly set; raw anchor files are still saved for traceability.
+- Added `controlDocCanonicalizationInteractionSpec` as the interaction-layer prompt/parse contract for later model-backed canonicalization without connecting Stage E to a real LLM.
+
+### Actual code / plan differences recorded
+
+- `outline_progress` is still defined in `RPG_SCHEMA_SLOTS` as owner `runtime`, import policy `runtime_apply`, write policy `merge`.
+- Stage E nevertheless permits `control_doc_import` to initialize `outline_progress` with empty/opening progress, because the stage specifically requests that slot. This does not change Runtime Update Apply, pending review, or runtime merge behavior.
+- The implementation chose the separate raw source anchor file strategy under `wiki/sources/imports/` instead of embedding the whole raw source only inside the target file. Target files keep `source_import_path` and `source_anchor` pointers.
+- Canonicalization is deterministic/local in this stage. It does not call the new interaction spec or any LLM.
+
+### Validation
+
+- `npx.cmd vitest run src/lib/rpg-import/source-ingest.test.ts src/lib/rpg-import/control-doc-import.test.ts src/lib/rpg-interactions.test.ts src/lib/rpg-wiki-schema.test.ts` passed: 4 test files, 80 tests.
+- `npm.cmd run typecheck` passed.
+
+### Scope notes
+
+- Did not implement Stage F, G, or H.
+- Did not implement campaign setup import.
+- Did not expose Runtime Update Apply through the import framework.
+- Did not change Runtime Update Apply write policy, pending staging, apply behavior, context compiler behavior, or UI.
+- Did not modify ordinary Source Ingest behavior.
+- Did not call a real LLM.
+- Did not write `wiki/current-scene/`.
+- Did not write `wiki/events/` or convert future outline material into history.
+- No `git commit` or `git push` was performed.
+
+## 2026-06-08 - RPG Import Modularization Stage D3.5 Redundancy Audit / Cleanup Gate
+
+### Stage
+
+RPG Import Modularization Plan 阶段 D3.5：Redundancy Audit / Cleanup Gate。
+
+### Changed files
+
+- `docs/RPG_IMPORT_REDUNDANCY_AUDIT_D3_5.md`
+- `docs/RPG_IMPORT_MODULARIZATION_PLAN.md`
+- `docs/CURRENT_STATE.md`
+- `docs/IMPLEMENTATION_LOG.md`
+- `src/lib/rpg-wiki-schema.ts`
+- `src/lib/ingest.ts`
+- `src/lib/ingest.prompt.test.ts`
+
+### Summary
+
+- Created the D3.5 audit record with `keep` / `merge` / `delete` / `defer` classifications.
+- Confirmed `src/lib/rpg-import/` is a keep item: the framework skeleton currently registers only `source_ingest`, wraps `autoIngest()`, and remains the intended Stage E/F/G expansion point.
+- Confirmed ordinary Source Ingest still runs through `autoIngest()` / existing prompt wrapper exports; D3.5 did not change writer, queue, UI, or LLM interaction flow.
+- Removed unreachable concrete Source Ingest forbidden target entries for the six runtime overlay directories because `wiki/*/runtime/**` already matches them before those entries can be reached.
+- Removed a duplicate hand-written forbidden target sentence from `buildChunkAnalysisSystemPrompt()` and kept `buildSourceIngestTargetPolicyGuidance()` as the prompt's authority for Source Ingest allowed/forbidden targets.
+- Updated the focused prompt test to assert `## Source Ingest Target Policy`, `wiki/*/runtime/**`, and `wiki/current-scene/**` instead of the removed duplicate sentence.
+- Updated the modularization plan to mark only D3.5 completed and to record the audit/cleanup results.
+
+### Evidence
+
+- `getRpgSourceIngestForbiddenTarget()` uses `Array.find()` over `RPG_SOURCE_INGEST_TARGET_POLICY.forbiddenTargets`.
+- `sourceIngestPathPatternMatches()` matches `wiki/*/runtime/**` against any `wiki/<category>/runtime/...` path, so later concrete runtime forbidden entries were unreachable.
+- After deletion, `rg "character runtime overlays record|location runtime overlays record|faction runtime overlays record|item runtime overlays record|relationship runtime overlays record|plot-arc runtime overlays record" src/lib` found no remaining source references.
+- The runtime overlay recommendation behavior remains covered by `src/lib/rpg-wiki-schema.test.ts` through `getRpgSourceIngestForbiddenTarget("wiki/characters/runtime/rin.md")` and `getRpgSourceIngestForbiddenTarget("wiki/locations/runtime/harbor.md")`.
+
+### Defer notes
+
+- Did not remove `runRpgRuntimeTurnFlow()`'s old narration-block transition fallback during the D3.5 audit. Redundancy Cleanup Phase 4 later removed it and updated controller/journal tests to use explicit interaction adapters.
+- Did not collapse all runtime prompt forbidden examples into `wiki-update-policy.ts`; this has drift risk but would touch Stage G behavior and prompt contracts.
+- Did not extract common fixed-slot test fixtures from runtime tests; some tests intentionally omit fixed slots to assert missing-slot warnings.
+- Did not delete legacy/default rejection tests or helpers; current tests mostly verify those paths are rejected or not used by new llmWikiRPG projects.
+
+### Validation
+
+- `npx.cmd vitest run src/lib/rpg-wiki-schema.test.ts src/lib/ingest.prompt.test.ts src/lib/rpg-interactions.test.ts` passed: 3 test files, 98 tests.
+- `npm.cmd run typecheck` passed.
+
+### Scope notes
+
+- Did not implement Stage E, F, G, or H.
+- Did not add `control_doc_import`, `campaign_setup_import`, or `runtime_update_apply` framework behavior.
+- Did not change UI.
+- Did not call a real LLM.
+- Did not perform destructive cleanup.
+- No `git commit` or `git push` was performed.
+
+## 2026-06-08 - RPG Import Modularization Stage D3 Overlay Resolver / Context Read Contract
+
+### Stage
+
+RPG Import Modularization Plan 阶段 D3：Overlay Resolver / Context Read Contract。
+
+### Changed files
+
+- `src/lib/rpg-runtime/context-compiler.ts`
+- `src/lib/rpg-runtime.test.ts`
+- `docs/RPG_IMPORT_MODULARIZATION_PLAN.md`
+- `docs/CURRENT_STATE.md`
+- `docs/IMPLEMENTATION_LOG.md`
+
+### Summary
+
+- Extended Context Compiler overlay grouping so `readRelevantOverlayGroups()` accepts `relationships` and `plot-arcs` in addition to `characters`, `locations`, `factions`, and `items`.
+- Switched relationship context from independent `rankedPages()` output to `relationshipGroups.map(formatGroupEntry)`, preserving base-before-overlay ordering inside each group.
+- Switched plot arc context from independent `rankedPages()` output to `plotArcGroups.map(formatGroupEntry)`, preserving base-before-overlay ordering inside each group.
+- Updated reference marking so matched relationship and plot arc overlay groups add both base paths and runtime overlay paths to `brief.references`.
+- Kept overlay resolver read-only: it only reads, groups, ranks, and formats context pages.
+- Kept Runtime Update Apply write boundaries unchanged; runtime relationship and plot-arc changes still belong under `relationships/runtime/*.md` and `plot-arcs/runtime/*.md` through pending/review/apply.
+- Added focused coverage proving same-slug relationship and plot arc base/runtime pages enter the brief together, unrelated base/runtime pages are filtered by action relevance, references include both layers, and preview/context compile does not modify wiki files.
+
+### Actual code / plan differences recorded
+
+- Before D3, `relationships` and `plot-arcs` were already read recursively by `readMarkdownDir()`, so their `runtime/*.md` files could appear in context.
+- The mismatch was that those runtime files were treated as ordinary independent markdown pages by `rankedPages()` rather than grouped with their stable base pages using `overlayBaseSlug()` and `compareBaseBeforeOverlay()`.
+- Existing `runtimeSectionPatternsFor()` already had relationship and plot-arc section patterns, so D3 reused the existing content selection behavior instead of adding new prompt/schema surfaces.
+
+### Validation
+
+- `npx.cmd vitest run src/lib/rpg-runtime.test.ts src/lib/rpg-wiki-schema.test.ts` passed: 2 test files, 30 tests.
+- `npm.cmd run typecheck` passed.
+
+### Scope notes
+
+- Did not implement Stage E, F, or G.
+- Did not add `control_doc_import`, `campaign_setup_import`, or `runtime_update_apply` import framework behavior.
+- Did not change Runtime Update Apply write policy, pending staging, review, or apply behavior.
+- Did not change UI.
+- Did not call a real LLM.
+- No `git commit` or `git push` was performed.
+
+## 2026-06-08 - RPG Import Modularization Stage D2.5 Mode-scoped Prompt / Schema Contract Cleanup
+
+### Stage
+
+RPG Import Modularization Plan 阶段 D2.5：Mode-scoped Prompt / Schema Contract Cleanup。
+
+### Changed files
+
+- `src/lib/rpg-wiki-schema.ts`
+- `src/lib/prompts/rpg-page-guidance.ts`
+- `src/lib/prompts/rpg-ingest.ts`
+- `src/lib/rpg-ingest-signals.ts`
+- `src/lib/ingest.ts`
+- `src/lib/rpg-extraction-validation.ts`
+- `src/lib/rpg-wiki-schema.test.ts`
+- `src/lib/ingest.prompt.test.ts`
+- `src/lib/rpg-ingest-signals.test.ts`
+- `src/lib/ingest.scenarios.test.ts`
+- `src/lib/rpg-extraction-validation.test.ts`
+- `docs/CURRENT_STATE.md`
+- `docs/IMPLEMENTATION_LOG.md`
+
+### Summary
+
+- Added `RPG_SOURCE_INGEST_TARGET_POLICY` as the code-readable D2.5 target policy for ordinary Source Ingest.
+- Added helper APIs for Source Ingest target decisions: `getRpgSourceIngestTargetPolicy()`, `getRpgSourceIngestForbiddenTarget()`, and `isRpgSourceIngestAllowedTarget()`.
+- Limited ordinary Source Ingest write targets to source/base directories: `sources`, `world`, `characters`, fixed `player` slots, `locations`, `factions`, `items`, `plot-arcs`, `events`, `relationships`, plus structural `index.md`, `overview.md`, and `log.md`.
+- Marked these as forbidden or review-only for ordinary Source Ingest: `rules`, `style`, `memory`, `outlines`, `current-scene`, any `wiki/*/runtime/` overlay, and `quests`.
+- Reworked `buildMinimalRpgGenerationContract()` and `buildRpgDirectoryBoundaryGuidance()` so Source Ingest sees other-mode paths as boundaries/review targets, not writable contracts.
+- Updated Stage 1 RPG analysis guidance to recommend `control_doc_import` for control documents, `campaign_setup_import` for opening scene / player bootstrap material, and `runtime_update_apply` for completed-turn or runtime overlay writeback material.
+- Updated long-source chunk prompt guidance so `targetPath` examples and instructions only point at ordinary Source Ingest targets and explicitly forbid other-mode target paths.
+- Updated structured long-source signal normalization to clear forbidden/unsupported Source Ingest target paths and keep those signals review-only before they can influence Stage 2 focused category selection.
+- Updated ordinary ingest writer behavior so forbidden/unsupported Source Ingest FILE blocks are skipped with warnings and review items instead of being written.
+- Updated extraction validation with equivalent source-ingest boundary review items for reusable validation paths.
+
+### Actual code / plan differences recorded
+
+- Before this stage, Stage 1 already excluded `quests`, `rules`, `style`, and `current-scene` from `needed_categories`.
+- Before this stage, Stage 2 focused guidance already avoided expanding those directory contracts from `needed_categories`.
+- The remaining mismatch was that the minimal generation contract, directory-boundary renderer, long-source signal prompt, structured signal propagation, writer/review text, and writer acceptance path still exposed or tolerated other-mode targets.
+- D2.5 therefore centralized the ordinary Source Ingest target policy and reused it from prompt, signal normalization, validation, and writer checks instead of implementing new import modes.
+
+### Validation
+
+- `npx.cmd vitest run src/lib/ingest.prompt.test.ts src/lib/rpg-interactions.test.ts src/lib/rpg-ingest-signals.test.ts src/lib/ingest.scenarios.test.ts src/lib/rpg-extraction-validation.test.ts src/lib/rpg-wiki-schema.test.ts` passed: 6 test files, 142 tests.
+- `npm.cmd run typecheck` passed.
+
+### Scope notes
+
+- Did not implement Stage D3 overlay resolver / context read contract.
+- Did not implement `control_doc_import`.
+- Did not implement `campaign_setup_import`.
+- Did not integrate `runtime_update_apply` into the import framework.
+- Did not implement E/F/G complete import modes.
+- Did not change Runtime Update Apply D2 prompt/validator behavior.
+- Did not change UI.
+- Did not call a real LLM.
+- No `git commit` or `git push` was performed.
+
+## 2026-06-07 - RPG Import Modularization Stage D2 Runtime Cross-directory Sync Contract
+
+### Stage
+
+RPG Import Modularization Plan 阶段 D2：Runtime Cross-directory Sync Contract。
+
+### Changed files
+
+- `src/lib/rpg-wiki-schema.ts`
+- `src/lib/rpg-interactions/wiki-update-policy.ts`
+- `src/lib/rpg-interactions/runtime-update-interaction.ts`
+- `src/lib/rpg-interactions/runtime-update-validation.ts`
+- `src/lib/rpg-wiki-schema.test.ts`
+- `src/lib/rpg-interactions.test.ts`
+- `src/lib/rpg-runtime-update-validation.test.ts`
+- `src/lib/rpg-write-policy.test.ts`
+- `src/lib/rpg-runtime-controller.test.ts`
+- `docs/CURRENT_STATE.md`
+- `docs/IMPLEMENTATION_LOG.md`
+
+### Summary
+
+- Added `RPG_RUNTIME_CROSS_DIRECTORY_SYNC_GUIDANCE` and `getRpgRuntimeCrossDirectorySyncGuidance()` as code-readable D2 sync metadata.
+- Documented current-scene as an overwrite-only latest-moment snapshot and required persistent state visible there to be paired with matching runtime overlay or dynamic directory proposal.
+- Split player inventory and item runtime semantics: player holdings/quantity/equipment/consumption belong in `wiki/player/inventory.md`, while object-level state belongs in `wiki/items/runtime/*.md`.
+- Tightened runtime target policy to fixed player slots, `wiki/outlines/progress.md`, `wiki/relationships/runtime/*.md`, and `wiki/plot-arcs/runtime/*.md`.
+- Removed runtime target allowance for arbitrary `wiki/player/*.md`, base `wiki/relationships/*.md`, and base `wiki/plot-arcs/*.md`.
+- Added runtime prompt text for the cross-directory sync contract and explicit forbidden runtime targets including base relationship/plot-arc pages, `outlines/main.md`, style/rules/sources/world, and base entity pages.
+- Added aggregate validator warnings after per-update validation. These warnings flag missing companion runtime sync for current-scene long-term changes, inventory object-state changes without item runtime updates, and item runtime player-holding changes without inventory updates.
+- Kept validator behavior warning-only for sync gaps; it does not create or repair `ProposedWikiUpdate`s.
+- Updated write-policy tests so relationship and plot-arc runtime writes use `relationships/runtime` and `plot-arcs/runtime`, while base relationship/plot-arc pages are rejected.
+
+### Actual code / plan differences recorded
+
+- Before this stage, runtime target policy still allowed base `wiki/relationships/*.md` and base `wiki/plot-arcs/*.md`.
+- Before this stage, runtime target policy allowed arbitrary `wiki/player/*.md`; D2 narrowed this to the fixed player slot set from the schema contract.
+- Before this stage, runtime validation only inspected each proposal independently; D2 added batch-level missing-sync warnings without adding an automatic repair layer.
+- Runtime controller tests needed their fixture to create Stage D fixed schema slots so D2-focused assertions were not obscured by project-structure warnings.
+
+### Validation
+
+- `npx.cmd vitest run src/lib/rpg-wiki-schema.test.ts src/lib/rpg-interactions.test.ts src/lib/rpg-runtime-update-validation.test.ts src/lib/rpg-write-policy.test.ts src/lib/rpg-update-staging.test.ts src/lib/rpg-runtime-controller.test.ts` passed: 6 test files, 112 tests.
+- `npm.cmd run typecheck` passed.
+
+### Scope notes
+
+- Did not implement Stage D3 overlay resolver / context read contract.
+- Did not auto-create missing companion `ProposedWikiUpdate`s.
+- Did not implement `control_doc_import`, `campaign_setup_import`, or `runtime_update_apply` as import framework modes.
+- Did not change UI.
+- Did not call a real LLM.
+- No `git commit` or `git push` was performed.
+
+## 2026-06-07 - RPG Import Modularization Stage D1 Directory Boundary Prompt / Schema Constraints
+
+### Stage
+
+RPG Import Modularization Plan 阶段 D1：目录边界 Prompt / Schema 约束。
+
+### Changed files
+
+- `src/lib/rpg-wiki-schema.ts`
+- `src/lib/prompts/rpg-page-guidance.ts`
+- `src/lib/prompts/rpg-ingest.ts`
+- `src/lib/ingest.ts`
+- `src/lib/rpg-ingest-signals.ts`
+- `src/lib/rpg-interactions/wiki-update-policy.ts`
+- `src/lib/rpg-interactions/runtime-update-interaction.ts`
+- `src/lib/rpg-wiki-schema.test.ts`
+- `src/lib/ingest.prompt.test.ts`
+- `src/lib/rpg-ingest-signals.test.ts`
+- `src/lib/rpg-interactions.test.ts`
+- `docs/CURRENT_STATE.md`
+- `docs/IMPLEMENTATION_LOG.md`
+
+### Summary
+
+- Added `RPG_DIRECTORY_BOUNDARY_GUIDANCE` and `getRpgDirectoryBoundaryGuidance()` as code-readable D1 semantic boundary metadata.
+- Covered these boundary pairs explicitly:
+  - `wiki/player/goals.md` vs `wiki/quests/*.md` vs `wiki/plot-arcs/*.md`.
+  - `wiki/rules/` vs `wiki/world/`.
+  - global `wiki/style/` vs character-specific voice in `characters/` or relationship-driven tone in `relationships/`.
+  - `wiki/characters/` vs `wiki/relationships/`.
+  - `wiki/items/` vs `wiki/player/inventory.md`.
+- Added prompt rendering for the code-readable boundary guidance through `buildRpgDirectoryBoundaryGuidance()`.
+- Injected the D1 boundary guidance into ordinary Source Ingest Stage 1 analysis and Stage 2 generation prompts.
+- Updated focused page contracts for `player`, `plot-arcs`, `relationships`, `items`, `world`, and `characters` to call out the new boundaries where those contracts are selected.
+- Updated long-source chunk analysis and structured signal context guidance so chunk-derived Stage 2 profiles do not route subjective goals, plot pressure, player TODO/checklists, rules/control mechanics, world background, style rules, or character voice into the wrong directory.
+- Tightened runtime target-rule descriptions and runtime update prompt text for `player/goals.md`, `quests`, `plot-arcs`, `relationships`, and `items/runtime` without adding D2 cross-directory sync behavior.
+- Added tests proving the schema boundary metadata exists, Source Ingest prompts include the D1 boundary text, structured signal context carries the same boundary rules, and runtime update policy no longer describes quests/plot-arcs/player goals too broadly.
+
+### Actual code / plan differences recorded
+
+- `quests`, `rules`, and `style` are present in runtime/manual project directories and write policies, but they are not part of the current ordinary Source Profile focused-category whitelist.
+- To keep Stage D1 small and avoid opening new ordinary Source Ingest behavior, this stage added reusable boundary guidance and prompt/policy constraints rather than adding new `RPG_CATEGORIES` entries or implementing new import modes.
+
+### Validation
+
+- `npx.cmd vitest run src/lib/rpg-wiki-schema.test.ts src/lib/ingest.prompt.test.ts src/lib/rpg-interactions.test.ts src/lib/rpg-ingest-signals.test.ts` passed: 4 test files, 100 tests.
+- `npm.cmd run typecheck` passed.
+
+### Scope notes
+
+- Did not implement Stage D2 runtime cross-directory sync.
+- Did not implement Stage D3 overlay resolver.
+- Did not implement `control_doc_import`, `campaign_setup_import`, `runtime_update_apply`, or any other new import mode behavior.
+- Did not change UI.
+- Did not call a real LLM.
+- No `git commit` or `git push` was performed.
+
+## 2026-06-07 - RPG Import Modularization Stage D Schema Slots and New Project Templates
+
+### Stage
+
+RPG Import Modularization Plan 阶段 D：Schema Slots 与新项目模板。
+
+### Changed files
+
+- `src/lib/rpg-wiki-schema.ts`
+- `src/lib/rpg-wiki-schema.test.ts`
+- `src/lib/rpg-runtime/types.ts`
+- `src/lib/rpg-runtime/context-compiler.ts`
+- `src/lib/rpg-interactions/narration-interaction.ts`
+- `src/lib/rpg-runtime.test.ts`
+- `src/lib/rpg-narration-prompts.test.ts`
+- `src/lib/rpg-interactions.test.ts`
+- `src/lib/rpg-llm-narration-adapter.test.ts`
+- `src/components/rpg/rpg-runtime-panel.test.tsx`
+- `src-tauri/src/commands/project.rs`
+- `src/lib/project-mode.ts`
+- `src/lib/project-mode.test.ts`
+- `docs/CURRENT_STATE.md`
+- `docs/IMPLEMENTATION_LOG.md`
+
+### Summary
+
+- Added the code-readable `RpgSchemaSlot` contract and fixed `RPG_SCHEMA_SLOTS` table.
+- Added helper APIs: `getRpgSchemaSlot()`, `getRpgSchemaSlotByPath()`, `getRequiredRpgSchemaSlots()`, `getRpgSchemaSlotsByOwner()`, `RPG_FIXED_PLAYER_SLOT_PATHS`, and `isFixedPlayerSlotPath()`.
+- Covered the fixed slot table in `src/lib/rpg-wiki-schema.test.ts`, including total count, exact paths, required flags, owner lookup, fixed player path set, manual_or_review_only control files, and `outline_progress` as runtime/merge.
+- Updated Context Compiler to read `current_scene` through the slot helper and to report missing required slots as project-structure warnings.
+- Updated Context Compiler player-state reads to use only the five fixed player slots: `player_main`, `player_abilities`, `player_inventory`, `player_goals`, and `player_known_information`.
+- Kept arbitrary `wiki/player/*.md` out of runtime player state; missing fixed player slots now produce warnings instead of being bypassed by scanning other player files.
+- Added `outlines` to allowed runtime reads and added `outlineNotes` to `CompactStoryBrief`, populated from `main_outline` and `outline_progress`.
+- Rendered `## Outline Notes` separately in the narration interaction prompt so outline guidance does not become `events` or `hardFacts`.
+- Updated rules/style/memory reads to load fixed slot files first and then keep same-directory markdown as supplemental material.
+- Updated Rust project bootstrap to create `wiki/outlines/`, `wiki/relationships/runtime/`, `wiki/plot-arcs/runtime/`, and all required fixed slot template files.
+- Updated the built-in schema text in Rust and the frontend project bootstrap schema copy to document fixed slots, manual_or_review_only control files, review-bounded outline progress merge, and the fixed player slot rule.
+- Added a Rust unit test proving `create_project_impl()` creates the new runtime directories and all fixed slot files.
+
+### Actual code / plan differences recorded
+
+- Before this stage, `src/lib/rpg-wiki-schema.ts` had directory-level schema entries but no code-readable fixed slot table.
+- Before this stage, `src/lib/rpg-runtime/context-compiler.ts` read arbitrary markdown under `wiki/player/` for player state.
+- Before this stage, `src-tauri/src/commands/project.rs` created several RPG directories but not the fixed schema slot template files, `wiki/outlines/`, `wiki/relationships/runtime/`, or `wiki/plot-arcs/runtime/`.
+- The frontend create-project flow rewrites `schema.md` from `src/lib/project-mode.ts` after the Tauri project command returns, so the frontend bootstrap schema copy was synchronized to avoid overwriting the Stage D Rust schema text with stale content.
+
+### Validation
+
+- `npx.cmd vitest run src/lib/rpg-wiki-schema.test.ts src/lib/rpg-runtime.test.ts src/lib/rpg-narration-prompts.test.ts` passed: 3 test files, 29 tests.
+- `npx.cmd vitest run src/lib/project-mode.test.ts` passed: 1 test file, 3 tests.
+- `cargo test --manifest-path src-tauri/Cargo.toml project` passed: 3 tests; Cargo emitted only pre-existing non-snake-case warnings in `src/proxy.rs`.
+- `npm.cmd run typecheck` passed.
+
+### Scope notes
+
+- Did not implement Stage D1 prompt-boundary expansion.
+- Did not implement Stage D2 runtime cross-directory sync.
+- Did not implement Stage D3 overlay resolver / broader context read rewrite.
+- Did not implement `control_doc_import`, `campaign_setup_import`, or `runtime_update_apply` as new import framework modes.
+- Did not add legacy/default migration, fallback, old path compatibility, or compatibility reads for missing fixed slots.
+- Did not change runtime write policy to broaden write permissions.
+- Did not call a real LLM.
+- No `git commit` or `git push` was performed.
+
+## 2026-06-07 - RPG Import Modularization Stage C Interaction Spec Migration
+
+### Stage
+
+RPG Import Modularization Plan 阶段 C：Interaction Spec 迁移。
+
+### Changed files
+
+- `src/lib/rpg-interactions/interaction-spec.ts`
+- `src/lib/rpg-interactions/source-ingest-analysis-interaction.ts`
+- `src/lib/rpg-interactions/source-ingest-generation-interaction.ts`
+- `src/lib/rpg-interactions/index.ts`
+- `src/lib/ingest.ts`
+- `src/lib/rpg-interactions.test.ts`
+- `docs/CURRENT_STATE.md`
+- `docs/IMPLEMENTATION_LOG.md`
+
+### Summary
+
+- Extended `RpgInteractionKind` to include the planned source ingest, control document, campaign setup, narration, runtime update, relationship derivation, outline impact, and outline regeneration interaction kinds.
+- Added `sourceIngestAnalysisInteractionSpec` with `kind: "source_ingest_analysis"`.
+- Added `sourceIngestGenerationInteractionSpec` with `kind: "source_ingest_generation"`.
+- The analysis spec reuses `buildRpgAnalysisPrompt(...)` for the system prompt and preserves the existing `Analyze this source document` user prompt shape, including `**File:**` and optional `**Folder context:**`.
+- The generation spec reuses `buildRpgGenerationPrompt(...)` for the system prompt and preserves the existing Stage 1 / Source Context FILE/REVIEW user prompt shape.
+- `parseOutput()` is intentionally a thin passthrough for both source ingest specs; the specs do not read files, write files, call the LLM, parse FILE blocks, or touch the writer.
+- Exported the new specs from `src/lib/rpg-interactions/index.ts`.
+- Updated `autoIngestImpl()` so the Stage 1 analysis and Stage 2 generation `streamChat()` calls now receive prompts from the source ingest interaction specs.
+- Kept `autoIngest()`, `buildAnalysisPrompt()`, and `buildGenerationPrompt()` available in `src/lib/ingest.ts` for the current ordinary source ingest entry path.
+
+### Actual code / plan differences recorded
+
+- Before this stage, `RpgInteractionKind` only contained `narration`, `runtime_state_update`, `relationship_derivation`, `outline_impact`, and `outline_regeneration`.
+- Before this stage, source ingest analysis/generation user prompts were inline in `autoIngestImpl()` rather than owned by `src/lib/rpg-interactions/`.
+- Stage B's `src/lib/rpg-import/source-ingest.ts` remains a thin `autoIngest()` wrapper; this stage did not expand it into additional import modes.
+
+### Validation
+
+- `npx.cmd vitest run src/lib/rpg-interactions.test.ts src/lib/ingest.prompt.test.ts src/lib/rpg-import/source-ingest.test.ts src/lib/ingest.scenarios.test.ts` passed: 4 test files, 87 tests.
+- `npm.cmd run typecheck` passed.
+
+### Scope notes
+
+- Did not implement `control_doc_import`, `campaign_setup_import`, or `runtime_update_apply`.
+- Did not change writer behavior, queue behavior, UI behavior, review/pending/apply behavior, LLM parameters, activity state handling, signal handling, or ordinary source ingest semantics.
+- Did not add a legacy/default import fallback, migration path, compatibility layer, or old-path preservation.
+- Did not call a real LLM; tests mock the LLM boundary.
+- No `git commit` or `git push` was performed.
+
+## 2026-06-07 - RPG Import Modularization Stage B Import Framework Skeleton
+
+### Stage
+
+RPG Import Modularization Plan 阶段 B：Import Framework 骨架。
+
+### Changed files
+
+- `src/lib/rpg-import/types.ts`
+- `src/lib/rpg-import/source-ingest.ts`
+- `src/lib/rpg-import/registry.ts`
+- `src/lib/rpg-import/pipeline.ts`
+- `src/lib/rpg-import/index.ts`
+- `src/lib/rpg-import/source-ingest.test.ts`
+- `docs/CURRENT_STATE.md`
+- `docs/IMPLEMENTATION_LOG.md`
+
+### Summary
+
+- Added the initial `src/lib/rpg-import/` skeleton.
+- Defined `RpgImportMode`, `RpgImportRequest`, `RpgImportResult`, and `RpgImportModeSpec`.
+- Added a small registry with `getRpgImportModeSpec()` and `listRpgImportModeSpecs()`.
+- Added `runRpgImport()` as the pipeline entry that dispatches through the registry and throws a clear error for unregistered modes.
+- Registered only `source_ingest` for this stage.
+- Implemented `source_ingest` as a thin wrapper around the existing `autoIngest()`: it requires `sourcePath` and `llmConfig`, passes through `projectPath`, `signal`, and `folderContext`, does not swallow errors, and returns `autoIngest()`'s `writtenPaths` unchanged with empty `reviewItems`, `warnings`, and `skipped`.
+- Added focused Vitest coverage comparing direct `autoIngest()` with `runRpgImport({ mode: "source_ingest" })` across two equivalent temp projects, including written paths, file contents, and review item semantic fields from the generation REVIEW block.
+
+### Validation
+
+- `npx.cmd vitest run src/lib/rpg-import/source-ingest.test.ts src/lib/ingest.scenarios.test.ts` passed.
+- `npm.cmd run typecheck` passed.
+
+### Scope notes
+
+- Ordinary ingest behavior was not changed.
+- `autoIngest()` body was not modified.
+- Queue, UI, prompt construction, writer behavior, and runtime update apply were not modified.
+- `control_doc_import`, `campaign_setup_import`, and `runtime_update_apply` remain type-level mode names only; their behavior was not implemented.
+- No `sourceText` temporary-file import path was introduced.
+- No legacy/default compatibility, migration, or fallback design was added.
+- No real LLM was called; tests mock `streamChat`.
+- No `git commit` or `git push` was performed.
+
+## 2026-06-07 - RPG Import Modularization Stage A Contract Freeze
+
+### Stage
+
+RPG Import Modularization Plan 阶段 A：文档与契约冻结。
+
+### Changed files
+
+- `docs/RPG_WIKI_SCHEMA.md`
+- `docs/LLMWIKIRPG_NEXT_ARCHITECTURE_STEPS.md`
+- `docs/CURRENT_STATE.md`
+- `docs/IMPLEMENTATION_LOG.md`
+
+### Summary
+
+- Added a dedicated `Import Mode 与固定 Schema Slot 契约` section to `docs/RPG_WIKI_SCHEMA.md`.
+- Froze the four mode names and boundaries: `source_ingest`, `control_doc_import`, `campaign_setup_import`, and `runtime_update_apply`.
+- Documented each mode's semantics, typical inputs, allowed target paths, forbidden paths / behaviors, and write strategy boundaries.
+- Added a fixed schema slot table for `main_outline`, `outline_progress`, `rules_*`, `style_*`, `memory_*`, `current_scene`, and the fixed `player_*` files.
+- Fixed schema-path conflicts in the schema document:
+  - `player/profile.md` is now `player/player.md`.
+  - `style/narrative_style.md`, `style/dialogue_style.md`, and `style/forbidden_patterns.md` are now `style/narration.md`, `style/dialogue.md`, and `style/forbidden.md`.
+  - `outlines/` now explicitly includes both `main.md` and `progress.md`.
+- Clarified fixed player files, `outlines/main.md` versus `outlines/progress.md`, and base/runtime overlay boundaries.
+- Updated Stage 6.17a in `docs/LLMWIKIRPG_NEXT_ARCHITECTURE_STEPS.md` so the Runtime Context Schema Contract explicitly depends on the fixed slot contract and remains documentation-only in this stage.
+
+### Validation
+
+- Documentation-only check; no automated tests were run.
+
+### Scope notes
+
+- Did not change runtime code.
+- Did not change ordinary ingest behavior.
+- Did not add UI.
+- Did not add `src/lib/rpg-import/`.
+- Did not add or modify tests.
+- Did not call a real LLM.
+- Did not design migration, compatibility fallback, or old-path preservation for legacy/default projects.
+- No `git commit` or `git push` was performed.
+
+## 2026-06-07 - Memory Directory Context Compiler Boundary
+
+### Stage
+
+Planning/documentation update for the memory directory contract.
+
+### Changed files
+
+- `docs/RPG_IMPORT_MODULARIZATION_PLAN.md`
+- `docs/CURRENT_STATE.md`
+- `docs/IMPLEMENTATION_LOG.md`
+
+### Summary
+
+- Redefined `wiki/memory/` as the Context Compiler's long-term helper and triage buffer.
+- Clarified that `memory/` is not the primary fact source and should not replace concrete directories such as `events/`, `quests/`, `outlines/progress.md`, `relationships/runtime/`, `plot-arcs/runtime/`, `current-scene/`, `rules/`, or `style/`.
+- Clarified the fixed memory files:
+  - `player-preferences.md` for player preferences, safety boundaries, and long-term experience requirements.
+  - `long-term.md` for cross-scene helper summaries that do not yet fit a more concrete directory.
+  - `session-notes.md` for recent session notes, manual notes, and material waiting to be sorted.
+- Updated the UI/import wording from "long-term memory" to "context memory" where appropriate.
+
+### Validation
+
+- Documentation-only change; no automated tests were run.
+
+### Scope notes
+
+- Did not change runtime code.
+- Did not change ordinary ingest behavior.
+- Did not implement schema slots, validators, prompt changes, UI changes, or write-policy code.
+- Did not call a real LLM.
+- No `git commit` or `git push` was performed.
+
+## 2026-06-07 - Outline Progress and Relationship/Plot Runtime Overlay Plan
+
+### Stage
+
+Planning/documentation update for outline progress and base/runtime overlay semantics.
+
+### Changed files
+
+- `docs/RPG_IMPORT_MODULARIZATION_PLAN.md`
+- `docs/CURRENT_STATE.md`
+- `docs/IMPLEMENTATION_LOG.md`
+
+### Summary
+
+- Added `wiki/outlines/progress.md` as a fixed outline progress slot.
+- Kept `wiki/outlines/main.md` as the low-frequency author/GM outline, modified only through manual/review or a dedicated outline revision flow after impact detection.
+- Explicitly did not add a fixed `wiki/outlines/revision-proposal.md`; outline revision proposals remain review/pending data until a later mechanism decides whether they need a file.
+- Updated Runtime Update Apply target paths so relationship and plot-arc runtime changes go to `wiki/relationships/runtime/*.md` and `wiki/plot-arcs/runtime/*.md`.
+- Clarified that base `wiki/relationships/*.md` and base `wiki/plot-arcs/*.md` store initial/stable relationship and plot-arc structures.
+- Added the overlay vs merge distinction: overlay is the base + runtime layering/read model, while merge is the write strategy used inside a single file, including runtime overlay files.
+- Added Stage D3 for the overlay resolver / context read contract.
+
+### Validation
+
+- Documentation-only change; no automated tests were run.
+
+### Scope notes
+
+- Did not change runtime code.
+- Did not change ordinary ingest behavior.
+- Did not implement schema slots, overlay resolver, validators, prompt changes, UI changes, or write-policy code.
+- Did not call a real LLM.
+- No `git commit` or `git push` was performed.
+
+## 2026-06-07 - Import Plan Directory Boundary Refinement
+
+### Stage
+
+Planning/documentation update for the RPG import modularization contract.
+
+### Changed files
+
+- `docs/RPG_IMPORT_MODULARIZATION_PLAN.md`
+- `docs/CURRENT_STATE.md`
+- `docs/IMPLEMENTATION_LOG.md`
+
+### Summary
+
+- Refined the import plan's directory semantics beyond the `outlines` / `plot-arcs` split.
+- Locked `wiki/player/` to a fixed file set: `player.md`, `abilities.md`, `inventory.md`, `goals.md`, and `known_information.md`.
+- Clarified that player abilities, skills, limits, and current availability belong in `wiki/player/abilities.md`, not `rules/`.
+- Added explicit semantic boundaries for `quests/` vs `player/goals.md` vs `plot-arcs/`.
+- Explained `memory/` authority levels: `player-preferences.md` as preference/control-like material, `long-term.md` as confirmed long-term memory, and `session-notes.md` as session notes rather than hard control or event history.
+- Added prompt/schema boundary requirements for `rules/` vs `world/`, global `style/` vs character-specific voice, `characters/` vs `relationships/`, and `items/` vs `player/inventory.md`.
+- Added runtime cross-directory sync guidance: `current-scene` remains an immediate snapshot, while persistent character/location/faction/item changes should produce runtime overlay updates.
+- Added Stage D1 and D2 to the plan for boundary prompt/schema constraints and runtime cross-directory sync contracts.
+
+### Validation
+
+- Documentation-only change; no automated tests were run.
+
+### Scope notes
+
+- Did not change runtime code.
+- Did not change ordinary ingest behavior.
+- Did not implement schema slots, validators, prompt changes, UI changes, or write-policy code.
+- Did not call a real LLM.
+- No `git commit` or `git push` was performed.
+
+## 2026-06-07 - Outline Directory Schema Decision
+
+### Stage
+
+Planning/documentation update for the RPG wiki schema and import contract.
+
+### Changed files
+
+- `AGENTS.md`
+- `docs/RPG_IMPORT_MODULARIZATION_PLAN.md`
+- `docs/RPG_WIKI_SCHEMA.md`
+- `docs/LLMWIKIRPG_FINAL_ARCHITECTURE.md`
+- `docs/LLMWIKIRPG_NEXT_ARCHITECTURE_STEPS.md`
+- `docs/CURRENT_STATE.md`
+- `docs/IMPLEMENTATION_LOG.md`
+
+### Summary
+
+- Adopted the separate `wiki/outlines/` directory for author/GM-side campaign outlines.
+- Moved the fixed `main_outline` slot from `wiki/plot-arcs/main-outline.md` to `wiki/outlines/main.md`.
+- Clarified that `wiki/plot-arcs/` stores runtime plot-arc state: unresolved conflict, pressure, foreshadowing, blockers, possible developments, and advancement conditions.
+- Updated the agent guide so future planning and implementation should not default to old-project compatibility, migration, fallback, or old-path preservation. The project is treated as a new `llmWikiRPG` product unless the user explicitly asks otherwise.
+- Updated runtime/write-boundary documentation so runtime updates cannot write `wiki/outlines/`.
+
+### Validation
+
+- Documentation-only change; no automated tests were run.
+
+### Scope notes
+
+- Did not change runtime code.
+- Did not change ordinary ingest behavior.
+- Did not implement schema slots, bootstrap templates, import modes, UI, or write-policy code.
+- Did not call a real LLM.
+- No `git commit` or `git push` was performed.
+
+## 2026-06-07 - RPG Import Modularization Plan
+
+### Stage
+
+Planning/documentation update for future RPG import modularization.
+
+### Changed files
+
+- `docs/RPG_IMPORT_MODULARIZATION_PLAN.md`
+- `docs/CURRENT_STATE.md`
+- `docs/IMPLEMENTATION_LOG.md`
+
+### Summary
+
+- Added a dedicated solution document for modularizing RPG import and ingest flows.
+- Defined four separate modes instead of one enlarged ingest path: `source_ingest`, `control_doc_import`, `campaign_setup_import`, and `runtime_update_apply`.
+- Documented why control documents such as style, rules, memory, and main outline should use a fidelity-preserving canonicalization path instead of ordinary source ingest.
+- Documented why player setup and initial scene material need a separate campaign setup path that can explicitly bootstrap `wiki/current-scene/scene_state.md`.
+- Proposed a future `src/lib/rpg-import/` framework for mode registry, pipeline orchestration, target policy, validation, review, and result reporting.
+- Proposed keeping `src/lib/rpg-interactions/` as the LLM interaction spec layer for prompt construction and output parsing.
+- Recorded a phased roadmap from documentation/schema contract through framework skeleton, interaction migration, schema slots, control document import, campaign setup import, runtime apply alignment, and a unified UI entry.
+
+### Validation
+
+- Documentation-only change; no automated tests were run.
+
+### Scope notes
+
+- Did not change runtime code.
+- Did not change ordinary ingest behavior.
+- Did not implement new import modes, schema slots, UI, write policies, or LLM interactions.
+- Did not call a real LLM.
+- No `git commit` or `git push` was performed.
+
+## 2026-06-07 - Context Compiler Redesign Plan Document
+
+### Stage
+
+Planning/documentation update for Stage 6.17: Context Compiler v1.
+
+### Changed files
+
+- `docs/CONTEXT_COMPILER_REDESIGN_PLAN.md`
+- `docs/LLMWIKIRPG_NEXT_ARCHITECTURE_STEPS.md`
+- `docs/CURRENT_STATE.md`
+- `docs/IMPLEMENTATION_LOG.md`
+
+### Summary
+
+- Added a dedicated detailed Context Compiler v1 redesign plan.
+- Documented the default two-LLM Context Compiler flow: Recall Selector / Memory Routing followed by Outline-aware Context Brief Compiler.
+- Documented inputs, outputs, budgets, fallback behavior, optional one-round downgrade, optional third-round retrieval repair / pre-narration outline impact probe, and long-campaign capsule strategy.
+- Shortened Stage 6.17 in `docs/LLMWIKIRPG_NEXT_ARCHITECTURE_STEPS.md` so the roadmap contains the execution summary and points to the detailed design file.
+- Preserved the Context Compiler boundary: no narration generation, no next action options, no pending updates, no wiki writes, and no formal outline revision inside Context Compiler.
+
+### Validation
+
+- Documentation-only change; no automated tests were run.
+
+### Scope notes
+
+- Did not change runtime code.
+- Did not call a real LLM.
+- Did not implement Context Compiler v1, narration generation, runtime update extraction, pending updates, wiki writes, relationship derivation, outline impact detection, or outline regeneration.
+- No `git commit` or `git push` was performed.
+
+## 2026-06-07 - Context Compiler v1 Planning Refinement
+
+### Stage
+
+Planning/documentation update for Stage 6.17: Context Compiler v1.
+
+### Changed files
+
+- `docs/LLMWIKIRPG_NEXT_ARCHITECTURE_STEPS.md`
+- `docs/CURRENT_STATE.md`
+- `docs/IMPLEMENTATION_LOG.md`
+
+### Summary
+
+- Expanded Stage 6.17 from a simple retrieval/budgeting upgrade into a multi-pass LLM-assisted context compilation plan.
+- Required at least two LLM interactions: a recall/synthesis pass over recent completed turns plus deterministic wiki retrieval results, and a narration-brief pass that produces a short prompt/brief for the next narration generator.
+- Added an optional retrieval-planning pass before wiki retrieval, with local path allowlist validation remaining authoritative.
+- Added suggested interfaces, implementation locations, scope exclusions, deterministic fallback requirements, and fixture-test expectations.
+- Updated current-state guidance so the next architecture implementation target is Stage 6.17, because Stage 6.16 is already covered by the existing section-aware/runtime write merge alignment work.
+
+### Validation
+
+- Documentation-only change; no automated tests were run.
+
+### Scope notes
+
+- Did not change runtime code.
+- Did not call a real LLM.
+- Did not generate narration, next action options, wiki updates, pending updates, or wiki writes.
+- Did not implement relationship derivation, outline impact detection, or outline regeneration.
+- No `git commit` or `git push` was performed.
+
+## 2026-06-07 - Runtime Update Validation v1
+
+### Stage
+
+Stage 6.15: Runtime Update Validation v1.
+
+### Changed files
+
+- `src/lib/rpg-interactions/runtime-update-validation.ts`
+- `src/lib/rpg-interactions/runtime-update-interaction.ts`
+- `src/lib/rpg-interactions/index.ts`
+- `src/lib/rpg-runtime/runtime-controller.ts`
+- `src/lib/rpg-runtime/runtime-persistence.ts`
+- `src/lib/rpg-runtime-update-validation.test.ts`
+- `src/lib/rpg-runtime-controller.test.ts`
+- `src/lib/rpg-interactions.test.ts`
+- `src/components/rpg/rpg-runtime-panel.test.tsx`
+- `docs/CURRENT_STATE.md`
+- `docs/IMPLEMENTATION_LOG.md`
+
+### Summary
+
+- Added a pure path-aware runtime update validator for `ProposedWikiUpdate[]`.
+- The validator returns accepted updates, rejected updates, warning/reject issues, and warning strings without reading or writing wiki files.
+- Covered Stage 6.15 semantic boundaries for `events`, `current-scene`, `plot-arcs`, `relationships`, `player`, `quests`, and runtime overlay paths.
+- Wired validation into `runRpgRuntimeTurnFlow()` immediately before `createPendingRpgUpdates()`, so only accepted proposals become user-reviewable pending updates.
+- Preserved rejected proposal audit data through controller warnings and `runtimeUpdateValidation` summary data in the runtime turn journal.
+- Preserved warning-only proposals in pending while keeping their warning issues visible in controller result and journal data.
+- Strengthened the runtime update interaction prompt/contract to require single-pass directory self-checking and to explicitly state there is no second LLM validation round.
+
+### Validation
+
+- `npx.cmd vitest run src/lib/rpg-runtime-update-validation.test.ts src/lib/rpg-runtime-controller.test.ts src/lib/rpg-interactions.test.ts src/lib/rpg-update-staging.test.ts src/lib/rpg-write-policy.test.ts` passed.
+- `npm.cmd run typecheck` passed.
+
+### Scope notes
+
+- Did not add a second LLM review, retry loop, or validator-feedback-to-LLM path.
+- Did not automatically accept, reject, apply, or write wiki files.
+- Did not modify `applyRpgPendingUpdates()` write permissions.
+- Did not implement Stage 6.16 section-aware merge, Stage 6.17 context compiler, relationship deriver, outline impact, or outline regeneration.
+- Did not modify ordinary ingest main flow.
+- Did not delete legacy `entities`, `concepts`, or `sources` functionality.
+- No `git commit` or `git push` was performed.
+
+## 2026-06-07 - Ordinary Ingest / Runtime Current-Scene Boundary Cleanup
+
+### Stage
+
+Boundary cleanup after Stage 6.14; this is not Stage 6.15/6.16/6.17 implementation.
+
+### Changed files
+
+- `src/lib/prompts/rpg-ingest.ts`
+- `src/lib/prompts/rpg-page-guidance.ts`
+- `src/lib/ingest.ts`
+- `src/lib/rpg-dynamic-update.ts`
+- `src/lib/rpg-extraction-validation.ts`
+- `src/lib/rpg-ingest-signals.ts`
+- related focused tests
+- `docs/CURRENT_STATE.md`
+- `docs/IMPLEMENTATION_LOG.md`
+- `docs/LLMWIKIRPG_NEXT_ARCHITECTURE_STEPS.md`
+- `docs/LLMWIKIRPG_USAGE.md`
+- `docs/RPG_WIKI_SCHEMA.md`
+- `docs/RPG_DYNAMIC_UPDATE_STRATEGY.md`
+- `docs/RPG_EXTRACTION_EVALUATION_V0_2_PLAN.md`
+- `docs/RPG_RUNTIME_ORIENTED_INGEST_PLAN.md`
+
+### Summary
+
+- Removed the former ordinary-ingest live marker mechanism from RPG Stage 1 and Stage 2 prompt contracts.
+- Removed `current-scene` from ordinary ingest `needed_categories` and focused page guidance.
+- Updated ordinary ingest writer validation so `wiki/current-scene/` FILE blocks are blocked with warning/review signals instead of being normalized or written.
+- Updated long-source structured signal context so it no longer emits live marker fields or infers `current-scene` for Stage 2.
+- Preserved RPG Play/Runtime writeback: `applyRpgPendingUpdates()` and runtime UI apply flow still allow accepted pending updates to overwrite `wiki/current-scene/scene_state.md`.
+
+### Validation
+
+- `npx.cmd vitest run src/lib/ingest.prompt.test.ts src/lib/ingest.scenarios.test.ts src/lib/rpg-extraction-validation.test.ts src/lib/rpg-write-policy.test.ts src/components/rpg/rpg-runtime-panel.test.tsx` passed.
+- `npx.cmd vitest run src/lib/rpg-dynamic-update.test.ts src/lib/rpg-ingest-signals.test.ts src/lib/rpg-smoke.test.ts src/lib/rpg-wiki-schema.test.ts` passed.
+- `npm.cmd run typecheck` passed.
+- A cleanup search for the former live marker, live profile fields, and old current-scene object type now reports only historical files under `docs/archive/`.
+
+### Scope notes
+
+- Did not implement Stage 6.15, Stage 6.16, or Stage 6.17.
+- Did not remove runtime write policy, `PendingRpgUpdatesPanel`, or `RpgRuntimePanel`.
+- Did not call a real LLM.
+- No `git commit` or `git push` was performed.
+
+## 2026-06-07 - Runtime Apply Refresh + UI Reliability v0
+
+### Stage
+
+Stage 6.14: Runtime Apply Refresh + UI Reliability v0.
+
+### Changed files
+
+- `src/components/rpg/rpg-runtime-panel.tsx`
+- `src/components/rpg/pending-rpg-updates-panel.tsx`
+- `src/components/rpg/index.ts`
+- `src/components/rpg/rpg-runtime-panel.test.tsx`
+- `src/components/rpg/pending-rpg-updates-panel.test.tsx`
+- `docs/CURRENT_STATE.md`
+- `docs/IMPLEMENTATION_LOG.md`
+- `docs/LLMWIKIRPG_USAGE.md`
+
+### Summary
+
+- Added applied-path calculation for RPG runtime apply results in `RpgRuntimePanel`.
+- After manual apply, the panel now reloads project files through the existing store path: `listDirectory(projectPath)`, `setFileTree()`, and `bumpDataVersion()`. This reuses the same file-tree/data-version refresh signal used by existing ingest, review, delete, and sync flows.
+- Added a narrow `onProjectFilesChanged?: (affectedPaths: string[]) => void | Promise<void>` panel prop so a caller can reuse an outer reload callback while still receiving the affected paths.
+- When the apply result contains an actually applied `wiki/current-scene/scene_state.md` overwrite, the runtime panel rereads that file with the existing `loadRpgCurrentScene()` path and updates the displayed current scene.
+- Extended the last apply result UI to show affected paths in addition to applied updates, skipped updates, and warnings.
+- Preserved Stage 6.13 pending persistence behavior: pending and rejected updates remain, accepted skipped updates remain accepted in the queue, and only successfully applied updates are removed.
+
+### Validation
+
+- `npx.cmd vitest run src/components/rpg/rpg-runtime-panel.test.tsx src/components/rpg/pending-rpg-updates-panel.test.tsx src/lib/rpg-runtime-persistence.test.ts src/lib/rpg-write-policy.test.ts` passed.
+- `npm.cmd run typecheck` passed.
+
+### Scope notes
+
+- Did not change `applyRpgPendingUpdates()` write-policy permissions or target validation.
+- Did not add automatic accept, automatic apply, or direct UI wiki writes.
+- Did not implement Stage 6.15, Stage 6.16, or Stage 6.17.
+- Did not wire relationship derivation, outline impact detection, outline regeneration, or any real LLM call.
+- Did not change ingest main flow.
+- No legacy `entities`, `concepts`, or `sources` functionality was deleted.
+- No `git commit` or `git push` was performed.
+
+## 2026-06-07 - RPG Merge Evaluation + Review-Controlled Distill
+
+### Stage
+
+Fifth and sixth RPG merge prompt redesign stages: deterministic merge evaluation samples plus review queue / user-controlled compression.
+
+### Changed files
+
+- `src/lib/rpg-merge-evaluation.ts`
+- `src/lib/rpg-merge-evaluation.test.ts`
+- `src/lib/rpg-merge-review.ts`
+- `src/lib/rpg-merge-review.test.ts`
+- `src/lib/rpg-merge-lint.ts`
+- `src/lib/rpg-merge-lint.test.ts`
+- `src/lib/rpg-section-merge.ts`
+- `docs/CURRENT_STATE.md`
+- `docs/IMPLEMENTATION_LOG.md`
+- `docs/RPG_MERGE_PROMPT_REDESIGN.md`
+
+### Summary
+
+- Added a pure deterministic RPG merge evaluation helper and 5 fixed mock regression samples.
+- Covered character pages staying as NPC operating models instead of biography/trivia sinks, relationship pages preserving playable tension without duplicate character profiles, plot-arcs keeping Possible Futures out of Confirmed Facts, events rejecting future/unchosen-option contamination, and player Current State replacing stale state.
+- Added a pure RPG merge review service that evaluates an already merged candidate through section merge, RPG merge lint, body-shrink checks, and section-deletion checks, then returns an existing-compatible `suggestion` review item for high-risk outputs instead of accepted content.
+- Added review-controlled distill proposal handling for overlong runtime-facing character/location/event/plot-arc/relationship pages, reusing `distillRpgWikiPage()` and `createRpgDistillReviewItems()`.
+- Added an accepted-only distill apply helper that can generate a compressed candidate only after proposal acceptance; pending and rejected proposals do not apply.
+- Kept manual-control `wiki/style/`, `wiki/rules/`, `wiki/memory/` and source `wiki/sources/` pages outside automatic runtime distill.
+- Tightened plot-arc lint for possible future language inside `Confirmed Facts` while preserving normal separate `Possible Futures` behavior.
+- Fixed section-aware merge printing so append-dedupe section bodies are followed by Markdown heading breaks before the next section.
+
+### Validation
+
+- `npx.cmd vitest run src/lib/rpg-merge-evaluation.test.ts` passed.
+- `npx.cmd vitest run src/lib/rpg-merge-review.test.ts` passed.
+- `npx.cmd vitest run src/lib/rpg-section-merge.test.ts src/lib/rpg-merge-lint.test.ts src/lib/page-merge.test.ts src/lib/rpg-merge-policy.test.ts src/lib/rpg-write-policy.test.ts` passed.
+- `npm.cmd run typecheck` passed.
+
+### Scope notes
+
+- Used fixed mock regression samples only; no real LLM call was made.
+- No automatic compression writeback was added; overlong pages produce review/proposal data only.
+- No UI rewrite, review persistence rewrite, runtime controller change, or runtime write-policy loosening was added.
+- `current-scene` overwrite, `events` append/create, and stable/base/source/manual-control blocked runtime write boundaries remain unchanged.
+- No legacy files or user files were deleted.
+- No `git commit` or `git push` was performed.
+
+## 2026-06-07 - Runtime Write Merge Alignment
+
+### Stage
+
+Fourth RPG merge prompt redesign stage: Runtime Write Merge alignment.
+
+### Changed files
+
+- `src/lib/rpg-runtime/write-policy.ts`
+- `src/lib/rpg-write-policy.test.ts`
+- `src/lib/rpg-section-merge.ts`
+- `src/lib/rpg-section-merge.test.ts`
+- `docs/CURRENT_STATE.md`
+- `docs/IMPLEMENTATION_LOG.md`
+- `docs/RPG_MERGE_PROMPT_REDESIGN.md`
+
+### Summary
+
+- Updated accepted runtime `merge` writes to call `mergeRpgSections()` instead of appending the new runtime update to the end of the existing file.
+- Added minimal runtime-write options to `mergeRpgSections()` so deterministic runtime merge can preserve existing frontmatter, existing pre-section heading text, and useful untouched sections while still replacing touched runtime-state sections.
+- Kept `Current State` replacement semantics for runtime-state, relationship, and overlay pages so stale player state, quest progress, relationship state, and current overlay state do not remain beside newer accepted updates.
+- Kept append-dedupe behavior for `Evidence and Uncertainty`, `Confirmed Facts`, and plot-arc `Possible Futures`; possible futures remain in `Possible Futures` and are not promoted into confirmed facts.
+- Expanded runtime-facing low-value section filtering to cover full biography / character profile material and Chinese equivalents, preventing old runtime-facing biography noise from flowing back into relationship and runtime pages.
+- Preserved runtime write boundaries: `current-scene` still overwrites, `events` still appends or creates, and stable/base/source/manual-control paths remain blocked by `validateRpgRuntimeUpdateTarget()`.
+- Added focused tests for player state replacement, quest objective progress replacement, relationship tension/evidence merge without biography restoration, plot-arc possible futures separation, all four runtime overlay path families, current-scene overwrite, events append/create, blocked paths, and low-value section suppression.
+
+### Validation
+
+- `npx.cmd vitest run src/lib/rpg-section-merge.test.ts src/lib/rpg-write-policy.test.ts` passed.
+- `npx.cmd vitest run src/lib/rpg-section-merge.test.ts src/lib/rpg-merge-lint.test.ts src/lib/page-merge.test.ts src/lib/rpg-merge-policy.test.ts src/lib/rpg-write-policy.test.ts` passed.
+- `npm.cmd run typecheck` passed.
+
+### Scope notes
+
+- No runtime controller, UI, context compiler, relationship deriver, or outline module was modified.
+- No post-ingest distiller was implemented.
+- No real LLM call was made.
+- No `wiki/current-scene/` or `wiki/events/` strategy semantics were changed.
+- No stable/base/source/manual-control runtime write permissions were loosened.
+- No legacy files or user files were deleted.
+- No `git commit` or `git push` was performed.
+
+## 2026-06-07 - Section-aware Merge v0
+
+### Stage
+
+Third RPG merge prompt redesign stage: Section-aware Merge v0.
+
+### Changed files
+
+- `src/lib/rpg-section-merge.ts`
+- `src/lib/rpg-section-merge.test.ts`
+- `src/lib/page-merge.ts`
+- `src/lib/page-merge.test.ts`
+- `docs/CURRENT_STATE.md`
+- `docs/IMPLEMENTATION_LOG.md`
+- `docs/RPG_MERGE_PROMPT_REDESIGN.md`
+
+### Summary
+
+- Added `src/lib/rpg-section-merge.ts` as a pure section-aware post-processor for already accepted LLM merge candidates.
+- Exported `RpgSectionMergeStrategy`, `RpgSectionMergeResult`, `RpgSectionMergeContext`, and `mergeRpgSections()`.
+- Implemented a lightweight Markdown section parser that recognizes `##` and `###` headings, normalizes heading names by case and whitespace, and preserves YAML frontmatter as emitted by the LLM.
+- Added strategy handling for `Runtime Capsule`, `Current State`, `Evidence and Uncertainty`, `Confirmed Facts`, `Possible Futures`, and low-value runtime-facing sections.
+- Restored an existing/incoming `Runtime Capsule` when the LLM omitted one, without generating a new capsule.
+- Replaced stale `Current State` on runtime-state, relationships, and current-scene pages by preferring LLM state then incoming state, without preserving stale existing state beside it.
+- Merged `Evidence and Uncertainty`, `Confirmed Facts`, and plot-arc `Possible Futures` with append-dedupe bullet behavior while keeping possible futures out of confirmed facts.
+- Preserved event-page `Possible Futures` contamination for RPG merge lint to reject/fallback instead of silently repairing it.
+- Prevented deleted low-value sections from flowing back into runtime-facing non-source pages while leaving `wiki/sources/` evidence pages outside that low-value drop behavior.
+- Integrated section-aware merge into `mergePageContent()` after frontmatter parsing and body shrink sanity checks, before RPG merge lint and deterministic frontmatter post-processing.
+- Added focused pure tests and page-merge integration tests for capsule restoration, stale current-state replacement, append-dedupe behavior, plot-arc/event boundaries, low-value section behavior, and existing fallback safety paths.
+
+### Validation
+
+- `npx.cmd vitest run src/lib/rpg-section-merge.test.ts src/lib/rpg-merge-lint.test.ts src/lib/page-merge.test.ts src/lib/rpg-merge-policy.test.ts` passed.
+- `npx.cmd vitest run src/lib/ingest.prompt.test.ts src/lib/rpg-smoke.test.ts src/lib/rpg-section-merge.test.ts src/lib/rpg-merge-lint.test.ts src/lib/page-merge.test.ts src/lib/rpg-merge-policy.test.ts` passed.
+- `npm.cmd run typecheck` passed.
+
+### Scope notes
+
+- No runtime controller, runtime write policy, UI, context compiler, relationship deriver, or outline module was modified.
+- No post-ingest distiller was implemented.
+- No runtime write merge alignment was implemented.
+- No real LLM call was made.
+- No legacy files or user files were deleted.
+- No `git commit` or `git push` was performed.
+
+## 2026-06-07 - RPG Merge Lint v0
+
+### Stage
+
+Second RPG merge prompt redesign stage: RPG Merge Lint v0.
+
+### Changed files
+
+- `src/lib/rpg-merge-lint.ts`
+- `src/lib/rpg-merge-lint.test.ts`
+- `src/lib/page-merge.ts`
+- `src/lib/page-merge.test.ts`
+- `docs/CURRENT_STATE.md`
+- `docs/IMPLEMENTATION_LOG.md`
+
+### Summary
+
+- Added `src/lib/rpg-merge-lint.ts` as a pure semantic lint layer for merged RPG pages.
+- Exported `RpgMergeLintSeverity`, `RpgMergeLintIssue`, `RpgMergeLintResult`, `RpgMergeLintContext`, and `lintRpgMergedPage()`.
+- Added warning-only detection for non-source runtime-facing pages that lack `## Runtime Capsule`, excluding `wiki/sources/` and manual-control `wiki/style/`, `wiki/rules/`, and `wiki/memory/`.
+- Added reject detection for `wiki/events/` pages containing future possibilities, next-step suggestions, optional or unchosen actions, and foreshadowing language.
+- Added reject detection for `wiki/plot-arcs/` pages that combine possible-future language with confirmed-happened language.
+- Added warning detection for base `wiki/characters/*.md`, `wiki/locations/*.md`, `wiki/factions/*.md`, and `wiki/items/*.md` pages that contain obvious runtime-only current-state wording.
+- Added reject detection for `wiki/current-scene/` pages that look like accumulated history, full profiles, complete timelines, or route recaps.
+- Integrated the lint into `mergePageContent()` after frontmatter parsing and policy-aware body shrink checks, before deterministic locked-field, array-union, and updated-stamp post-processing.
+- Reject lint results now use the existing fallback contract: log warning details, run the backup hook, and write array-merged incoming content. Warning-only lint results are logged but still accept the LLM merge output.
+- Added focused tests for the pure lint rules and page-merge integration paths for reject fallback and warning acceptance.
+
+### Validation
+
+- `npx.cmd vitest run src/lib/rpg-merge-lint.test.ts src/lib/page-merge.test.ts src/lib/rpg-merge-policy.test.ts` passed.
+  - 3 test files passed.
+  - 41 tests passed.
+- `npx.cmd vitest run src/lib/ingest.prompt.test.ts src/lib/rpg-smoke.test.ts src/lib/rpg-merge-lint.test.ts src/lib/page-merge.test.ts src/lib/rpg-merge-policy.test.ts` passed.
+  - 5 test files passed.
+  - 75 tests passed.
+- `npm.cmd run typecheck` passed.
+
+### Scope notes
+
+- No automatic rewrite, compression, section-aware merge, or post-ingest distiller behavior was added.
+- No review queue persistence or ingest main-flow semantics were changed.
+- No runtime controller, runtime write policy, UI, context compiler, relationship deriver, or outline module was modified.
+- No real LLM call was made.
+- No legacy files or user files were deleted.
+- No `git commit` or `git push` was performed.
+
+## 2026-06-07 - RPG Merge Policy v0
+
+### Stage
+
+First RPG merge prompt redesign stage: RPG Merge Policy v0.
+
+### Changed files
+
+- `src/lib/rpg-merge-policy.ts`
+- `src/lib/page-merge.ts`
+- `src/lib/ingest.ts`
+- `src/lib/page-merge.test.ts`
+- `src/lib/rpg-merge-policy.test.ts`
+- `docs/CURRENT_STATE.md`
+- `docs/IMPLEMENTATION_LOG.md`
+
+### Summary
+
+- Confirmed the page merge function receives a `MergeContext` containing `sourceFileName`, `pagePath`, and `signal`.
+- Confirmed `mergePageContent()` passes the target `pagePath` to the injected merger and uses `getRpgMergePolicy(opts.pagePath).bodyShrinkThreshold` for body shrink sanity checks.
+- Confirmed `buildPageMerger()` builds its system prompt through `buildRpgMergeSystemPrompt(context.pagePath)` and forwards `context.signal` to `streamChat()`.
+- Confirmed the merge prompt is RPG runtime-oriented instead of encyclopedia-oriented: it prioritizes NPC portrayal, player choices, relationship tension, scene hooks, state consequences, action constraints, rules/hard setting, atmosphere/style, and future pacing, while rejecting low-value trivia and future-as-fact drift.
+- Confirmed deterministic merge safety is preserved: array-field union, locked frontmatter fields, updated stamp, no-frontmatter rejection, LLM failure fallback, and backup hook behavior.
+- Expanded `src/lib/rpg-merge-policy.test.ts` with path classification coverage for sources, stable base pages, runtime pages, events, current-scene, manual-control pages, and generic fallback behavior.
+
+### Validation
+
+- `npx.cmd vitest run src/lib/page-merge.test.ts src/lib/rpg-merge-policy.test.ts` passed.
+  - 2 test files passed.
+  - 30 tests passed.
+- `npx.cmd vitest run src/lib/ingest.prompt.test.ts src/lib/rpg-smoke.test.ts src/lib/page-merge.test.ts src/lib/rpg-merge-policy.test.ts` passed.
+  - 4 test files passed.
+  - 64 tests passed.
+- `npm.cmd run typecheck` passed.
+
+### Scope notes
+
+- No runtime controller, runtime write policy, UI, context compiler, relationship deriver, or outline module was modified.
+- No post-ingest distiller was implemented or wired.
+- No real LLM call was made.
+- No legacy files or user files were deleted.
+- No `git commit` or `git push` was performed.
+
+## 2026-06-07 - RPG Runtime-Oriented Relationship/Tension Deriver v0
+
+### Stage
+
+Sixth runtime-oriented ingest stage: Relationship/Tension Deriver v0.
+
+### Changed files
+
+- `src/lib/rpg-relationship-tension-deriver.ts`
+- `src/lib/rpg-relationship-tension-deriver.test.ts`
+- `docs/CURRENT_STATE.md`
+- `docs/IMPLEMENTATION_LOG.md`
+
+### Summary
+
+- Added `src/lib/rpg-relationship-tension-deriver.ts` as a pure TypeScript proposal service for implicit RPG relationship and plot-pressure derivation.
+- Added `deriveRpgRelationshipTensions()` to read wiki pages, optional `RpgIngestSignal[]`, and optional source notes, then produce proposal-only derivations for trust, tension, secret, misunderstanding, dependency, and conflict pressure.
+- Added `createRpgRelationshipDeriverReviewItems()` so proposals can be converted into existing `suggestion` review items with Inspect/Dismiss options, without writing review storage by itself.
+- Proposal output includes `targetPath`, `targetKind`, `derivationKind`, `participants`, `canonStatus`, `confidence`, `evidence`, `rationale`, `playerTriggers`, `unresolvedBoundaries`, `mergePatchMarkdown` for relationship targets, `proposalMarkdown`, and `warnings`.
+- Relationship proposals use merge-style deltas focused on trust, pressure, triggers, evidence, and boundaries instead of repeating full character introductions.
+- Plot-arc proposals focus on unresolved conflict pressure, escalation conditions, and cannot-resolve-early boundaries, and explicitly avoid writing possible futures as completed events.
+- Insufficient participant or evidence cases produce warnings and review-only proposals instead of fabricating relationship pages.
+- Direct evidence, source notes, and canon-marked structured signals are retained as evidence summaries; derivation conclusions are not promoted to canon facts.
+- Added focused tests for character behavior plus event consequences, secret/misunderstanding inference boundaries, evidence-only direct facts, merge proposal shape, plot-arc conflict pressure boundaries, source notes/signals as evidence, review-only insufficient-participant behavior, and REVIEW/proposal-only markdown boundaries.
+
+### Validation
+
+- `npx.cmd vitest run src/lib/rpg-relationship-tension-deriver.test.ts` passed.
+  - 1 test file passed.
+  - 8 tests passed.
+- `npx.cmd vitest run src/lib/rpg-post-ingest-distiller.test.ts src/lib/rpg-ingest-signals.test.ts src/lib/rpg-extraction-validation.test.ts` passed.
+  - 3 test files passed.
+  - 31 tests passed.
+- `npm.cmd run typecheck` passed.
+
+### Scope notes
+
+- The deriver was not connected to the ordinary ingest automatic write path.
+- No silent writes to `wiki/relationships/` or `wiki/plot-arcs/` were added.
+- No canon facts were written.
+- No runtime controller, UI, Tauri command, or write policy was modified.
+- No real LLM calls were added.
+- No review accept/reject/apply behavior was added.
+- No legacy `entities`, `concepts`, or `sources` functionality was deleted.
+- No `git commit` or `git push` was performed.
+
+## 2026-06-06 - RPG Runtime-Oriented Context Capsule Retrieval v0
+
+### Stage
+
+Fifth runtime-oriented ingest stage: Context Capsule Retrieval v0.
+
+### Changed files
+
+- `src/lib/rpg-runtime/context-compiler.ts`
+- `src/lib/rpg-runtime.test.ts`
+- `docs/CURRENT_STATE.md`
+- `docs/IMPLEMENTATION_LOG.md`
+
+### Summary
+
+- Updated the read-only RPG runtime context compiler so non-source wiki pages are formatted through runtime section extraction before entering `CompactStoryBrief` fields.
+- Added lightweight Markdown `##` / `###` section parsing inside `src/lib/rpg-runtime/context-compiler.ts`, without introducing a new parser module or changing ingest/write behavior.
+- Prioritized `Runtime Capsule` for non-source pages, then category-specific runtime sections such as character `Behavior Rules`, `Dialogue Style`, `Relationship Levers`; location `Scene Hooks`, `Interactables`, `Risks`, `Clues`, `Sensory Anchors`; relationship / plot-arc tension, triggers, unresolved questions, and progression conditions; event consequences, state changes, and fallout; and runtime-useful player/world/faction/item/quest/memory/style/rule sections.
+- Kept `wiki/sources/` reference-only. Source pages are still included in references but their page bodies do not enter `hardFacts`, page groups, or narration prompt body fields.
+- Preserved high-priority `current-scene` snapshot handling and kept player pages high-priority while selecting player runtime/current-state sections before fallback.
+- Preserved base page plus `runtime/` overlay composition by applying runtime section extraction to each page before group compaction.
+- Preserved `stripUnchosenActionOptions()` sanitation so unselected `Next Action Options` do not enter serialized briefs.
+- Added fallback behavior: if no runtime-facing sections exist, the compiler falls back to the existing compact whole-page behavior within `MAX_ENTRY_CHARS`.
+- Added focused tests covering character runtime sections over Canon/Evidence poison text, location scene affordances over long history poison text, relationship tension/triggers/progression over background poison text, source reference-only behavior, current-scene/player/relationship priority, overlay composition, and unchosen option stripping.
+
+### Validation
+
+- `npx.cmd vitest run src/lib/rpg-runtime.test.ts` passed.
+  - 1 test file passed.
+  - 8 tests passed.
+- `npx.cmd vitest run src/lib/rpg-runtime.test.ts src/lib/rpg-narration-prompts.test.ts src/lib/rpg-runtime-controller.test.ts` passed.
+  - 3 test files passed.
+  - 29 tests passed.
+- `npm.cmd run typecheck` passed.
+
+### Scope notes
+
+- No ingest write flow was changed.
+- No runtime write policy was changed.
+- No wiki files were written, compressed, rewritten, or auto-distilled.
+- No automatic review apply/accept/reject behavior was added.
+- No real LLM calls were added.
+- No UI behavior was changed.
+- No Relationship/Tension Deriver was implemented.
+- Existing legacy protections and source reference-only behavior were preserved.
+- No `git commit` or `git push` was performed.
+
+## 2026-06-06 - RPG Runtime-Oriented Post-Ingest Distiller v0
+
+### Stage
+
+Fourth runtime-oriented ingest stage: Post-Ingest Distiller v0.
+
+### Changed files
+
+- `src/lib/rpg-post-ingest-distiller.ts`
+- `src/lib/rpg-post-ingest-distiller.test.ts`
+- `docs/CURRENT_STATE.md`
+- `docs/IMPLEMENTATION_LOG.md`
+
+### Summary
+
+- Added `src/lib/rpg-post-ingest-distiller.ts` as a pure internal TypeScript service for existing long RPG wiki pages.
+- Added `distillRpgWikiPage()` for single-page proposals, `distillRpgWikiPages()` for batch proposal generation, and `createRpgDistillReviewItems()` for review/proposal items that contain affected pages and Inspect/Dismiss options.
+- Implemented path-based category recognition for `wiki/characters/`, `wiki/locations/`, `wiki/events/`, `wiki/plot-arcs/`, and `wiki/relationships/`.
+- Kept `wiki/sources/` out of runtime-facing distill and returns a skipped proposal with a warning because sources are the evidence layer.
+- Proposal results include `targetPath`, `category`, `originalLength`, `hasRuntimeCapsule`, `candidateRuntimeCapsule`, `roleplaySignals`, `keepSections`, `compressSections`, `moveToEvidenceSections`, `needsHumanConfirmation`, `proposalMarkdown`, and `warnings`.
+- The generated proposal markdown explicitly lists recommended keep, recommended compress, move to sources/evidence, needs human confirmation, candidate Runtime Capsule, roleplay signals, and warnings.
+- Added deterministic v0 section heuristics for long biography, route/timeline recap, duplicate evidence, low-value encyclopedia metadata/trivia, event future plans/foreshadowing, and plot-arc future-as-fact wording.
+- Added runtime-facing keep heuristics for character portrayal/dialogue/boundaries, location affordances/dangers/clues/sensory anchors, confirmed event consequences, plot pressure/progression conditions, and relationship trust/tension/secrets/change triggers.
+- Added focused unit tests covering all five required categories, no-writeback purity, and review item generation.
+
+### Validation
+
+- `npx.cmd vitest run src/lib/rpg-post-ingest-distiller.test.ts` passed.
+  - 1 test file passed.
+  - 7 tests passed.
+- `npx.cmd vitest run src/lib/rpg-ingest-signals.test.ts src/lib/rpg-extraction-validation.test.ts` passed.
+  - 2 test files passed.
+  - 24 tests passed.
+- `npm.cmd run typecheck` passed.
+
+### Scope notes
+
+- No original wiki page was silently written back, overwritten, deleted, or compressed in place.
+- No `.llm-wiki/review.json` write was added.
+- No automatic review accept/reject/apply behavior was added.
+- No Context Capsule Retrieval was implemented.
+- No Relationship/Tension Deriver was implemented.
+- No runtime controller, UI, Tauri command, or real filesystem write behavior was modified.
+- Existing legacy `entities` / `concepts` / `sources` functionality was not deleted.
+- No `git commit` or `git push` was performed.
+
+## 2026-06-06 - RPG Merge Prompt Redesign Execution Handoff
+
+### Stage
+
+Documentation handoff for RPG merge prompt redesign follow-up execution.
+
+### Changed files
+
+- `docs/RPG_MERGE_PROMPT_REDESIGN.md`
+- `docs/CURRENT_STATE.md`
+- `docs/IMPLEMENTATION_LOG.md`
+
+### Summary
+
+- Appended a copy-ready opencode execution prompt for the first implementation stage, `RPG Merge Policy v0`.
+- The prompt includes required reading, strict scope boundaries, concrete code steps, policy classification rules, prompt requirements, sanity-check changes, tests, validation commands, documentation updates, and acceptance criteria.
+- Added a brief follow-up roadmap for merge lint, section-aware merge, runtime write merge alignment, real-model evaluation, and review-controlled compression.
+
+### Validation
+
+- Documentation-only change; no automated tests were run.
+
+### Scope notes
+
+- No production code was modified in this pass.
+- No merge policy, prompt helper, page-merge behavior, runtime write policy, UI, or real LLM path changed in this pass.
+- No `git commit` or `git push` was performed.
+
+## 2026-06-06 - RPG Merge Policy v0
+
+### Stage
+
+RPG-oriented entry merge prompt and policy implementation.
+
+### Changed files
+
+- `src/lib/rpg-merge-policy.ts`
+- `src/lib/page-merge.ts`
+- `src/lib/ingest.ts`
+- `src/lib/page-merge.test.ts`
+- `src/lib/rpg-merge-policy.test.ts`
+- `docs/RPG_MERGE_PROMPT_REDESIGN.md`
+- `docs/CURRENT_STATE.md`
+- `docs/IMPLEMENTATION_LOG.md`
+
+### Summary
+
+- Added `src/lib/rpg-merge-policy.ts` as the path-aware merge policy registry for llmWikiRPG pages.
+- The registry classifies merge targets into source evidence, stable operating model, runtime state, relationship tension, plot pressure, event history, current-scene snapshot, manual-control, or generic RPG fallback policies.
+- Replaced the production merge system prompt's old encyclopedia contract with a shared RPG runtime utility gate plus category-specific prompt fragments.
+- The new prompt explicitly rejects preserving every factual claim as the top priority, asks the model to keep only runtime-useful source-supported material, prevents future-as-fact drift, and separates stable base pages from runtime overlay/current-state pages.
+- Updated `MergeFn` to receive a `MergeContext` containing `sourceFileName`, `pagePath`, and `signal`, allowing prompt construction and sanity checks to depend on the target path.
+- Updated `mergePageContent()` to pass merge context into the injected merger while preserving deterministic array-field union, locked frontmatter fields, fallback behavior, backup behavior, and `updated` stamping.
+- Made body-shrink sanity checks path-aware: runtime-state, relationship-tension, plot-pressure, current-scene, and stable operating model policies allow stronger compression than the old 70% threshold, while generic/unknown paths stay conservative.
+- Added unit coverage for merge context propagation, RPG compression acceptance for relationship pages, policy classification, runtime overlay classification, stable base character classification, conservative generic fallback, and prompt regression away from the old `Preserves every factual claim` wording.
+
+### Validation
+
+- `npx.cmd vitest run src/lib/page-merge.test.ts src/lib/rpg-merge-policy.test.ts` passed.
+  - 2 test files passed.
+  - 18 tests passed.
+- `npx.cmd vitest run src/lib/ingest.prompt.test.ts src/lib/rpg-smoke.test.ts src/lib/page-merge.test.ts src/lib/rpg-merge-policy.test.ts` passed.
+  - 4 test files passed.
+  - 52 tests passed.
+- `npm.cmd run typecheck` passed.
+
+### Scope notes
+
+- No real LLM merge call was manually exercised.
+- No runtime write policy, pending update, UI, context compiler, relationship/tension derivation, outline, or apply behavior was changed.
+- No automatic page rewriting/compression pass was added outside the existing LLM merge path.
+- No legacy/default project support was reintroduced.
+- No `git commit` or `git push` was performed.
+
+## 2026-06-06 - RPG Runtime-Oriented Long Source Signal Extraction v0
+
+### Stage
+
+Third runtime-oriented ingest stage: Long Source Signal Extraction v0.
+
+### Changed files
+
+- `src/lib/rpg-ingest-signals.ts`
+- `src/lib/rpg-ingest-signals.test.ts`
+- `src/lib/ingest.ts`
+- `src/lib/prompts/rpg-page-guidance.ts`
+- `src/lib/ingest.prompt.test.ts`
+- `docs/CURRENT_STATE.md`
+- `docs/IMPLEMENTATION_LOG.md`
+
+### Summary
+
+- Added `RpgIngestSignal` as a pure long-source signal boundary with required fields `kind`, optional `targetPath`, `summary`, `rpUse`, `evidence`, `utilityScore`, `confidence`, and `canonStatus`; optional internal fields include `sourceChunkId`, `targetObject`, `dedupeKey`, and `warnings`.
+- Added parser support for fenced `## RP Runtime Signals JSON` chunk output. The parser accepts a JSON array or `{ signals: [...] }`, then normalizes each object before it can reach long-source consolidation.
+- Added normalizer safety behavior: invalid signal kinds become `noise`, utility scores are clamped to 0-5, invalid confidence defaults to `low`, invalid canon status defaults to `uncertain`, unsafe or legacy target paths are cleared, non-noise signals missing summary or evidence are downgraded to `noise`, and `noise` signals are capped at utility 0-1.
+- Added global signal dedupe/merge by `kind + targetPath/targetObject + normalized summary`. Duplicate signals merge short evidence and RP-use snippets without unbounded growth, keep the highest utility score and confidence, and merge canon status conservatively so uncertain or inferred material is not promoted to canon.
+- Extended the long-source chunk system/user prompts to require exactly three sections: `## Chunk Analysis`, fenced `## RP Runtime Signals JSON`, and `## Updated Global Digest`. The prompt includes the 0-5 utility scoring rules and explicitly redirects long route/course material toward `plot-arcs` unless there is a confirmed discrete already-happened event for `events`.
+- Updated `analyzeLongSourceInChunks()` to parse each chunk's structured signals, merge them into a checkpointed accumulator, and include `## Structured RP Runtime Signals` in both the precomputed Stage 1 analysis and long-source `sourceContext` before Stage 2 generation.
+- Upgraded long-source checkpoints to version 2 with a `signals` array. Older checkpoints without signals are treated as incompatible and safely ignored so the long-source analysis can be regenerated with structured signals instead of resuming without them.
+- The structured long-source context now emits a generated `## Source Profile` from high-utility signals so focused Stage 2 page contracts can still activate when long sources bypass the normal single-pass Stage 1 analysis.
+- Added signal bucket routing in the consolidated context: utilityScore 3-5 signals are core non-source page material, 4-5 signals are marked as Runtime Capsule priority, utilityScore 2 signals go to REVIEW or Evidence and Uncertainty, and utilityScore 0-1 signals are kept as source-only / ignored noise.
+- Strengthened Stage 2 RPG page guidance so `## Structured RP Runtime Signals` is the authoritative long-source generation gate when present, low-scored structured signals cannot generate non-source pages, long plot/course recaps cannot become one long `wiki/events/` page, confirmed discrete events are the only event-page basis, and unresolved conflicts / foreshadowing / possible developments / progression conditions go to `wiki/plot-arcs/` or REVIEW.
+- Added focused tests for normalizer behavior, utility clamping, enum defaults, unsafe target path clearing, weak signal downgrade, dedupe/merge caps, conservative canon-status merge, structured context score buckets, long plot recap routing, high-noise metadata handling, chunk prompt requirements, and Stage 2 structured-signal gating.
+
+### Validation
+
+- `npx.cmd vitest run src/lib/rpg-ingest-signals.test.ts` passed.
+  - 1 test file passed.
+  - 9 tests passed.
+- `npx.cmd vitest run src/lib/ingest.prompt.test.ts` passed.
+  - 1 test file passed.
+  - 33 tests passed.
+- `npx.cmd vitest run src/lib/rpg-extraction-validation.test.ts src/lib/rpg-smoke.test.ts` passed.
+  - 2 test files passed.
+  - 16 tests passed.
+- `npm.cmd run typecheck` passed.
+
+### Scope notes
+
+- No Post-Ingest Distiller was implemented.
+- No Context Capsule Retrieval was implemented.
+- No Relationship/Tension Deriver was implemented.
+- No automatic accept/reject/apply review behavior was implemented.
+- No automatic page rewriting or compression was implemented.
+- No runtime controller or UI behavior was changed for this stage.
+- No real LLM long-source run was manually verified; this stage is covered by pure-function tests, prompt contract tests, existing RPG lint/smoke tests, and typecheck.
+- Existing legacy `entities` / `concepts` / `sources` code was not deleted.
+- No `git commit` or `git push` was performed.
+
+## 2026-06-06 - RPG Runtime-Oriented Ingest Quality Lint v0
+
+### Stage
+
+RPG Runtime-Oriented Ingest Quality Lint v0
+
+### Changed files
+
+- `src/lib/rpg-extraction-validation.ts`
+- `src/lib/rpg-extraction-validation.test.ts`
+- `src/lib/rpg-smoke.test.ts`
+- `docs/CURRENT_STATE.md`
+- `docs/IMPLEMENTATION_LOG.md`
+
+### Summary
+
+- Added lightweight RPG runtime-facing path helpers to skip `wiki/sources/` and structural listing pages while checking non-source RPG pages under world, characters, player, locations, factions, items, plot-arcs, events, current-scene, relationships, style, rules, quests, and memory.
+- Added `## Runtime Capsule` presence lint and weak-capsule lint using v0 action hook, constraint/risk, tension/relationship pressure, state-impact, and portrayal/style/atmosphere keyword groups.
+- Added runtime-facing soft-budget lint for directory page bodies plus an 800-character Runtime Capsule soft budget. Over-budget pages only create warning/review signals and recommend compression to Runtime Capsule + key evidence.
+- Added low-value encyclopedia-noise lint for release/version/platform, voice actor/production metadata, fan tags, trivia, and character profile trivia when the runtime-facing body lacks RP utility signals. Evidence/source-like sections are ignored for this check.
+- Strengthened dynamic semantic checks: `wiki/events/` now flags future plans, possible development, foreshadowing, player-choice suggestions, and progression conditions; `wiki/plot-arcs/` flags possible futures written as confirmed facts; current-scene static-source violations now also surface warnings in addition to review items.
+- Added review item de-duplication inside `validateRpgExtraction()` with a local `title + affectedPages` key so multiple checks do not push repeated identical review items.
+- Added unit coverage for missing capsule, weak capsule, soft budget overflow, low-value encyclopedia noise, event future/unresolved material, plot-arc future-as-fact wording, current-scene warning visibility, and source-page non-regression. Updated the smoke scenario assertion to expect runtime lint review items from historical mock outputs that intentionally lack the new Runtime Capsule contract.
+
+### Validation
+
+- `npx.cmd vitest run src/lib/rpg-extraction-validation.test.ts` passed.
+  - 1 test file passed.
+  - 15 tests passed.
+- `npx.cmd vitest run src/lib/ingest.prompt.test.ts src/lib/rpg-smoke.test.ts src/lib/rpg-extraction-validation.test.ts` passed.
+  - 3 test files passed.
+  - 46 tests passed.
+- `npm.cmd run typecheck` passed.
+
+### Scope notes
+
+- No Long Source Signal Extraction was implemented.
+- No Post-Ingest Distiller was implemented.
+- No Context Capsule Retrieval was implemented.
+- No Relationship/Tension Deriver was implemented.
+- No automatic page rewrite or compression was implemented.
+- No automatic accept/reject/apply behavior was added.
+- No source-summary write blocking was added.
+- No writer strategy, runtime controller, UI, prompt, or real LLM call path change was made.
+- No `git commit` or `git push` was performed.
+
+## 2026-06-06 - RPG Runtime-Oriented Ingest Prompt Contract v0
+
+### Stage
+
+First runtime-oriented ingest prompt-contract implementation stage.
+
+### Changed files
+
+- `src/lib/prompts/rpg-ingest.ts`
+- `src/lib/prompts/rpg-page-guidance.ts`
+- `src/lib/ingest.prompt.test.ts`
+- `docs/CURRENT_STATE.md`
+- `docs/IMPLEMENTATION_LOG.md`
+
+### Summary
+
+- Enhanced RPG Stage 1 Source Profile with runtime utility focus, noise ratio, and recommended ingest mode so high-noise sources can be routed toward source-only or review-first handling.
+- Added per-candidate `runtime_utility`, `runtime_use`, and `canon_status` fields, plus explicit 0-5 runtime scoring rules and a hard gate against creating/updating non-source pages from candidates below 3 except as evidence, merge targets, or REVIEW notes.
+- Added a natural-language `## RP Runtime Signals` section for Stage 1 output, covering portrayal, dialogue, behavior boundary, scene affordance, relationship tension, plot pressure, world constraint, action hook, state change, style rule, and noise signals for Stage 2 context.
+- Updated Stage 2 generation guidance so non-source RPG pages should include `## Runtime Capsule`, use actionable source-grounded bullets, filter low-value encyclopedia metadata/trivia, and follow soft runtime page budgets.
+- Rewrote directory contracts toward runtime components: world constraints, location scene cards, faction pressure sources, item runtime functions, confirmed events, unresolved plot arcs, relationship levers, PC-facing player state, and the then-current gated current-scene snapshot design.
+- Compressed the character page contract into a runtime-first operation model with `Runtime Capsule`, `Canon Facts`, `Psychological Model`, `Behavior Rules`, `Dialogue Style`, `Relationship Levers`, and `Evidence and Uncertainty`.
+- Updated focused prompt assertions for the new runtime contract wording.
+
+### Validation
+
+- `npx.cmd vitest run src/lib/ingest.prompt.test.ts` passed.
+  - 1 test file passed.
+  - 30 tests passed.
+- `npx.cmd vitest run src/lib/rpg-smoke.test.ts src/lib/rpg-extraction-validation.test.ts` passed.
+  - 2 test files passed.
+  - 9 tests passed.
+- `npm.cmd run typecheck` passed.
+
+### Scope notes
+
+- Prompt/helper layer only.
+- No long-source chunk signal merge was implemented.
+- No post-ingest distiller was implemented.
+- No ingest quality lint was implemented.
+- No context compiler retrieval change was implemented.
+- No Relationship/Tension Deriver was implemented.
+- No writer, parser, runtime controller, UI, or real LLM call path was changed.
+- No `git commit` or `git push` was performed.
+
+## 2026-06-06 - Runtime-Oriented Ingest Phase 1 Codex Prompt Rewrite
+
+### Stage
+
+Planning/documentation update for the first runtime-oriented ingest prompt-contract phase.
+
+### Changed files
+
+- `docs/RPG_RUNTIME_ORIENTED_INGEST_PLAN.md`
+- `docs/CURRENT_STATE.md`
+- `docs/IMPLEMENTATION_LOG.md`
+
+### Summary
+
+- Rewrote the first-stage plan in `docs/RPG_RUNTIME_ORIENTED_INGEST_PLAN.md` into a direct Codex execution prompt that can be copied into a fresh Codex window.
+- Added required reading, strict scope boundaries, eight concrete implementation steps, suggested validation commands, acceptance criteria, and required documentation updates for the future execution window.
+- Kept the following-stage roadmap after the first-stage prompt intact.
+
+### Validation
+
+- Documentation-only change; no automated tests were run.
+
+### Scope notes
+
+- No production code was modified.
+- The first-stage prompt-contract implementation was not executed in this pass.
+- No ingest prompt, parser, writer, lint, distiller, context compiler, or deriver behavior was changed.
+- No `git commit` or `git push` was performed.
+
+## 2026-06-06 - Stage 6.13 Runtime Persistence v0
+
+### Stage
+
+Stage 6.13: Runtime Persistence v0.
+
+### Changed files
+
+- `src/lib/rpg-runtime/runtime-persistence.ts`
+- `src/lib/rpg-runtime/runtime-controller.ts`
+- `src/lib/rpg-runtime/index.ts`
+- `src/components/rpg/rpg-runtime-panel.tsx`
+- `src/components/rpg/index.ts`
+- `src/lib/rpg-runtime-persistence.test.ts`
+- `src/lib/rpg-runtime-controller.test.ts`
+- `src/components/rpg/rpg-runtime-panel.test.tsx`
+- `docs/LLMWIKIRPG_NEXT_ARCHITECTURE_STEPS.md`
+- `docs/LLMWIKIRPG_USAGE.md`
+- `docs/CURRENT_STATE.md`
+- `docs/IMPLEMENTATION_LOG.md`
+
+### Summary
+
+- Added `src/lib/rpg-runtime/runtime-persistence.ts` as the Stage 6.13 runtime metadata boundary.
+- Runtime persistence writes only under `projectPath/.llm-wiki/runtime/`: `turn-records.jsonl`, `pending-updates.json`, and `apply-results.jsonl`.
+- Added safe pending queue restore behavior: missing files return an empty queue, corrupt pending JSON returns an empty queue plus warnings, and invalid pending entries are skipped with warnings.
+- Added stable JSONL append helpers for turn and apply journals.
+- Extended `runRpgRuntimeTurnFlow()` with optional runtime persistence injection. As of Redundancy Cleanup Phase 4, completed turn journal entries use only the interaction proposal source.
+- Preserved controller boundaries: it still does not accept, reject, apply, or write wiki files.
+- Updated `RpgRuntimePanel` dependencies and helpers so the UI restores pending updates on startup, saves new pending queues after turns, persists accept/reject status changes, saves the remaining queue after apply, and appends apply result journal entries.
+- Preserved review/apply semantics: restored accepted updates are not auto-applied, pending/rejected updates are not passed to apply, and apply still goes only through `applyRpgPendingUpdates()`.
+- Updated usage/current-state/roadmap docs to mark Stage 6.13 complete and keep Stage 6.14 apply-refresh work as the next stage.
+
+### Validation
+
+- `npx.cmd vitest run src/lib/rpg-runtime-persistence.test.ts src/lib/rpg-runtime-controller.test.ts src/lib/rpg-update-staging.test.ts src/lib/rpg-write-policy.test.ts src/lib/rpg-state-extractor.test.ts src/components/rpg/rpg-runtime-panel.test.tsx src/components/rpg/pending-rpg-updates-panel.test.tsx` passed.
+  - 7 test files passed.
+  - 61 tests passed.
+- `npx.cmd vitest run src/lib/project-mode.test.ts src/lib/wiki-page-types.test.ts src/lib/wiki-type-style.test.ts src/lib/rpg-runtime.test.ts src/lib/rpg-turn-model.test.ts src/lib/rpg-interactions.test.ts` passed.
+  - 6 test files passed.
+  - 65 tests passed.
+- `npm.cmd run typecheck` passed.
+
+### Scope notes
+
+- Stage 6.13 does not implement apply-after-write current-scene, file-tree, graph, or UI refresh.
+- Stage 6.13 does not implement runtime update semantic validation v1.
+- Stage 6.13 does not implement section-aware merge.
+- Stage 6.13 does not implement Context Compiler v1.
+- Stage 6.13 does not implement relationship/tension derivation.
+- Stage 6.13 does not implement outline impact detection or outline regeneration.
+- Stage 6.13 does not call a real LLM.
+- Stage 6.13 does not modify ingest flow.
+- Stage 6.13 does not change `wiki/quests/` Stage 6.12 semantics.
+- Stage 6.13 does not reintroduce legacy/default support.
+- Runtime journal metadata is not wiki canon; applied wiki updates still use wiki files as the source of truth.
+- No `git commit` or `git push` was performed.
+
+## 2026-06-06 - Runtime-Oriented Ingest Follow-up Stage Plan Expansion
+
+### Stage
+
+Planning/documentation update for the follow-up stages after the first runtime-oriented ingest prompt pass.
+
+### Changed files
+
+- `docs/RPG_RUNTIME_ORIENTED_INGEST_PLAN.md`
+- `docs/CURRENT_STATE.md`
+- `docs/IMPLEMENTATION_LOG.md`
+
+### Summary
+
+- Expanded the post-first-stage plan from a brief five-item list into concrete Stage 2-6 follow-up plans.
+- Added goals, suggested changes, validation criteria, and safety boundaries for Ingest Quality Lint, Long Source Signal Extraction, Post-Ingest Distiller, Context Capsule Retrieval, and Relationship/Tension Deriver.
+- Kept the existing first-stage plan for `src/lib/prompts/rpg-ingest.ts` and `src/lib/prompts/rpg-page-guidance.ts` unchanged.
+
+### Validation
+
+- Documentation-only change; no automated tests were run.
+
+### Scope notes
+
+- No production code was modified.
+- No ingest prompt, parser, writer, lint, distiller, context compiler, or deriver behavior was changed in this pass.
+- No `git commit` or `git push` was performed.
+
+## 2026-06-06 - Final Architecture Runtime-Oriented Ingest Alignment
+
+### Stage
+
+Planning/documentation update for the final architecture ingest layer.
+
+### Changed files
+
+- `docs/LLMWIKIRPG_FINAL_ARCHITECTURE.md`
+- `docs/CURRENT_STATE.md`
+- `docs/IMPLEMENTATION_LOG.md`
+
+### Summary
+
+- Replaced the old Ingest layer description with a runtime-oriented ingest architecture aligned with `docs/RPG_RUNTIME_ORIENTED_INGEST_PLAN.md`.
+- Reframed ingest as a lossy RPG runtime compiler rather than an ordinary encyclopedia generator.
+- Added the three-layer ingest model: source evidence layer, RP signal layer, and runtime page layer.
+- Added RP utility scoring, `Runtime Capsule` as the ingest/runtime contract, directory-specific runtime goals, source-type routing guidance, and future quality lint / post-ingest distiller notes.
+- Preserved the existing static/live write boundary: ordinary static ingest still must not update live `current-scene/`, and legacy FILE block paths remain forbidden.
+
+### Validation
+
+- Documentation-only change; no automated tests were run.
+
+### Scope notes
+
+- No production code was modified.
+- No ingest prompt, parser, writer, lint, distiller, or context compiler behavior was changed in this pass.
+- No `git commit` or `git push` was performed.
+
+## 2026-06-06 - Stage 6.12 Runtime Contract Alignment v0
+
+### Stage
+
+Stage 6.12: Runtime Contract Alignment v0.
+
+### Changed files
+
+- `src/lib/rpg-runtime/types.ts`
+- `src/lib/rpg-runtime/context-compiler.ts`
+- `src/lib/rpg-interactions/wiki-update-policy.ts`
+- `src/lib/rpg-interactions/narration-interaction.ts`
+- `src/lib/project-mode.ts`
+- `src-tauri/src/commands/project.rs`
+- `src/lib/project-mode.test.ts`
+- `src/lib/wiki-page-types.test.ts`
+- `src/lib/wiki-type-style.test.ts`
+- `src/lib/rpg-runtime.test.ts`
+- `src/lib/rpg-turn-model.test.ts`
+- `src/lib/rpg-interactions.test.ts`
+- `src/lib/rpg-write-policy.test.ts`
+- `src/lib/rpg-state-extractor.test.ts`
+- `src/lib/rpg-narration-prompts.test.ts`
+- `src/lib/rpg-llm-narration-adapter.test.ts`
+- `src/components/rpg/rpg-runtime-panel.test.tsx`
+- `docs/LLMWIKIRPG_FINAL_ARCHITECTURE.md`
+- `docs/LLMWIKIRPG_NEXT_ARCHITECTURE_STEPS.md`
+- `docs/LLMWIKIRPG_USAGE.md`
+- `docs/CURRENT_STATE.md`
+- `docs/IMPLEMENTATION_LOG.md`
+
+### Summary
+
+- Defined `wiki/quests/` as the Stage 6.12 objective tracking directory for goals, tasks, blockers, completion state, and accepted runtime objective changes.
+- Added `activeQuests` to `CompactStoryBrief`.
+- Added `quests` to the context compiler allowed RPG runtime directories and fixed-read compilation path. Context Compiler v0 now reads `wiki/quests/*.md`, strips unchosen action-option sections, formats quest pages into `brief.activeQuests`, and includes quest pages in `brief.references`.
+- Added `wiki/quests/*.md | merge` to the shared runtime update target policy in `src/lib/rpg-interactions/wiki-update-policy.ts`.
+- Kept extractor and write policy aligned through the shared target policy: `validateRpgRuntimeUpdateTarget("wiki/quests/main.md", "merge")` passes, while quests with `overwrite` or `append` fail.
+- Confirmed stable/manual/base/legacy protections remain in force: `wiki/style/`, `wiki/rules/`, `wiki/sources/`, `wiki/memory/`, base `characters` / `locations` / `factions` / `items`, and legacy directories still fail runtime update/write validation.
+- Added `Active Quests` to the narration prompt so objective tracking notes from `CompactStoryBrief.activeQuests` reach narration generation.
+- Confirmed `cleanRpgReferences()` allows quest references and continues filtering legacy `entities` / `concepts` / `queries` references.
+- Confirmed UI/type/display handling already recognizes quests and added focused recognition/style coverage without redesigning UI or adding runtime panels.
+- Aligned frontend and Rust bootstrap schema wording so `wiki/quests/` is described as objective tracking with manual/runtime merge semantics.
+- Updated architecture, usage, current-state, and roadmap docs so quests are no longer listed as an unresolved runtime contract gap and Stage 6.13 `Runtime Persistence v0` is the next architecture stage.
+
+### Validation
+
+- `npx.cmd vitest run src/lib/project-mode.test.ts src/lib/wiki-page-types.test.ts src/lib/wiki-type-style.test.ts src/lib/rpg-runtime.test.ts src/lib/rpg-turn-model.test.ts src/lib/rpg-interactions.test.ts src/lib/rpg-write-policy.test.ts src/lib/rpg-state-extractor.test.ts src/lib/rpg-runtime-controller.test.ts src/components/rpg/rpg-runtime-panel.test.tsx` passed.
+  - 10 test files passed.
+  - 102 tests passed.
+- `npx.cmd vitest run src/lib/rpg-narration-prompts.test.ts src/lib/rpg-llm-narration-adapter.test.ts` passed.
+  - 2 test files passed.
+  - 16 tests passed.
+- `npm.cmd run typecheck` passed.
+
+### Scope notes
+
+- Stage 6.12 does not implement runtime persistence.
+- Stage 6.12 does not implement apply-after-write UI refresh.
+- Stage 6.12 does not implement runtime update semantic validation v1.
+- Stage 6.12 does not implement section-aware merge.
+- Stage 6.12 does not implement Context Compiler v1.
+- Stage 6.12 does not implement relationship derivation, outline impact detection, or outline regeneration.
+- Stage 6.12 does not call a real LLM.
+- Stage 6.12 does not modify ingest flow.
+- Stage 6.12 does not reintroduce legacy/default support.
+- Unchosen `nextActionOptions` remain excluded from completed turn records, proposed updates, pending updates, write policy input, and quest brief content.
+- No `git commit` or `git push` was performed.
+
+## 2026-06-06 - Runtime Roadmap Recalibration After Stage 6.11
+
+### Stage
+
+Planning/documentation update after reviewing the current Stage 6.11 implementation state.
+
+### Changed files
+
+- `docs/LLMWIKIRPG_NEXT_ARCHITECTURE_STEPS.md`
+- `docs/LLMWIKIRPG_FINAL_ARCHITECTURE.md`
+- `docs/LLMWIKIRPG_USAGE.md`
+- `docs/CURRENT_STATE.md`
+- `docs/IMPLEMENTATION_LOG.md`
+
+### Summary
+
+- Reframed future implementation so the next target is Stage 6.12 `Runtime Contract Alignment v0`, rather than jumping directly to outline impact detection.
+- Added a new future sequence: runtime contract alignment, runtime persistence, apply-refresh UI reliability, runtime update semantic validation, section-aware merge, Context Compiler v1, relationship/tension derivation, outline impact detection, outline regeneration, and project audit/evaluation.
+- Preserved the completed Stage 1-6.11 implementation records and updated only future-direction sections.
+- Updated the final architecture gap list so the Stage 1-6.11 runtime loop, pending review/apply UI, interaction boundaries, and write policy are treated as existing capabilities.
+- Updated usage notes to reflect the current RPG-only `wikiMode: llmwikirpg` boundary and the remaining runtime stability limits.
+
+### Validation
+
+- Documentation-only change; no automated tests were run.
+
+### Scope notes
+
+- No production code was modified.
+- No completed Stage 1-6.11 implementation record was rewritten.
+- No `git commit` or `git push` was performed.
+
+## 2026-06-06 - Stage 6.11 RPG LLM Interaction Boundary Consolidation v0
+
+### Stage
+
+Stage 6.11: RPG LLM Interaction Boundary Consolidation v0.
+
+### Changed files
+
+- `src/lib/rpg-interactions/interaction-spec.ts`
+- `src/lib/rpg-interactions/narration-interaction.ts`
+- `src/lib/rpg-interactions/llm-runtime-update-adapter.ts`
+- `src/lib/rpg-interactions/index.ts`
+- `src/lib/rpg-runtime/narration-prompts.ts`
+- `src/lib/rpg-runtime/narration-adapter.ts`
+- `src/lib/rpg-runtime/llm-narration-adapter.ts`
+- `src/lib/rpg-runtime/turn-orchestrator.ts`
+- `src/components/rpg/rpg-runtime-panel.tsx`
+- `src/lib/rpg-interactions.test.ts`
+- `src/lib/rpg-narration-prompts.test.ts`
+- `src/lib/rpg-llm-narration-adapter.test.ts`
+- `src/lib/rpg-runtime-controller.test.ts`
+- `src/components/rpg/rpg-runtime-panel.test.tsx`
+- `docs/CURRENT_STATE.md`
+- `docs/IMPLEMENTATION_LOG.md`
+
+### Summary
+
+- Extended `RpgInteractionKind` with `"narration"`.
+- Added `narrationInteractionSpec` under `src/lib/rpg-interactions/`, moving the RPG narration prompt contract into the interaction layer.
+- Added narration parse support that extracts fenced JSON, generic fenced JSON, bare JSON, and prose-wrapped JSON, then validates through `validateRpgTurnResult()`.
+- Kept `src/lib/rpg-runtime/narration-prompts.ts` as a compatibility wrapper exporting the existing `buildRpgNarrationPrompt()` API while delegating to `narrationInteractionSpec.buildPrompt()`.
+- Refactored `createLlmRpgNarrationAdapter()` so it still owns `streamChat()` but delegates output parsing to the narration interaction boundary instead of carrying the JSON extraction/validation logic itself.
+- Added `createLlmRpgRuntimeUpdateInteractionAdapter()` under `src/lib/rpg-interactions/`. It streams an `RpgInteractionPrompt` to the configured LLM and returns raw text only.
+- Exported the new narration interaction and runtime update LLM adapter from `src/lib/rpg-interactions/index.ts`.
+- Updated `RpgRuntimePanelDependencies` with `createUpdateInteractionAdapter` and wired `submitRpgRuntimePanelAction()` to create both narration and runtime update interaction adapters before calling `runRpgRuntimeTurnFlow({ updateInteractionAdapter })`.
+- Preserved the controller's narration-block extraction fallback during Stage 6.11 while making the UI default path use the dedicated runtime update interaction. Redundancy Cleanup Phase 4 later removed that fallback and made the adapter required.
+- Added/updated tests for narration interaction kind, narration prompt boundary rules, fenced and bare JSON parsing, invalid `RpgTurnResult` rejection, runtime update LLM adapter raw streaming, LLM narration adapter parse delegation, controller adapter-priority behavior, and UI update-adapter injection.
+
+### Validation
+
+- `npx.cmd vitest run src/lib/rpg-interactions.test.ts src/lib/rpg-narration-prompts.test.ts src/lib/rpg-llm-narration-adapter.test.ts src/lib/rpg-runtime-controller.test.ts src/components/rpg/rpg-runtime-panel.test.tsx` passed.
+  - 5 test files passed.
+  - 66 tests passed.
+- `npm.cmd run typecheck` passed.
+
+### Scope notes
+
+- Stage 6.11 does not implement Stage 7 outline impact detection.
+- Stage 6.11 does not implement Stage 8 outline regeneration.
+- Stage 6.11 does not implement Stage 9 relationship/tension derivation.
+- Stage 6.11 does not add wiki write paths.
+- Stage 6.11 does not modify ingest.
+- Stage 6.11 does not automatically accept or reject pending updates.
+- Stage 6.11 does not call `applyRpgPendingUpdates()` automatically.
+- Stage 6.11 does not remove the legacy controller fallback for narration `rpg-wiki-update` blocks.
+- No `git commit` or `git push` was performed.
+
+## 2026-06-06 - Stage 6.10 Runtime Update Interaction Controller Integration v0
+
+### Stage
+
+Stage 6.10: Runtime Update Interaction Controller Integration v0.
+
+### Changed files
+
+- `src/lib/rpg-interactions/runtime-update-adapter.ts`
+- `src/lib/rpg-interactions/index.ts`
+- `src/lib/rpg-runtime/runtime-controller.ts`
+- `src/lib/rpg-interactions.test.ts`
+- `src/lib/rpg-runtime-controller.test.ts`
+- `docs/CURRENT_STATE.md`
+- `docs/IMPLEMENTATION_LOG.md`
+
+### Summary
+
+- Added `RpgRuntimeUpdateInteractionAdapter` as the injectable adapter boundary for runtime update proposal generation.
+- Added `createFixtureRuntimeUpdateInteractionAdapter()` so tests can provide deterministic raw interaction output without calling a real LLM.
+- Exported the new adapter type/helper from `src/lib/rpg-interactions`.
+- Extended `RunRpgRuntimeTurnFlowInput` with optional `updateInteractionAdapter` at the time; Redundancy Cleanup Phase 4 later made it required.
+- Updated `runRpgRuntimeTurnFlow()` so adapter-driven callers first complete the existing `runRpgTurn()` path, then build a runtime update prompt from the completed `RpgTurnRecord`, call `updateInteractionAdapter.generateUpdateProposal(prompt)`, parse the raw output with `runtimeUpdateInteractionSpec.parseOutput()`, and stage the resulting proposed updates with `createPendingRpgUpdates()`.
+- Preserved the transition path when no update interaction adapter was injected at the time. Redundancy Cleanup Phase 4 later removed that path; `extractRpgStateUpdates()` remains as the interaction output parser.
+- Kept controller warnings merged from turn orchestration plus update interaction parse warnings.
+- Added tests proving injected interaction output wins over narration update blocks, interaction output can create pending updates even when narration has no `rpg-wiki-update` block, invalid interaction targets become warnings with no proposed update, and the update prompt does not include unchosen `nextActionOptions` text.
+
+### Validation
+
+- `npx.cmd vitest run src/lib/rpg-runtime-controller.test.ts src/lib/rpg-interactions.test.ts src/lib/rpg-state-extractor.test.ts src/lib/rpg-update-staging.test.ts src/lib/rpg-write-policy.test.ts src/lib/rpg-turn-orchestrator.test.ts src/lib/rpg-narration-prompts.test.ts` passed.
+  - 7 test files passed.
+  - 65 tests passed.
+- `npm.cmd run typecheck` passed.
+
+### Scope notes
+
+- Stage 6.10 does not call a real LLM.
+- Stage 6.10 does not write wiki files.
+- Stage 6.10 does not call `applyRpgPendingUpdates()`.
+- Stage 6.10 does not automatically accept or reject pending updates.
+- Stage 6.10 does not modify UI.
+- Stage 6.10 does not modify ingest.
+- Stage 6.10 does not implement outline impact detection, outline regeneration, relationship/tension derivation, or any Stage 7-9 behavior.
+- No `git commit` or `git push` was performed.
+
+## 2026-06-06 - Stage 6.9 RPG Interaction Contract v0
+
+### Stage
+
+Stage 6.9: RPG Interaction Contract v0.
+
+### Changed files
+
+- `src/lib/rpg-interactions/interaction-spec.ts`
+- `src/lib/rpg-interactions/runtime-update-interaction.ts`
+- `src/lib/rpg-interactions/wiki-update-policy.ts`
+- `src/lib/rpg-interactions/index.ts`
+- `src/lib/rpg-runtime/state-extractor.ts`
+- `src/lib/rpg-runtime/write-policy.ts`
+- `src/lib/rpg-interactions.test.ts`
+- `docs/CURRENT_STATE.md`
+- `docs/IMPLEMENTATION_LOG.md`
+
+### Summary
+
+- Added the generic `RpgInteractionSpec<TInput, TOutput>` contract with `kind`, `buildPrompt()`, and `parseOutput()` to describe future RPG interaction flows.
+- Added `runtimeUpdateInteractionSpec` as the first concrete interaction, focused on runtime state update proposals from a completed `RpgTurnRecord`.
+- The runtime update prompt explicitly limits facts to `submittedAction + generatedNarrative + references`, excludes unchosen `nextActionOptions`, and tells the model it may only propose updates rather than claim wiki writes.
+- The prompt lists the allowed runtime target rules and keeps the first-version `rpg-wiki-update` fenced-block protocol.
+- Added shared runtime update target policy helpers: `getRpgRuntimeUpdateTargetRules()` and `validateRpgRuntimeUpdateTarget()`.
+- Reused the shared target policy from both the existing `extractRpgStateUpdates()` path and `applyRpgPendingUpdates()` write policy, keeping deterministic validation aligned.
+- Added focused tests for allowed and rejected runtime targets, prompt contents, parseOutput conversion to `ProposedWikiUpdate[]`, invalid path warnings, and read/write-free helper behavior.
+
+### Validation
+
+- `npx.cmd vitest run src/lib/rpg-interactions.test.ts src/lib/rpg-state-extractor.test.ts src/lib/rpg-update-staging.test.ts src/lib/rpg-write-policy.test.ts src/lib/rpg-runtime-controller.test.ts src/lib/rpg-turn-orchestrator.test.ts src/lib/rpg-narration-prompts.test.ts` passed.
+  - 7 test files passed.
+  - 60 tests passed.
+- `npm.cmd run typecheck` passed.
+
+### Scope notes
+
+- Stage 6.9 does not call a real LLM.
+- Stage 6.9 does not automatically connect `runtimeUpdateInteractionSpec` to `runRpgRuntimeTurnFlow()`.
+- Stage 6.9 does not modify UI.
+- Stage 6.9 does not call `applyRpgPendingUpdates()`.
+- Stage 6.9 does not write wiki files.
+- Stage 6.9 does not implement relationship derivation, outline impact detection, outline regeneration, or other Stage 7-9 behavior.
+- Existing runtime controller behavior is intentionally preserved for this stage.
+- No `git commit` or `git push` was performed.
+
 ## 2026-06-06 - Stage 6.8 Pending RPG Updates Review + Apply UI v0
 
 ### Stage
@@ -936,7 +3421,7 @@ Post-v0.2 prompt refinement follow-up: merge the former Stage 1 routing-boundary
 
 ### Summary
 
-- Merged `player_character`, `current_scene_state`, `discrete_event`, `plot_arc`, `relationship`, `character_trait_or_trivia`, `wiki_noise`, `location`, and `faction` boundary warnings into their glossary definitions.
+- Merged player-character, former current-scene-state, discrete-event, plot-arc, relationship, character-trait/trivia, wiki-noise, location, and faction boundary warnings into their glossary definitions.
 - Replaced the old per-type `Routing boundaries` block with a smaller `Routing discipline` block for the general one-best-route rule.
 - Strengthened prompt tests to assert that the key boundary warnings are present in the glossary and that the old `Routing boundaries:` heading is gone.
 
@@ -988,7 +3473,7 @@ Post-v0.2 prompt refinement: add schema-derived one-line `object_type` definitio
 
 ### Stage
 
-Post-v0.2 current-scene marker gate hardening: replace live/current-scene heuristic admission with the explicit `[RPG-LIVE]` input marker.
+Post-v0.2 current-scene marker gate hardening: replaced live/current-scene heuristic admission with an explicit input marker. This historical design has now been superseded by the ordinary-ingest block.
 
 ### Changed files
 
@@ -1010,9 +3495,9 @@ Post-v0.2 current-scene marker gate hardening: replace live/current-scene heuris
 
 ### Summary
 
-- Prompt changes: Stage 1 now includes `live_runtime_input`, `live_input_marker: [RPG-LIVE] | none`, and explicit rules that `current-scene` plus `live_scene_allowed: true` require the exact `[RPG-LIVE]` marker.
-- Stage 2 guidance now parses `live_scene_allowed` and filters `current-scene` out of focused contracts unless it is explicitly `true`; blocked focused guidance emits a REVIEW note.
-- Writer validation now allows `wiki/current-scene/` writes only when `context.sourceText` contains `[RPG-LIVE]`; unmarked `Current scene:`, `session`, `turn`, `scene`, `GM:`, and `Player:` signals are diagnostic hints only.
+- Prompt changes at that historical point added live-input profile fields and explicit rules for a marker-gated `current-scene` path.
+- Stage 2 guidance at that historical point parsed a live-scene flag and filtered `current-scene` out of focused contracts unless it was explicitly enabled; this is now superseded by the ordinary-ingest block.
+- Writer validation at that historical point allowed `wiki/current-scene/` writes only when the source contained the old marker; this is now superseded by the ordinary-ingest block.
 - Docs now record the marker gate in schema, dynamic update strategy, usage workflow, v0.2 evaluation plan, implementation summary, and current-state handoff.
 
 ### Validation
@@ -1086,7 +3571,7 @@ Post-Phase-5 prompt trimming follow-up: make RPG Stage 2 focused directory contr
 
 ### Summary
 
-- Added a required RPG Stage 1 `## Source Profile` structure with `source_kind`, `dominant_focus`, `needed_categories`, `suppressed_categories`, `live_scene_allowed`, and `event_extraction_mode`.
+- Added a required RPG Stage 1 `## Source Profile` structure with `source_kind`, `dominant_focus`, `needed_categories`, `suppressed_categories`, and `event_extraction_mode`; a former live-scene flag from that era is no longer part of the current prompt contract.
 - Reworked RPG Stage 2 focused guidance so `needed_categories` from Stage 1 is the only category-selection input.
 - Removed the previous focused-category inference path from schema, purpose, source filename, source summary path, `object_type`, and `suggested_route`.
 - Kept `sources/` summary generation, `wiki/index.md`, `wiki/log.md`, and `wiki/overview.md` under the minimal RPG generation contract rather than `needed_categories`.
@@ -1849,7 +4334,7 @@ Post-v1 extraction-quality fix: restrict `current-scene/` writes to explicit liv
 ### Summary
 
 - Tightened the schema-level `current-scene/` boundary so it now explicitly accepts only live RPG scene/session inputs such as current session logs, post-action latest state, GM or user-declared current scene, or opening-scene initialization.
-- Tightened RPG analysis and generation prompts so `current_scene_state` now lists both the allowed live-input cases and the disallowed static-source cases, including the required explicit current-scene example and the blocked `HF True End` flower-viewing example.
+- Tightened RPG analysis and generation prompts so the then-current scene-state type listed both the allowed live-input cases and the disallowed static-source cases, including the required explicit current-scene example and the blocked `HF True End` flower-viewing example.
 - Extended writer-side RPG validation so `wiki/current-scene/` writes are rejected before hitting disk when the source looks like static encyclopedia, ending-summary, biography, world-lore, or route-summary material.
 - Applied that validation to both the main `autoIngest` write path and the manual `executeIngestWrites` path so `current-scene/` gating does not depend on which ingest flow was used.
 - Kept the gate intentionally lightweight: live session-like source-path markers such as `session-*` or `turn-*` still allow normal runtime snapshot writes, while static markers like `ending`, `true end`, `years later`, and `赏花场景` block them.
@@ -1928,9 +4413,9 @@ Post-v1 extraction-quality fix: require object-type classification before RPG di
 ### Summary
 
 - Updated RPG analysis prompt guidance so candidate objects must be classified into one `object_type` before any wiki directory is chosen.
-- Added the required 13-type classification list directly into the RPG analysis and generation prompts: `source`, `world_fact`, `npc_character`, `player_character`, `location`, `faction`, `item`, `plot_arc`, `discrete_event`, `current_scene_state`, `relationship`, `character_trait_or_trivia`, and `wiki_noise`.
+- Added the required classification list directly into the RPG analysis and generation prompts, including the then-current scene-state type alongside source, world, character, location, faction, item, plot, event, relationship, trait/trivia, and noise types.
 - Added explicit routing instructions for those types in generation guidance, including `world_fact -> wiki/world/` versus legacy-compatible `wiki/concepts/` fallback wording, `player_character -> wiki/player/` only under explicit current-PC evidence, `character_trait_or_trivia` merge-into-character behavior, and `wiki_noise` ignore behavior.
-- Tightened prompt wording so `current_scene_state` is only valid for runtime scene input or live session-state material, not static lore.
+- Tightened prompt wording so the then-current scene-state type was only valid for runtime scene input or live session-state material, not static lore.
 - Added explicit anti-filler guidance: do not invent pages just to populate directories, but still extract clearly or strongly implied places and organizations into `wiki/locations/` and `wiki/factions/`.
 - Updated analysis guidance so the model is asked to surface two explicit side lists when relevant: ignored `wiki_noise`, and trait/trivia merged into character pages.
 

@@ -1,5 +1,7 @@
 import fs from "node:fs/promises"
 import path from "node:path"
+import { validateRpgRuntimeUpdateTarget } from "../rpg-interactions/runtime/wiki-update-policy"
+import { mergeRpgSections } from "../rpg-section-merge"
 import type { RpgUpdateStrategy } from "./state-extractor"
 import type { PendingRpgUpdate } from "./update-staging"
 
@@ -79,7 +81,7 @@ export async function applyRpgPendingUpdates(
     }
 
     try {
-      await writeRuntimeUpdate(validation.absolutePath, update.content, validation.strategy)
+      await writeRuntimeUpdate(validation.absolutePath, update.content, validation.strategy, validation.targetPath)
       appliedUpdates.push({
         id: update.id,
         targetPath: validation.targetPath,
@@ -107,47 +109,25 @@ function validateRpgRuntimeWriteTarget(
 ): WriteTargetValidation {
   const targetPath = normalizeWikiPathForDisplay(update.targetPath)
 
-  if (!isRpgUpdateStrategy(update.strategy)) {
-    return { ok: false, targetPath, reason: `strategy "${update.strategy}" is not allowed.` }
+  const policy = validateRpgRuntimeUpdateTarget(update.targetPath, update.strategy)
+  if (!policy.ok) {
+    return { ok: false, targetPath, reason: policy.reason }
   }
 
-  const policy = strategyForRuntimeTarget(targetPath)
-  if (!policy) {
-    return { ok: false, targetPath, reason: `targetPath "${targetPath}" is outside allowed runtime write paths.` }
-  }
-
-  if (update.strategy !== policy) {
-    return { ok: false, targetPath, reason: `targetPath "${targetPath}" requires strategy "${policy}".` }
-  }
-
-  const absolutePath = path.resolve(projectRoot, ...targetPath.split("/"))
+  const absolutePath = path.resolve(projectRoot, ...policy.targetPath.split("/"))
   if (!isPathInsideOrEqual(absolutePath, wikiRoot)) {
-    return { ok: false, targetPath, reason: `targetPath "${targetPath}" escapes project wiki directory.` }
+    return { ok: false, targetPath: policy.targetPath, reason: `targetPath "${policy.targetPath}" escapes project wiki directory.` }
   }
 
-  return { ok: true, targetPath, strategy: update.strategy, absolutePath }
+  return { ok: true, targetPath: policy.targetPath, strategy: policy.strategy, absolutePath }
 }
 
-function strategyForRuntimeTarget(targetPath: string): RpgUpdateStrategy | null {
-  if (targetPath === "wiki/current-scene/scene_state.md") return "overwrite"
-  if (matchesDirectMarkdownChild(targetPath, "wiki/events/")) return "append"
-
-  if (
-    matchesDirectMarkdownChild(targetPath, "wiki/player/") ||
-    matchesDirectMarkdownChild(targetPath, "wiki/relationships/") ||
-    matchesDirectMarkdownChild(targetPath, "wiki/plot-arcs/") ||
-    matchesDirectMarkdownChild(targetPath, "wiki/characters/runtime/") ||
-    matchesDirectMarkdownChild(targetPath, "wiki/locations/runtime/") ||
-    matchesDirectMarkdownChild(targetPath, "wiki/factions/runtime/") ||
-    matchesDirectMarkdownChild(targetPath, "wiki/items/runtime/")
-  ) {
-    return "merge"
-  }
-
-  return null
-}
-
-async function writeRuntimeUpdate(absolutePath: string, content: string, strategy: RpgUpdateStrategy): Promise<void> {
+async function writeRuntimeUpdate(
+  absolutePath: string,
+  content: string,
+  strategy: RpgUpdateStrategy,
+  targetPath: string,
+): Promise<void> {
   await fs.mkdir(path.dirname(absolutePath), { recursive: true })
 
   if (strategy === "overwrite") {
@@ -157,7 +137,8 @@ async function writeRuntimeUpdate(absolutePath: string, content: string, strateg
 
   if (strategy === "append" || strategy === "merge") {
     const existing = await readOptionalFile(absolutePath)
-    await fs.writeFile(absolutePath, appendSection(existing, content), "utf-8")
+    const nextContent = strategy === "append" ? appendSection(existing, content) : mergeRuntimeSections(existing, content, targetPath)
+    await fs.writeFile(absolutePath, nextContent, "utf-8")
   }
 }
 
@@ -176,19 +157,26 @@ function appendSection(existing: string, content: string): string {
   return `${existing.trimEnd()}\n\n${nextContent}\n`
 }
 
+function mergeRuntimeSections(existing: string, content: string, targetPath: string): string {
+  const nextContent = content.trim()
+  if (!existing.trim()) return formatWriteContent(nextContent)
+
+  const result = mergeRpgSections(nextContent, {
+    pagePath: targetPath,
+    existingContent: existing,
+    incomingContent: nextContent,
+    preserveExistingSections: true,
+    preserveExistingFrontmatter: true,
+    preserveExistingBodyPrefix: true,
+  })
+  if (result.warnings.length > 0) {
+    console.warn(`[rpg-runtime-write] section merge for ${targetPath}: ${result.warnings.join(" | ")}`)
+  }
+  return formatWriteContent(result.content)
+}
+
 function formatWriteContent(content: string): string {
   return `${content.trimEnd()}\n`
-}
-
-function matchesDirectMarkdownChild(targetPath: string, prefix: string): boolean {
-  if (!targetPath.startsWith(prefix) || !targetPath.endsWith(".md")) return false
-
-  const rest = targetPath.slice(prefix.length)
-  return rest.length > ".md".length && !rest.includes("/")
-}
-
-function isRpgUpdateStrategy(value: string): value is RpgUpdateStrategy {
-  return value === "overwrite" || value === "append" || value === "merge"
 }
 
 function normalizeWikiPathForDisplay(targetPath: string): string {

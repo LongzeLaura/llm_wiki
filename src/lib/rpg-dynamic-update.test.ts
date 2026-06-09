@@ -178,7 +178,7 @@ describe("validateRpgDynamicWrite", () => {
     expect(result.warnings[0]).toContain("wiki/plot-arcs/")
   })
 
-  it("allows current-scene pages when the source explicitly declares the live scene", () => {
+  it("rejects current-scene pages even when ordinary source text declares a live scene", () => {
     const content = [
       "---",
       'type: "current-scene"',
@@ -192,11 +192,12 @@ describe("validateRpgDynamicWrite", () => {
 
     const result = validateRpgDynamicWrite("wiki/current-scene/scene_state.md", content, {
       sourcePath: "raw/sources/session-03.md",
-      sourceText: "[RPG-LIVE]\nCurrent scene: the player is standing at the Fuyuki church gate. GM notes that the church interior is lit by candlelight.",
+      sourceText: "Current scene: the player is standing at the Fuyuki church gate. GM notes that the church interior is lit by candlelight.",
     })
 
-    expect(result.allowWrite).toBe(true)
-    expect(result.warnings).toEqual([])
+    expect(result.allowWrite).toBe(false)
+    expect(result.warnings[0]).toContain("ordinary ingest")
+    expect(result.warnings[0]).toContain("RPG Play/Runtime apply flow")
   })
 
   it("rejects unmarked Current scene input even when it looks like live play", () => {
@@ -217,7 +218,7 @@ describe("validateRpgDynamicWrite", () => {
     })
 
     expect(result.allowWrite).toBe(false)
-    expect(result.warnings[0]).toContain("[RPG-LIVE]")
+    expect(result.warnings[0]).toContain("ordinary ingest")
     expect(result.warnings[0]).toContain("wiki/current-scene/")
   })
 })

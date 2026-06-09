@@ -5,7 +5,11 @@ export { RpgPlayPanel } from "./rpg-play-panel"
 export {
   RpgRuntimePanel,
   applyRpgRuntimePanelAcceptedUpdates,
+  didApplyCurrentSceneOverwrite,
+  getAppliedRpgUpdatePaths,
   loadRpgCurrentScene,
+  loadRpgRuntimePanelPendingUpdates,
+  saveRpgRuntimePanelPendingUpdates,
   submitRpgRuntimePanelAction,
 } from "./rpg-runtime-panel"
 export { TurnNarrativePanel } from "./turn-narrative-panel"

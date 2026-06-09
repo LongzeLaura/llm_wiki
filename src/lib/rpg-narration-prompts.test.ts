@@ -1,7 +1,7 @@
 import { describe, expect, it, afterEach } from "vitest"
 import fs from "node:fs/promises"
 import { createTempProject, readFileRaw, writeFileRaw } from "@/test-helpers/fs-temp"
-import { buildRpgNarrationPrompt } from "./rpg-runtime"
+import { buildRpgNarrationPrompt } from "./rpg-interactions/runtime"
 import type { CompactStoryBrief } from "./rpg-runtime"
 
 interface Ctx {
@@ -36,6 +36,8 @@ describe("RPG Narration Prompt Builder", () => {
     expect(combined).toContain("The River Port is under curfew")
     expect(combined).toContain("Trust between Iven and Mira is rising but fragile")
     expect(combined).toContain("The sealed canal gate is an active pressure point")
+    expect(combined).toContain("The main outline keeps the gate patron hidden until the sigil is decoded")
+    expect(combined).toContain("Open the canal gate without alerting the Harbor Watch")
     expect(combined).toContain("Keep prose tense and grounded")
     expect(combined).toContain("Cannot open a warded gate without a key or ritual")
     expect(combined).toContain("Mira dislikes grandstanding")
@@ -83,7 +85,7 @@ describe("RPG Narration Prompt Builder", () => {
   })
 
   it("does not read or write wiki files while building prompts", async () => {
-    ctx = { tmp: await createTempProject("rpg-narration-prompts-readonly") }
+    ctx = { tmp: await createTempProject("rpg-narration-contract-readonly") }
     const projectPath = ctx.tmp.path
 
     await writeFileRaw(`${projectPath}/wiki/current-scene/scene_state.md`, "# Current Scene\n\nThe door is closed.")
@@ -112,6 +114,8 @@ function sampleBrief(): CompactStoryBrief {
     presentCharacters: ["Mira is alert, injured, and suspicious of loud magic."],
     relationshipTensions: ["Trust between Iven and Mira is rising but fragile."],
     activePlotPressure: ["The sealed canal gate is an active pressure point."],
+    outlineNotes: ["The main outline keeps the gate patron hidden until the sigil is decoded."],
+    activeQuests: ["Open the canal gate without alerting the Harbor Watch."],
     relevantLocations: ["wiki/locations/river-port.md: Old sluices connect to the lower city."],
     relevantFactions: ["wiki/factions/harbor-watch.md: Patrols enforce the curfew."],
     relevantItems: ["wiki/items/lantern-key.md: Brass key tied to canal wards."],

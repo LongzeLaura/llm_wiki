@@ -118,7 +118,96 @@
     "confirm": "Confirm",
     "loadingMore": "Loading more sources...",
     "sourceCount": "{{count}} source",
-    "sourceCount_plural": "{{count}} sources"
+    "sourceCount_plural": "{{count}} sources",
+    "rpgImport": {
+      "openButton": "Import to RPG Project",
+      "title": "Import to RPG Project",
+      "description": "Choose what this file means inside the RPG wiki.",
+      "semanticLabel": "Import semantic",
+      "chooseFiles": "Choose files",
+      "chooseFile": "Choose one file",
+      "noFileSelected": "Choose a file to import first.",
+      "singleFileRequired": "This import semantic handles one file at a time.",
+      "questName": "Quest name (optional)",
+      "questNamePlaceholder": "Example: Moon Gate Promise",
+      "relationshipName": "Relationship name (optional)",
+      "relationshipNamePlaceholder": "Example: Mira",
+      "confirmCurrentScene": "Confirm current-scene bootstrap",
+      "confirmCurrentSceneHint": "When checked, this file writes the opening current-scene snapshot.",
+      "confirmControlOverwrite": "Allow replacing an existing control document",
+      "confirmControlOverwriteHint": "When unchecked, existing high-risk control documents go to review or skipped instead of being silently replaced.",
+      "selectedFiles": "Selected files",
+      "noFiles": "No file selected",
+      "resultsTitle": "Import result",
+      "addedToReview": "Review panel: {{count}}",
+      "actions": {
+        "openRelated": "Open related page",
+        "skip": "Skip"
+      },
+      "results": {
+        "warnings": "Warnings",
+        "reviewItems": "Review Items",
+        "writtenPaths": "Written Paths",
+        "skipped": "Skipped Paths",
+        "none": "None"
+      },
+      "close": "Close",
+      "import": "Import",
+      "groups": {
+        "controlDoc": "Control Documents",
+        "campaignSetup": "Campaign Setup"
+      },
+      "options": {
+        "sourceIngest": {
+          "label": "Ordinary source material",
+          "description": "Copy into raw/sources and send through the existing ordinary source ingest queue."
+        },
+        "controlDoc": {
+          "main_outline": {
+            "label": "Control doc: main outline",
+            "description": "Import into wiki/outlines/main.md with review or explicit confirmation by default."
+          },
+          "outline_progress": {
+            "label": "Control doc: outline progress",
+            "description": "Import into wiki/outlines/progress.md to initialize play progress against the outline."
+          },
+          "rules_core": {
+            "label": "Control doc: core rules",
+            "description": "Import into wiki/rules/core.md while preserving rule semantics instead of lossy source extraction."
+          },
+          "style_narration": {
+            "label": "Control doc: narration style",
+            "description": "Import into wiki/style/narration.md while preserving global narration guidance."
+          }
+        },
+        "campaignSetup": {
+          "player_main": {
+            "label": "Campaign setup: player profile",
+            "description": "Import into wiki/player/player.md as the opening fixed player slot profile."
+          },
+          "current_scene": {
+            "label": "Campaign setup: current scene",
+            "description": "Import into wiki/current-scene/scene_state.md with explicit bootstrap confirmation."
+          },
+          "events_prologue": {
+            "label": "Campaign setup: prologue event",
+            "description": "Import into wiki/events/prologue.md with already-happened prologue facts only."
+          },
+          "main_quest": {
+            "label": "Campaign setup: main quest",
+            "description": "Import into wiki/quests/main.md as the opening tracked objective."
+          },
+          "quest": {
+            "label": "Campaign setup: quest",
+            "description": "Import into wiki/quests/<name>.md; an optional quest name can be provided."
+          },
+          "player_relationship": {
+            "label": "Campaign setup: player relationship",
+            "description": "Import into wiki/relationships/player-<name>.md; an optional relationship name can be provided."
+          }
+        }
+      }
+    }
   },
   "chat": {
     "placeholder": "Ask about your wiki...",
@@ -302,11 +391,7 @@
         "lastErrorHeading": "Last embedding error",
         "reindexAll": "Re-index all pages",
         "reindexing": "Indexing {{done}}/{{total}}…",
-        "reindexDone": "Indexed {{count}} pages.",
-        "legacyPromptTitle": "Legacy per-page index detected",
-        "legacyPromptBody": "Your project has {{count}} entries in the old per-page vector store. The new per-chunk index gives better retrieval but needs a one-time re-embed. Run \"Re-index all pages\" to upgrade.",
-        "dropLegacy": "Drop legacy index",
-        "dropLegacyDone": "Legacy index removed."
+        "reindexDone": "Indexed {{count}} pages."
       },
       "multimodal": {
         "title": "Image Captioning",
@@ -497,34 +582,10 @@
       },
       "maintenance": {
         "title": "Maintenance",
-        "description": "RPG-only maintenance tools will appear here. Legacy entity/concept duplicate cleanup is no longer exposed.",
+        "description": "RPG-only maintenance tools will appear here as runtime audits are added.",
         "rpgOnly": {
           "title": "RPG runtime maintenance",
-          "description": "llmWikiRPG keeps legacy llm_wiki cleanup actions hidden. Future maintenance actions should operate on RPG runtime directories such as current-scene, events, relationships, and memory."
-        },
-        "noProject": "Open a project first.",
-        "noLlm": "Configure an LLM provider first.",
-        "dedup": {
-          "title": "Detect duplicate entities / concepts",
-          "description": "Asks the LLM to scan all entity / concept pages and group ones that likely refer to the same topic under different names (English vs Chinese, plural vs singular, abbreviation vs full form). You confirm each group before merging. Merges are queued and run one at a time so cross-references stay consistent.",
-          "scanButton": "Scan for duplicates",
-          "scanning": "Scanning…",
-          "noneFound": "No duplicate groups found. The wiki is clean.",
-          "candidates": "{{n}} candidates",
-          "canonicalLabel": "Keep this slug as canonical:",
-          "mergeButton": "Merge into {{slug}}",
-          "merging": "Merging…",
-          "queued": "Queued",
-          "queuedAhead": "Queued ({{n}} ahead)",
-          "failed": "Failed ({{retries}}/3)",
-          "cancel": "Cancel",
-          "retry": "Retry",
-          "delete": "Delete",
-          "queueTitle": "In-progress merges",
-          "queueDescription": "Tasks queued from a previous scan that haven't finished yet. Merges run one at a time.",
-          "notDuplicates": "Not duplicates",
-          "merged": "Merged",
-          "skipped": "Marked not duplicates"
+          "description": "Future maintenance actions should operate on RPG runtime directories such as current-scene, events, relationships, and memory."
         }
       },
       "changelog": {

@@ -33,7 +33,7 @@ The rest of the dynamic directories must update around those boundaries rather t
 
 | Directory | Semantic role | Write mode | Stage 07 rule |
 | -- | -- | -- | -- |
-| `wiki/current-scene/` | Current turn snapshot | Overwrite | Keep only the latest scene state. Never accumulate prior scenes here. Writes require source text with the exact `[RPG-LIVE]` marker. |
+| `wiki/current-scene/` | Current turn snapshot | Runtime overwrite only | Keep only the latest scene state. Never accumulate prior scenes here. Ordinary ingest must not write this directory; the RPG Play/Runtime apply flow owns the overwrite path. |
 | `wiki/events/` | Canonical happened history | Append | Only store already-happened events and consequences. Do not store next-step advice or future development sections here. |
 | `wiki/player/` | Player state | Merge | Preserve stable profile, but rewrite volatile state sections from the latest turn instead of carrying stale status forward. |
 | `wiki/characters/` | NPC and important character state | Merge | Preserve static profile, but rewrite volatile current-state sections from the latest turn. |
@@ -51,7 +51,7 @@ The rest of the dynamic directories must update around those boundaries rather t
 - `events` answers: what has already happened
 - If the scene changes, `current-scene` is replaced
 - If the change becomes historical fact, it is appended to `events`
-- `current-scene` is opened by an explicit marker gate: the source text must contain `[RPG-LIVE]`; unmarked session/current-scene wording is not enough.
+- Ordinary ingest never opens `current-scene`; session/current-scene wording should be routed to `events`, `plot-arcs`, `relationships`, `player`, or source notes unless it arrives through the RPG Play/Runtime apply path.
 
 ### `events` vs `plot-arcs`
 
@@ -78,11 +78,10 @@ Stage 07 adds only small writer-boundary rules:
    - Writes to `wiki/events/` are skipped when the generated page contains obvious future-planning section headings such as “Possible Directions”, “Next Steps”, or equivalent headings.
    - These sections should instead be emitted to `wiki/plot-arcs/`.
 
-3. Current-scene explicit marker gate
-   - Writes to `wiki/current-scene/` are skipped unless `context.sourceText` contains the exact `[RPG-LIVE]` marker.
-   - Earlier live session/current scene heuristic signals such as `Current scene:`, `session`, `turn`, `scene`, `GM:`, and `Player:` are now warning context only; they do not open the writer boundary by themselves.
+3. Current-scene ordinary-ingest block
+   - Writes to `wiki/current-scene/` are skipped in ordinary ingest regardless of source wording.
+   - `current-scene` is a runtime-owned snapshot maintained by the RPG Play/Runtime apply path, not by source ingest.
    - Static-source blocked markers are still kept so warnings can explain when a rejected source looks like encyclopedia, lore, route summary, ending, or epilogue material.
-   - `[RPG-LIVE]` is a control marker and must not be copied into wiki page content.
 
 4. Stale-state cleanup before merge
    - Before merge-based updates of `player`, `characters`, `relationships`, and `plot-arcs`, designated volatile sections are removed from the existing on-disk page.
@@ -112,7 +111,7 @@ The exact implementation is intentionally heading-based and minimal. It is not a
 After Stage 07, the writer path has a clearer contract:
 
 - `current-scene` stays a single latest snapshot
-- `current-scene` now uses an explicit `[RPG-LIVE]` marker gate instead of a live session/current scene heuristic
+- ordinary ingest no longer writes `current-scene`; runtime apply remains the dedicated overwrite path
 - `events` stays history-oriented
 - `plot-arcs` stays future- and structure-oriented
 - merge-based dynamic pages no longer keep stale “current state” sections by default

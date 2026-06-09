@@ -1,6 +1,14 @@
 import { RPG_CATEGORIES, type RpgCategory, type RpgCategoryId, getRpgCategoryById } from "./rpg-categories"
 
 export type RpgWikiUpdateStrategy = "append" | "cautious-merge" | "merge" | "overwrite"
+export type RpgSchemaSlotOwner = "source_ingest" | "control_doc" | "campaign_setup" | "runtime"
+export type RpgSchemaSlotRuntimePriority = "critical" | "high" | "normal" | "reference"
+export type RpgSchemaSlotImportPolicy =
+  | "ordinary_ingest"
+  | "controlled_canonicalize"
+  | "campaign_bootstrap"
+  | "runtime_apply"
+export type RpgSchemaSlotWritePolicy = "manual_or_review_only" | "merge" | "append" | "overwrite"
 
 export interface RpgWikiFieldDefinition {
   name: string
@@ -16,6 +24,61 @@ export interface RpgWikiSchemaEntry {
   exclude: readonly string[]
   updateStrategy: RpgWikiUpdateStrategy
   recommendedGranularity: string
+}
+
+export interface RpgSchemaSlot {
+  slotId: string
+  path: string
+  owner: RpgSchemaSlotOwner
+  requiredForNewProject: boolean
+  runtimePriority: RpgSchemaSlotRuntimePriority
+  importPolicy: RpgSchemaSlotImportPolicy
+  writePolicy: RpgSchemaSlotWritePolicy
+}
+
+export type RpgDirectoryBoundaryId =
+  | "player_goals"
+  | "quests"
+  | "plot_arcs"
+  | "rules"
+  | "world"
+  | "style"
+  | "characters"
+  | "relationships"
+  | "items"
+  | "player_inventory"
+
+export interface RpgDirectoryBoundaryGuidance {
+  boundaryId: RpgDirectoryBoundaryId
+  paths: readonly string[]
+  include: readonly string[]
+  exclude: readonly string[]
+  recommendedGranularity: string
+}
+
+export interface RpgRuntimeCrossDirectorySyncGuidance {
+  syncId: string
+  trigger: string
+  requiredTargets: readonly string[]
+  guidance: readonly string[]
+}
+
+export type RpgSourceIngestOtherMode =
+  | "control_doc_import"
+  | "campaign_setup_import"
+  | "runtime_update_apply"
+  | "review_only"
+
+export interface RpgSourceIngestForbiddenTarget {
+  pathPattern: string
+  reason: string
+  recommendedMode: RpgSourceIngestOtherMode
+}
+
+export interface RpgSourceIngestTargetPolicy {
+  ordinaryTargets: readonly string[]
+  structuralTargets: readonly string[]
+  forbiddenTargets: readonly RpgSourceIngestForbiddenTarget[]
 }
 
 const category = (id: RpgCategoryId): RpgCategory => {
@@ -180,7 +243,7 @@ export const RPG_WIKI_SCHEMA = [
     recommendedGranularity: "Use timeline plus one page per discrete happened event. Each event page should include at least a time or relative-time anchor, place, participants, what happened, and consequences/state change. If the material reads like a route, storyline, timeline, or complete course, spans many days or years, or contains 5+ independent sub-events, put it in plot-arcs or split it into multiple events instead of one event page.",
   }),
   defineSchema("current-scene", {
-    extractionGoal: "Keep only the latest immediate scene snapshot needed for the next RPG turn. Only generate or update this from explicit live RPG scene input such as current session logs, post-player-action latest state, GM or user-declared current scene, or opening-scene initialization.",
+    extractionGoal: "Runtime-owned latest immediate scene snapshot needed for the next RPG turn. Ordinary source ingest must not generate or update this category; it is maintained only by the RPG Play/Runtime apply flow.",
     fields: [
       { name: "time", description: "Current in-world time or immediate sequence marker." },
       { name: "place", description: "Current location and scene frame." },
@@ -197,7 +260,7 @@ export const RPG_WIKI_SCHEMA = [
       "Route summaries, flower-viewing ending scenes, or years-later epilogues written into current-scene",
     ],
     updateStrategy: "overwrite",
-    recommendedGranularity: "First version should use the exact single scene snapshot file current-scene/scene_state.md; do not invent alternate current-scene filenames. If the source is static lore or summary material, route ending/epilogue snapshots to events, plot-arcs, or character state pages instead of current-scene.",
+    recommendedGranularity: "The runtime apply path uses the exact single scene snapshot file current-scene/scene_state.md. Ordinary ingest must route source-described scenes, endings, epilogues, and summaries to events, plot-arcs, locations, characters, relationships, player, world, or sources instead of current-scene.",
   }),
   defineSchema("relationships", {
     extractionGoal: "Track relationship state, trust, tension, conflict, dependency, misunderstandings, and relationship changes.",
@@ -214,14 +277,457 @@ export const RPG_WIKI_SCHEMA = [
   }),
 ] as const satisfies readonly RpgWikiSchemaEntry[]
 
+export const RPG_SCHEMA_SLOTS = [
+  {
+    slotId: "main_outline",
+    path: "wiki/outlines/main.md",
+    owner: "control_doc",
+    requiredForNewProject: true,
+    runtimePriority: "high",
+    importPolicy: "controlled_canonicalize",
+    writePolicy: "manual_or_review_only",
+  },
+  {
+    slotId: "outline_progress",
+    path: "wiki/outlines/progress.md",
+    owner: "runtime",
+    requiredForNewProject: true,
+    runtimePriority: "high",
+    importPolicy: "runtime_apply",
+    writePolicy: "merge",
+  },
+  {
+    slotId: "rules_core",
+    path: "wiki/rules/core.md",
+    owner: "control_doc",
+    requiredForNewProject: true,
+    runtimePriority: "critical",
+    importPolicy: "controlled_canonicalize",
+    writePolicy: "manual_or_review_only",
+  },
+  {
+    slotId: "rules_world",
+    path: "wiki/rules/world.md",
+    owner: "control_doc",
+    requiredForNewProject: true,
+    runtimePriority: "high",
+    importPolicy: "controlled_canonicalize",
+    writePolicy: "manual_or_review_only",
+  },
+  {
+    slotId: "rules_table",
+    path: "wiki/rules/table.md",
+    owner: "control_doc",
+    requiredForNewProject: true,
+    runtimePriority: "high",
+    importPolicy: "controlled_canonicalize",
+    writePolicy: "manual_or_review_only",
+  },
+  {
+    slotId: "style_narration",
+    path: "wiki/style/narration.md",
+    owner: "control_doc",
+    requiredForNewProject: true,
+    runtimePriority: "high",
+    importPolicy: "controlled_canonicalize",
+    writePolicy: "manual_or_review_only",
+  },
+  {
+    slotId: "style_dialogue",
+    path: "wiki/style/dialogue.md",
+    owner: "control_doc",
+    requiredForNewProject: true,
+    runtimePriority: "high",
+    importPolicy: "controlled_canonicalize",
+    writePolicy: "manual_or_review_only",
+  },
+  {
+    slotId: "style_forbidden",
+    path: "wiki/style/forbidden.md",
+    owner: "control_doc",
+    requiredForNewProject: true,
+    runtimePriority: "critical",
+    importPolicy: "controlled_canonicalize",
+    writePolicy: "manual_or_review_only",
+  },
+  {
+    slotId: "memory_long_term",
+    path: "wiki/memory/long-term.md",
+    owner: "control_doc",
+    requiredForNewProject: true,
+    runtimePriority: "normal",
+    importPolicy: "controlled_canonicalize",
+    writePolicy: "manual_or_review_only",
+  },
+  {
+    slotId: "memory_session_notes",
+    path: "wiki/memory/session-notes.md",
+    owner: "control_doc",
+    requiredForNewProject: true,
+    runtimePriority: "reference",
+    importPolicy: "controlled_canonicalize",
+    writePolicy: "manual_or_review_only",
+  },
+  {
+    slotId: "memory_player_preferences",
+    path: "wiki/memory/player-preferences.md",
+    owner: "control_doc",
+    requiredForNewProject: true,
+    runtimePriority: "critical",
+    importPolicy: "controlled_canonicalize",
+    writePolicy: "manual_or_review_only",
+  },
+  {
+    slotId: "current_scene",
+    path: "wiki/current-scene/scene_state.md",
+    owner: "runtime",
+    requiredForNewProject: true,
+    runtimePriority: "critical",
+    importPolicy: "runtime_apply",
+    writePolicy: "overwrite",
+  },
+  {
+    slotId: "player_main",
+    path: "wiki/player/player.md",
+    owner: "campaign_setup",
+    requiredForNewProject: true,
+    runtimePriority: "critical",
+    importPolicy: "campaign_bootstrap",
+    writePolicy: "merge",
+  },
+  {
+    slotId: "player_abilities",
+    path: "wiki/player/abilities.md",
+    owner: "campaign_setup",
+    requiredForNewProject: true,
+    runtimePriority: "high",
+    importPolicy: "campaign_bootstrap",
+    writePolicy: "merge",
+  },
+  {
+    slotId: "player_inventory",
+    path: "wiki/player/inventory.md",
+    owner: "campaign_setup",
+    requiredForNewProject: true,
+    runtimePriority: "high",
+    importPolicy: "campaign_bootstrap",
+    writePolicy: "merge",
+  },
+  {
+    slotId: "player_goals",
+    path: "wiki/player/goals.md",
+    owner: "campaign_setup",
+    requiredForNewProject: true,
+    runtimePriority: "high",
+    importPolicy: "campaign_bootstrap",
+    writePolicy: "merge",
+  },
+  {
+    slotId: "player_known_information",
+    path: "wiki/player/known_information.md",
+    owner: "campaign_setup",
+    requiredForNewProject: true,
+    runtimePriority: "high",
+    importPolicy: "campaign_bootstrap",
+    writePolicy: "merge",
+  },
+] as const satisfies readonly RpgSchemaSlot[]
+
+export const RPG_DIRECTORY_BOUNDARY_GUIDANCE = [
+  {
+    boundaryId: "player_goals",
+    paths: ["wiki/player/goals.md"],
+    include: ["PC subjective goals, wishes, promises, commitments, personal motives, and changing subjective priorities."],
+    exclude: [
+      "Quest progress tables, blockers, completion/failure conditions, and objective status tracking.",
+      "Plot pressure, unresolved story conflict, foreshadowing, author/GM intent, and dramatic pacing pressure.",
+    ],
+    recommendedGranularity: "One fixed player slot page for the current PC's subjective motivations; merge updates into wiki/player/goals.md.",
+  },
+  {
+    boundaryId: "quests",
+    paths: ["wiki/quests/*.md"],
+    include: ["Game-recognized, trackable objectives with objective, blockers/progress, and completion or failure conditions."],
+    exclude: [
+      "Purely subjective wishes or private motives without an explicit game-recognized task frame.",
+      "Story themes, author intent, foreshadowing structures, plot pressure, or ordinary player TODO/checklists.",
+    ],
+    recommendedGranularity: "One page per active quest/objective only when the source or runtime state makes it trackable.",
+  },
+  {
+    boundaryId: "plot_arcs",
+    paths: ["wiki/plot-arcs/*.md", "wiki/plot-arcs/runtime/*.md"],
+    include: ["Story pressure, unresolved conflicts, foreshadowing, reveal pacing, progression conditions, and possible developments."],
+    exclude: [
+      "Player TODO/checklists or quest progress ledgers.",
+      "Confirmed happened events presented as current facts without linking to events, or possible futures written as already happened.",
+    ],
+    recommendedGranularity: "One page per important plot arc, conflict, mystery, or pressure structure; runtime changes belong under plot-arcs/runtime/.",
+  },
+  {
+    boundaryId: "rules",
+    paths: ["wiki/rules/core.md", "wiki/rules/world.md", "wiki/rules/table.md", "wiki/rules/*.md"],
+    include: ["Executable mechanics, limits, resource costs, checks, allowed/disallowed actions, success/failure boundaries, and hard constraints."],
+    exclude: ["Stable background prose, public history, culture, geography, social description, or common knowledge that does not define how actions work."],
+    recommendedGranularity: "Use the fixed rules slots for control material; split by mechanism only when an explicit control import or manual edit calls for it.",
+  },
+  {
+    boundaryId: "world",
+    paths: ["wiki/world/*.md"],
+    include: ["Background, common knowledge, history, society, culture, geography, public perception, and stable setting facts."],
+    exclude: ["Executable mechanics, checks, resource costs, hard action limits, or success/failure boundaries that belong in rules/."],
+    recommendedGranularity: "One page per stable setting topic such as overview, history, common sense, social structure, or geography.",
+  },
+  {
+    boundaryId: "style",
+    paths: ["wiki/style/narration.md", "wiki/style/dialogue.md", "wiki/style/forbidden.md", "wiki/style/*.md"],
+    include: ["Global narration, dialogue, formatting, pacing, forbidden-pattern, and style rules that apply across the whole campaign."],
+    exclude: [
+      "Character-specific voice, catchphrases, address habits, politeness level, avoided topics, or relationship-driven tone changes.",
+      "Single-character speech texture promoted into a global writing rule.",
+    ],
+    recommendedGranularity: "Use the fixed style slots for global writing control; keep character voice in characters/ or relationships/.",
+  },
+  {
+    boundaryId: "characters",
+    paths: ["wiki/characters/*.md", "wiki/characters/runtime/*.md"],
+    include: ["Stable character identity, behavior patterns, ability limits, usual interaction rules, and character-specific voice."],
+    exclude: [
+      "Full relationship histories or pair-specific relationship-state changes.",
+      "A stage-specific change in one relationship rewritten as permanent character personality.",
+    ],
+    recommendedGranularity: "One base page per character operating model; campaign-only changes belong in the matching characters/runtime/ overlay.",
+  },
+  {
+    boundaryId: "relationships",
+    paths: ["wiki/relationships/*.md", "wiki/relationships/runtime/*.md"],
+    include: ["Stable relationship model, tension, trust/hostility, dependency, misunderstandings, secrets, and interaction changes between parties."],
+    exclude: ["Duplicate complete character profiles, appearance sheets, ability lists, or general biography material."],
+    recommendedGranularity: "One page per important pair or relationship group; runtime relationship changes belong under relationships/runtime/.",
+  },
+  {
+    boundaryId: "items",
+    paths: ["wiki/items/*.md", "wiki/items/runtime/*.md"],
+    include: ["Item definitions, functions, costs, limits, source/history, plot role, usual holder, and object-level campaign state."],
+    exclude: ["The player's current quantity, equipped/backpack status, consumption count, or personal inventory ledger."],
+    recommendedGranularity: "One page per important object; campaign-only object-state changes belong in the matching items/runtime/ overlay.",
+  },
+  {
+    boundaryId: "player_inventory",
+    paths: ["wiki/player/inventory.md"],
+    include: ["Player current holdings, quantity, equipped/backpack location, consumed/damaged state, and inventory availability."],
+    exclude: ["Full item definitions, item lore, general functionality, source/history, or plot role that should live in items/."],
+    recommendedGranularity: "One fixed player slot page for current PC possessions; item definitions remain in items/.",
+  },
+] as const satisfies readonly RpgDirectoryBoundaryGuidance[]
+
+export const RPG_RUNTIME_CROSS_DIRECTORY_SYNC_GUIDANCE = [
+  {
+    syncId: "current_scene_snapshot_not_history",
+    trigger: "Runtime Update Apply writes wiki/current-scene/scene_state.md.",
+    requiredTargets: ["wiki/current-scene/scene_state.md"],
+    guidance: [
+      "current-scene is an overwrite-only latest-moment snapshot for the next turn, not an accumulated store of long-term state.",
+      "If current-scene mentions visible long-term changes, the same proposal batch should include the matching runtime overlay or dynamic directory update.",
+    ],
+  },
+  {
+    syncId: "current_scene_long_term_overlay_targets",
+    trigger: "A current-scene snapshot contains persistent NPC, location, faction, item, relationship, plot-arc, or outline-progress changes.",
+    requiredTargets: [
+      "wiki/characters/runtime/*.md",
+      "wiki/locations/runtime/*.md",
+      "wiki/factions/runtime/*.md",
+      "wiki/items/runtime/*.md",
+      "wiki/relationships/runtime/*.md",
+      "wiki/plot-arcs/runtime/*.md",
+      "wiki/outlines/progress.md",
+    ],
+    guidance: [
+      "NPC injuries, conditions, loyalty, location, or other ongoing state changes belong in characters/runtime/*.md.",
+      "Location damage, locks, blocked routes, alarms, alertness, or access changes belong in locations/runtime/*.md.",
+      "Faction stance, resources, alert level, pressure, or current moves belong in factions/runtime/*.md.",
+      "Relationship trust, tension, conflict, reconciliation, secrets, or misunderstandings belong in relationships/runtime/*.md.",
+      "Plot arc runtime state, triggered/skipped/delayed/advanced beats, pressure changes, and resolved/unresolved arc state belong in plot-arcs/runtime/*.md.",
+      "Outline-relative play progress, completed/skipped/advanced/delayed beats, act progress, and deviations may update outlines/progress.md through pending/review merge.",
+    ],
+  },
+  {
+    syncId: "inventory_and_item_runtime_split",
+    trigger: "Runtime changes player holdings or object-level item state.",
+    requiredTargets: ["wiki/player/inventory.md", "wiki/items/runtime/*.md"],
+    guidance: [
+      "Player holdings, quantities, equipped/backpack status, acquisition, loss, and consumption belong in wiki/player/inventory.md.",
+      "Object-level item state such as holder transfer, damage, sealing, temporary enhancement, depletion, or condition belongs in wiki/items/runtime/*.md.",
+      "If one update changes both player possession and the object itself, propose both inventory and item runtime updates in the same batch.",
+    ],
+  },
+  {
+    syncId: "runtime_only_relationships_and_plot_arcs",
+    trigger: "Runtime Update Apply wants to record relationship or plot-arc changes from play.",
+    requiredTargets: ["wiki/relationships/runtime/*.md", "wiki/plot-arcs/runtime/*.md"],
+    guidance: [
+      "Runtime relationship changes must target relationships/runtime/*.md; base wiki/relationships/*.md are stable/base pages and are not runtime write targets.",
+      "Runtime plot arc changes must target plot-arcs/runtime/*.md; base wiki/plot-arcs/*.md are stable/base pages and are not runtime write targets.",
+      "Runtime update must not write outlines/main.md, style, rules, sources, world, memory, or base entity pages.",
+    ],
+  },
+] as const satisfies readonly RpgRuntimeCrossDirectorySyncGuidance[]
+
+export const RPG_SOURCE_INGEST_TARGET_POLICY = {
+  ordinaryTargets: [
+    "wiki/sources/",
+    "wiki/world/",
+    "wiki/characters/",
+    "wiki/player/player.md",
+    "wiki/player/abilities.md",
+    "wiki/player/inventory.md",
+    "wiki/player/goals.md",
+    "wiki/player/known_information.md",
+    "wiki/locations/",
+    "wiki/factions/",
+    "wiki/items/",
+    "wiki/plot-arcs/",
+    "wiki/events/",
+    "wiki/relationships/",
+  ],
+  structuralTargets: [
+    "wiki/index.md",
+    "wiki/overview.md",
+    "wiki/log.md",
+  ],
+  forbiddenTargets: [
+    {
+      pathPattern: "wiki/rules/**",
+      reason: "rules/control material belongs to the control document import boundary, not ordinary source ingest.",
+      recommendedMode: "control_doc_import",
+    },
+    {
+      pathPattern: "wiki/style/**",
+      reason: "global narration/dialogue/forbidden style rules are control documents; character voice should stay in characters or relationships.",
+      recommendedMode: "control_doc_import",
+    },
+    {
+      pathPattern: "wiki/memory/**",
+      reason: "context memory is a controlled Context Compiler helper layer and should not be filled by lossy source ingest.",
+      recommendedMode: "control_doc_import",
+    },
+    {
+      pathPattern: "wiki/outlines/**",
+      reason: "outlines are author/GM control material or runtime outline progress, not ordinary source pages.",
+      recommendedMode: "control_doc_import",
+    },
+    {
+      pathPattern: "wiki/current-scene/**",
+      reason: "current-scene is a runtime-owned latest-moment snapshot or campaign bootstrap target.",
+      recommendedMode: "runtime_update_apply",
+    },
+    {
+      pathPattern: "wiki/*/runtime/**",
+      reason: "runtime overlays are owned by completed-turn state apply flows, not ordinary source ingest.",
+      recommendedMode: "runtime_update_apply",
+    },
+    {
+      pathPattern: "wiki/quests/**",
+      reason: "quests are review-only for source ingest until a dedicated campaign/runtime quest flow owns them.",
+      recommendedMode: "review_only",
+    },
+  ],
+} as const satisfies RpgSourceIngestTargetPolicy
+
+export const RPG_FIXED_PLAYER_SLOT_PATHS = RPG_SCHEMA_SLOTS
+  .filter((slot) => slot.slotId.startsWith("player_"))
+  .map((slot) => slot.path)
+
+export type RpgSchemaSlotId = (typeof RPG_SCHEMA_SLOTS)[number]["slotId"]
+
 export type RpgWikiSchemaCategoryId = (typeof RPG_WIKI_SCHEMA)[number]["categoryId"]
 
 export function getRpgWikiSchemaEntry(categoryId: string): RpgWikiSchemaEntry | undefined {
   return RPG_WIKI_SCHEMA.find((entry) => entry.categoryId === categoryId)
 }
 
+export function getRpgSchemaSlot(slotId: string): RpgSchemaSlot | undefined {
+  return RPG_SCHEMA_SLOTS.find((slot) => slot.slotId === slotId)
+}
+
+export function getRpgSchemaSlotByPath(path: string): RpgSchemaSlot | undefined {
+  const normalized = normalizeRpgSlotPath(path)
+  return RPG_SCHEMA_SLOTS.find((slot) => {
+    const slotPath = normalizeRpgSlotPath(slot.path)
+    return normalized === slotPath || normalized.endsWith(`/${slotPath}`)
+  })
+}
+
+export function getRequiredRpgSchemaSlots(): RpgSchemaSlot[] {
+  return RPG_SCHEMA_SLOTS.filter((slot) => slot.requiredForNewProject)
+}
+
+export function getRpgSchemaSlotsByOwner(owner: RpgSchemaSlotOwner): RpgSchemaSlot[] {
+  return RPG_SCHEMA_SLOTS.filter((slot) => slot.owner === owner)
+}
+
+export function getRpgDirectoryBoundaryGuidance(
+  boundaryId: string,
+): RpgDirectoryBoundaryGuidance | undefined {
+  return RPG_DIRECTORY_BOUNDARY_GUIDANCE.find((guidance) => guidance.boundaryId === boundaryId)
+}
+
+export function getRpgRuntimeCrossDirectorySyncGuidance(): readonly RpgRuntimeCrossDirectorySyncGuidance[] {
+  return RPG_RUNTIME_CROSS_DIRECTORY_SYNC_GUIDANCE
+}
+
+export function getRpgSourceIngestTargetPolicy(): RpgSourceIngestTargetPolicy {
+  return RPG_SOURCE_INGEST_TARGET_POLICY
+}
+
+export function getRpgSourceIngestForbiddenTarget(
+  path: string,
+): RpgSourceIngestForbiddenTarget | undefined {
+  const normalized = normalizeRpgSlotPath(path)
+  return RPG_SOURCE_INGEST_TARGET_POLICY.forbiddenTargets.find((target) =>
+    sourceIngestPathPatternMatches(normalized, target.pathPattern),
+  )
+}
+
+export function isRpgSourceIngestAllowedTarget(path: string): boolean {
+  const normalized = normalizeRpgSlotPath(path)
+  if (getRpgSourceIngestForbiddenTarget(normalized)) return false
+  return RPG_SOURCE_INGEST_TARGET_POLICY.structuralTargets.some((target) => normalized === target)
+    || RPG_SOURCE_INGEST_TARGET_POLICY.ordinaryTargets.some((target) => {
+      const normalizedTarget = normalizeRpgSlotPath(target)
+      return normalizedTarget.endsWith("/")
+        ? normalized.startsWith(normalizedTarget)
+        : normalized === normalizedTarget
+    })
+}
+
+export function isFixedPlayerSlotPath(path: string): boolean {
+  const normalized = normalizeRpgSlotPath(path)
+  return RPG_FIXED_PLAYER_SLOT_PATHS.some((slotPath) => {
+    const normalizedSlotPath = normalizeRpgSlotPath(slotPath)
+    return normalized === normalizedSlotPath || normalized.endsWith(`/${normalizedSlotPath}`)
+  })
+}
+
 export function rpgSchemaCategoryIdsMatchRegistry(): boolean {
   const schemaIds = RPG_WIKI_SCHEMA.map((entry) => entry.categoryId)
   const categoryIds = RPG_CATEGORIES.map((entry) => entry.id)
   return schemaIds.length === categoryIds.length && schemaIds.every((id, index) => id === categoryIds[index])
+}
+
+function normalizeRpgSlotPath(path: string): string {
+  return path.replace(/\\/g, "/").replace(/^\/+/, "").replace(/\/+/g, "/").toLowerCase()
+}
+
+function sourceIngestPathPatternMatches(path: string, pattern: string): boolean {
+  const normalizedPattern = normalizeRpgSlotPath(pattern)
+  if (normalizedPattern === "wiki/*/runtime/**") {
+    return /^wiki\/[^/]+\/runtime\//.test(path)
+  }
+  if (normalizedPattern.endsWith("/**")) {
+    const prefix = normalizedPattern.slice(0, -2)
+    return path.startsWith(prefix)
+  }
+  return path === normalizedPattern
 }

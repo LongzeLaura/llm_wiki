@@ -3,15 +3,23 @@ import { beforeEach, describe, expect, it, vi } from "vitest"
 import {
   RpgRuntimePanel,
   applyRpgRuntimePanelAcceptedUpdates,
+  didApplyCurrentSceneOverwrite,
+  getAppliedRpgUpdatePaths,
   loadRpgCurrentScene,
+  loadRpgRuntimePanelPendingUpdates,
+  saveRpgRuntimePanelPendingUpdates,
   submitRpgRuntimePanelAction,
 } from "@/components/rpg"
 import * as writePolicy from "@/lib/rpg-runtime/write-policy"
 import type { LlmConfig } from "@/stores/wiki-store"
-import type { RpgNarrationAdapter } from "@/lib/rpg-runtime/narration-adapter"
+import type {
+  RpgNarrationAdapter,
+  RpgRuntimeUpdateInteractionAdapter,
+} from "@/lib/rpg-interactions/runtime"
 import type { RunRpgRuntimeTurnFlowResult } from "@/lib/rpg-runtime/runtime-controller"
 import type { SubmittedAction } from "@/lib/rpg-runtime/types"
 import type { PendingRpgUpdate } from "@/lib/rpg-runtime/update-staging"
+import * as updateStaging from "@/lib/rpg-runtime/update-staging"
 
 vi.mock("@/commands/fs", () => ({
   readFile: vi.fn(),
@@ -22,6 +30,15 @@ vi.mock("@/lib/rpg-runtime/write-policy", async (importOriginal) => {
   return {
     ...actual,
     applyRpgPendingUpdates: vi.fn(actual.applyRpgPendingUpdates),
+  }
+})
+
+vi.mock("@/lib/rpg-runtime/update-staging", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/rpg-runtime/update-staging")>()
+  return {
+    ...actual,
+    acceptPendingRpgUpdate: vi.fn(actual.acceptPendingRpgUpdate),
+    rejectPendingRpgUpdate: vi.fn(actual.rejectPendingRpgUpdate),
   }
 })
 
@@ -78,17 +95,33 @@ describe("RpgRuntimePanel", () => {
     const narrationAdapter: RpgNarrationAdapter = {
       generateTurn: vi.fn(),
     }
+    const updateInteractionAdapter: RpgRuntimeUpdateInteractionAdapter = {
+      generateUpdateProposal: vi.fn(),
+    }
     const createNarrationAdapter = vi.fn(() => narrationAdapter)
+    const createUpdateInteractionAdapter = vi.fn(() => updateInteractionAdapter)
     const runTurnFlow = vi.fn(async () => sampleRuntimeResult())
+    const appendTurnJournalEntry = vi.fn(async () => undefined)
+    const savePendingUpdates = vi.fn(async () => ({ warnings: [] }))
 
     const result = await submitRpgRuntimePanelAction({
       projectPath: "C:/tmp/rpg-project",
       llmConfig: sampleLlmConfig(),
       submittedAction,
-      dependencies: { createNarrationAdapter, runTurnFlow },
+      dependencies: {
+        createNarrationAdapter,
+        createUpdateInteractionAdapter,
+        runTurnFlow,
+        appendTurnJournalEntry,
+        savePendingUpdates,
+      },
     })
 
     expect(createNarrationAdapter).toHaveBeenCalledWith({
+      llmConfig: sampleLlmConfig(),
+      signal: undefined,
+    })
+    expect(createUpdateInteractionAdapter).toHaveBeenCalledWith({
       llmConfig: sampleLlmConfig(),
       signal: undefined,
     })
@@ -97,7 +130,12 @@ describe("RpgRuntimePanel", () => {
       wikiMode: "llmwikirpg",
       submittedAction,
       narrationAdapter,
+      updateInteractionAdapter,
+      runtimePersistence: {
+        appendTurnJournalEntry,
+      },
     })
+    expect(savePendingUpdates).toHaveBeenCalledWith("C:/tmp/rpg-project", sampleRuntimeResult().pendingUpdates)
     expect(result.lastNarrative).toContain("Mira reads the sigil")
     expect(result.nextActionOptions.map((option) => option.playerFacingText)).toContain("Touch the lantern key to the sigil.")
     expect(result.pendingUpdates).toEqual(sampleRuntimeResult().pendingUpdates)
@@ -170,6 +208,11 @@ describe("RpgRuntimePanel", () => {
   })
 
   it("does not apply pending updates during panel submission", async () => {
+    const createUpdateInteractionAdapter = vi.fn(() => ({
+      generateUpdateProposal: vi.fn(),
+    }))
+    const savePendingUpdates = vi.fn(async () => ({ warnings: [] }))
+
     await submitRpgRuntimePanelAction({
       projectPath: "C:/tmp/rpg-project",
       llmConfig: sampleLlmConfig(),
@@ -180,10 +223,17 @@ describe("RpgRuntimePanel", () => {
       },
       dependencies: {
         createNarrationAdapter: () => ({ generateTurn: vi.fn() }),
+        createUpdateInteractionAdapter,
         runTurnFlow: vi.fn(async () => sampleRuntimeResult()),
+        appendTurnJournalEntry: vi.fn(async () => undefined),
+        savePendingUpdates,
       },
     })
 
+    expect(createUpdateInteractionAdapter).toHaveBeenCalledOnce()
+    expect(savePendingUpdates).toHaveBeenCalledWith("C:/tmp/rpg-project", sampleRuntimeResult().pendingUpdates)
+    expect(updateStaging.acceptPendingRpgUpdate).not.toHaveBeenCalled()
+    expect(updateStaging.rejectPendingRpgUpdate).not.toHaveBeenCalled()
     expect(writePolicy.applyRpgPendingUpdates).not.toHaveBeenCalled()
   })
 
@@ -231,11 +281,21 @@ describe("RpgRuntimePanel", () => {
       ],
       warnings: ["Skipped RPG pending update \"update-skipped\"."],
     })
+    const savePendingUpdates = vi.fn(async () => ({ warnings: [] }))
+    const appendApplyJournalEntry = vi.fn(async () => undefined)
+    const readFile = vi.fn(async () => "# Current Scene\n\nThe accepted scene is now visible.")
+    const reloadProjectFiles = vi.fn(async () => ({ warnings: [] }))
 
     const result = await applyRpgRuntimePanelAcceptedUpdates({
       projectPath: "C:/tmp/rpg-project",
       updates: [acceptedScene, pendingEvent, rejectedPlayer, acceptedSkipped],
-      dependencies: { applyPendingUpdates: writePolicy.applyRpgPendingUpdates },
+      dependencies: {
+        applyPendingUpdates: writePolicy.applyRpgPendingUpdates,
+        savePendingUpdates,
+        appendApplyJournalEntry,
+        readFile,
+        reloadProjectFiles,
+      },
     })
 
     expect(writePolicy.applyRpgPendingUpdates).toHaveBeenCalledWith({
@@ -247,10 +307,113 @@ describe("RpgRuntimePanel", () => {
       "update-rejected",
       "update-skipped",
     ])
+    expect(result.pendingUpdates.find((update) => update.id === "update-skipped")?.status).toBe("accepted")
+    expect(savePendingUpdates).toHaveBeenCalledWith("C:/tmp/rpg-project", [
+      pendingEvent,
+      rejectedPlayer,
+      acceptedSkipped,
+    ])
+    expect(appendApplyJournalEntry).toHaveBeenCalledWith(
+      "C:/tmp/rpg-project",
+      expect.objectContaining({
+        attemptedUpdateIds: ["update-scene", "update-skipped"],
+        appliedUpdateIds: ["update-scene"],
+        remainingPendingUpdateIds: ["update-pending", "update-rejected", "update-skipped"],
+        applyResult: expect.objectContaining({
+          appliedUpdates: expect.arrayContaining([expect.objectContaining({ id: "update-scene" })]),
+        }),
+      }),
+    )
     expect(result.skippedApplyReasons).toEqual({
       "update-skipped": "targetPath is outside allowed runtime write paths.",
     })
     expect(result.applyResult.warnings).toContain("Skipped RPG pending update \"update-skipped\".")
+    expect(result.affectedPaths).toEqual(["wiki/current-scene/scene_state.md"])
+    expect(reloadProjectFiles).toHaveBeenCalledWith("C:/tmp/rpg-project", ["wiki/current-scene/scene_state.md"])
+    expect(readFile).toHaveBeenCalledWith("C:/tmp/rpg-project/wiki/current-scene/scene_state.md")
+    expect(result.refreshedCurrentScene).toContain("accepted scene is now visible")
+  })
+
+  it("computes apply affected paths from applied updates only", () => {
+    const applyResult = {
+      appliedUpdates: [
+        {
+          id: "update-scene",
+          targetPath: "wiki/current-scene/scene_state.md",
+          strategy: "overwrite" as const,
+          status: "applied" as const,
+        },
+        {
+          id: "update-event",
+          targetPath: "wiki/events/canal-gate.md",
+          strategy: "append" as const,
+          status: "applied" as const,
+        },
+      ],
+      skippedUpdates: [
+        {
+          id: "update-skipped",
+          targetPath: "wiki/world/stable.md",
+          reason: "targetPath is outside allowed runtime write paths.",
+        },
+      ],
+      warnings: [],
+    }
+
+    expect(getAppliedRpgUpdatePaths(applyResult)).toEqual([
+      "wiki/current-scene/scene_state.md",
+      "wiki/events/canal-gate.md",
+    ])
+    expect(didApplyCurrentSceneOverwrite(applyResult)).toBe(true)
+  })
+
+  it("loads persisted pending updates for panel startup restore", async () => {
+    const persistedUpdates = [
+      { ...sampleRuntimeResult().pendingUpdates[0], status: "accepted" as const },
+      { ...sampleRuntimeResult().pendingUpdates[0], id: "update-rejected", status: "rejected" as const },
+    ]
+    const loadRuntimeSnapshot = vi.fn(async () => ({
+      pendingUpdates: persistedUpdates,
+      warnings: ["Recovered pending updates from runtime metadata."],
+    }))
+
+    const result = await loadRpgRuntimePanelPendingUpdates("C:/tmp/rpg-project", { loadRuntimeSnapshot })
+
+    expect(loadRuntimeSnapshot).toHaveBeenCalledWith("C:/tmp/rpg-project")
+    expect(result.pendingUpdates.map((update) => update.status)).toEqual(["accepted", "rejected"])
+    expect(result.warnings).toEqual(["Recovered pending updates from runtime metadata."])
+  })
+
+  it("persists accepted and rejected pending queue state through the panel helper", async () => {
+    const pending = sampleRuntimeResult().pendingUpdates
+    const accepted = updateStaging.acceptPendingRpgUpdate(pending, "update-scene")
+    const rejected = updateStaging.rejectPendingRpgUpdate(accepted, "update-scene")
+    const savePendingUpdates = vi.fn(async () => ({ warnings: [] }))
+
+    await saveRpgRuntimePanelPendingUpdates({
+      projectPath: "C:/tmp/rpg-project",
+      updates: rejected,
+      dependencies: { savePendingUpdates },
+    })
+
+    expect(savePendingUpdates).toHaveBeenCalledWith("C:/tmp/rpg-project", [
+      expect.objectContaining({ id: "update-scene", status: "rejected" }),
+    ])
+  })
+
+  it("does not auto-apply restored accepted pending updates", () => {
+    renderToStaticMarkup(
+      <RpgRuntimePanel
+        projectPath="C:/tmp/rpg-project"
+        llmConfig={sampleLlmConfig()}
+        initialState={{
+          currentScene: "The scene is loaded.",
+          pendingUpdates: [{ ...sampleRuntimeResult().pendingUpdates[0], status: "accepted" }],
+        }}
+      />,
+    )
+
+    expect(writePolicy.applyRpgPendingUpdates).not.toHaveBeenCalled()
   })
 
   it("surfaces runtime flow errors from submission", async () => {
@@ -265,6 +428,9 @@ describe("RpgRuntimePanel", () => {
         },
         dependencies: {
           createNarrationAdapter: () => ({ generateTurn: vi.fn() }),
+          createUpdateInteractionAdapter: () => ({ generateUpdateProposal: vi.fn() }),
+          appendTurnJournalEntry: vi.fn(async () => undefined),
+          savePendingUpdates: vi.fn(async () => ({ warnings: [] })),
           runTurnFlow: vi.fn(async () => {
             throw new Error("adapter failed")
           }),
@@ -302,6 +468,8 @@ function sampleRuntimeResult(): RunRpgRuntimeTurnFlowResult {
       presentCharacters: [],
       relationshipTensions: [],
       activePlotPressure: [],
+      outlineNotes: [],
+      activeQuests: [],
       relevantLocations: [],
       relevantFactions: [],
       relevantItems: [],
@@ -367,5 +535,22 @@ function sampleRuntimeResult(): RunRpgRuntimeTurnFlowResult {
       },
     ],
     warnings: ["Runtime warning sample."],
+    proposalSource: "interaction",
+    runtimeUpdateValidation: {
+      acceptedUpdates: [
+        {
+          id: "update-scene",
+          targetPath: "wiki/current-scene/scene_state.md",
+          strategy: "overwrite",
+          reason: "Refresh the current scene snapshot.",
+          content: "# Current Scene\n\nThe lantern key has answered the sigil.",
+          sourceTurnId: submittedAction.id,
+          references: ["wiki/current-scene/scene_state.md"],
+        },
+      ],
+      rejectedUpdates: [],
+      issues: [],
+      warnings: [],
+    },
   }
 }

@@ -1,7 +1,7 @@
 import { describe, expect, it, afterEach } from "vitest"
 import fs from "node:fs/promises"
 import { createTempProject, readFileRaw, writeFileRaw } from "@/test-helpers/fs-temp"
-import { createRpgTurnRecord } from "./rpg-runtime"
+import { cleanRpgReferences, createRpgTurnRecord } from "./rpg-runtime"
 import type { RpgTurnResult, SubmittedAction } from "./rpg-runtime"
 
 interface Ctx {
@@ -94,6 +94,7 @@ describe("RPG Turn Model", () => {
           "./wiki/locations/courtyard.md",
           "/wiki/characters/mira.md",
           "wiki/world//shrines.md",
+          "wiki/quests/main.md",
           "wiki/entities/legacy-poison.md",
           "wiki/concepts/legacy-poison.md",
           "wiki/queries/old-answer.md",
@@ -106,8 +107,20 @@ describe("RPG Turn Model", () => {
       "wiki/characters/mira.md",
       "wiki/events/session-04.md",
       "wiki/locations/courtyard.md",
+      "wiki/quests/main.md",
       "wiki/world/shrines.md",
     ])
+  })
+
+  it("allows quest references while still filtering legacy directories", () => {
+    expect(
+      cleanRpgReferences([
+        "wiki/quests/main.md",
+        "wiki/entities/legacy.md",
+        "wiki/concepts/legacy.md",
+        "wiki/queries/legacy.md",
+      ]),
+    ).toEqual(["wiki/quests/main.md"])
   })
 
   it("does not write any wiki files while creating a turn record", async () => {

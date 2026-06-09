@@ -92,6 +92,11 @@ export interface DeleteSourcesResult {
   skippedPages: number
 }
 
+export interface ImportSourceFilesResult {
+  importedPaths: string[]
+  skippedPaths: string[]
+}
+
 export function isIngestableSourcePath(path: string): boolean {
   const normalized = normalizePath(path)
   if (normalized.split("/").includes(".cache")) return false
@@ -141,8 +146,19 @@ export async function importSourceFiles(
   llmConfig: LlmConfig,
   sourceWatchConfig?: SourceWatchConfig,
 ): Promise<string[]> {
+  const result = await importSourceFilesWithReport(project, sourcePaths, llmConfig, sourceWatchConfig)
+  return result.importedPaths
+}
+
+export async function importSourceFilesWithReport(
+  project: WikiProject,
+  sourcePaths: string[],
+  llmConfig: LlmConfig,
+  sourceWatchConfig?: SourceWatchConfig,
+): Promise<ImportSourceFilesResult> {
   const pp = normalizePath(project.path)
   const importedPaths: string[] = []
+  const skippedPaths: string[] = []
   const cfg = normalizeSourceWatchConfig(sourceWatchConfig)
   const maxBytes = cfg.maxFileSizeMb * 1024 * 1024
 
@@ -156,7 +172,10 @@ export async function importSourceFiles(
         allowed = false
       }
     }
-    if (!allowed) continue
+    if (!allowed) {
+      skippedPaths.push(sourcePath)
+      continue
+    }
 
     const destPath = await getUniqueDestPath(`${pp}/raw/sources`, originalName)
     try {
@@ -165,12 +184,13 @@ export async function importSourceFiles(
       preprocessFile(destPath).catch(() => {})
     } catch (err) {
       console.error(`Failed to import ${originalName}:`, err)
+      skippedPaths.push(sourcePath)
     }
   }
 
   await enqueueSourceIngest(project, importedPaths, llmConfig)
 
-  return importedPaths
+  return { importedPaths, skippedPaths }
 }
 
 export async function importSourceFolder(

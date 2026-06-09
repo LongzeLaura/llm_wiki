@@ -11,11 +11,11 @@ import { useTranslation } from "react-i18next"
 import { normalizePath } from "@/lib/path-utils"
 import { decideDeleteClick } from "@/lib/sources-tree-delete"
 import { rescanProjectFileSync } from "@/lib/project-file-sync"
+import { RpgImportDialog } from "@/components/sources/rpg-import-dialog"
 import {
   deleteSourceFile,
   deleteSourceFolder,
   enqueueSourceIngest,
-  importSourceFiles,
   importSourceFolder,
 } from "@/lib/source-lifecycle"
 
@@ -34,6 +34,7 @@ export function SourcesView() {
   const dataVersion = useWikiStore((s) => s.dataVersion)
   const [sources, setSources] = useState<FileNode[]>([])
   const [importing, setImporting] = useState(false)
+  const [rpgImportOpen, setRpgImportOpen] = useState(false)
   const [ingestingPath, setIngestingPath] = useState<string | null>(null)
   const [refreshing, setRefreshing] = useState(false)
   const [refreshError, setRefreshError] = useState<string | null>(null)
@@ -91,57 +92,6 @@ export function SourcesView() {
     } finally {
       await loadSources()
       setRefreshing(false)
-    }
-  }
-
-  async function handleImport() {
-    if (!project) return
-
-    const selected = await open({
-      multiple: true,
-      title: t("sources.importSourceFiles"),
-      filters: [
-        {
-          name: "Documents",
-          extensions: [
-            "md", "mdx", "txt", "rtf", "pdf",
-            "html", "htm", "xml",
-            "doc", "docx", "xls", "xlsx", "ppt", "pptx",
-            "odt", "ods", "odp", "epub", "pages", "numbers", "key",
-          ],
-        },
-        {
-          name: "Data",
-          extensions: ["json", "jsonl", "csv", "tsv", "yaml", "yml", "ndjson"],
-        },
-        {
-          name: "Code",
-          extensions: [
-            "py", "js", "ts", "jsx", "tsx", "rs", "go", "java",
-            "c", "cpp", "h", "rb", "php", "swift", "sql", "sh",
-          ],
-        },
-        {
-          name: "Images",
-          extensions: ["png", "jpg", "jpeg", "gif", "webp", "svg", "bmp", "tiff", "avif", "heic"],
-        },
-        {
-          name: "Media",
-          extensions: ["mp4", "webm", "mov", "avi", "mkv", "mp3", "wav", "ogg", "flac", "m4a"],
-        },
-        { name: "All Files", extensions: ["*"] },
-      ],
-    })
-
-    if (!selected || selected.length === 0) return
-
-    setImporting(true)
-    const paths = Array.isArray(selected) ? selected : [selected]
-    try {
-      await importSourceFiles(project, paths, llmConfig, sourceWatchConfig)
-      await loadSources()
-    } finally {
-      setImporting(false)
     }
   }
 
@@ -240,8 +190,8 @@ export function SourcesView() {
 
   async function handleIngest(node: FileNode) {
     if (!project || ingestingPath) return
-    // Re-ingest goes through the same automated queue path as a fresh
-    // import (`handleImport` above). Earlier this used `startIngest`,
+    // Re-ingest goes through the same automated queue path as ordinary
+    // source file import. Earlier this used `startIngest`,
     // which opens an interactive chat → user clicks "Save to Wiki" →
     // `executeIngestWrites`. That had two problems: (a) it duplicated
     // the auto-pipeline so features like image cascade had to be
@@ -281,9 +231,9 @@ export function SourcesView() {
               {t("sources.refreshFolderTooltip")}
             </TooltipContent>
           </Tooltip>
-          <Button size="sm" onClick={handleImport} disabled={importing}>
+          <Button size="sm" onClick={() => setRpgImportOpen(true)} disabled={!project}>
             <Plus className="mr-1 h-4 w-4" />
-            {importing ? t("sources.importing") : t("sources.import")}
+            {t("sources.rpgImport.openButton")}
           </Button>
           <Button size="sm" onClick={handleImportFolder} disabled={importing}>
             <Plus className="mr-1 h-4 w-4" />
@@ -306,9 +256,9 @@ export function SourcesView() {
             <p>{t("sources.noSources")}</p>
             <p>{t("sources.importHint")}</p>
             <div className="flex gap-2">
-              <Button variant="outline" size="sm" onClick={handleImport}>
+              <Button variant="outline" size="sm" onClick={() => setRpgImportOpen(true)} disabled={!project}>
                 <Plus className="mr-1 h-4 w-4" />
-                {t("sources.importFiles")}
+                {t("sources.rpgImport.openButton")}
               </Button>
               <Button variant="outline" size="sm" onClick={handleImportFolder}>
                 <Plus className="mr-1 h-4 w-4" />
@@ -354,6 +304,14 @@ export function SourcesView() {
           </TooltipContent>
         </Tooltip>
       </div>
+      <RpgImportDialog
+        open={rpgImportOpen}
+        onOpenChange={setRpgImportOpen}
+        project={project}
+        llmConfig={llmConfig}
+        sourceWatchConfig={sourceWatchConfig}
+        onImported={loadSources}
+      />
       </div>
     </TooltipProvider>
   )

@@ -123,52 +123,6 @@ export interface RpgDynamicWriteValidationContext {
   sourceText?: string
 }
 
-const RPG_LIVE_INPUT_MARKER = "[RPG-LIVE]"
-
-const CURRENT_SCENE_UNMARKED_RUNTIME_HINTS = [
-  "current scene",
-  "current scene:",
-  "scene state",
-  "scene snapshot",
-  "live session",
-  "session log",
-  "session record",
-  "session transcript",
-  "session recap",
-  "turn log",
-  "turn record",
-  "turn summary",
-  "opening scene",
-  "start scene",
-  "scene initialization",
-  "scene setup",
-  "post action state",
-  "after the player action",
-  "after the player's action",
-  "latest state",
-  "gm current scene",
-  "user declared current scene",
-  "当前场景",
-  "场景状态",
-  "场景快照",
-  "当前会话",
-  "会话记录",
-  "会话实录",
-  "跑团记录",
-  "团录",
-  "回合记录",
-  "回合总结",
-  "开场场景",
-  "开局场景",
-  "场景初始化",
-  "玩家行动后",
-  "行动后状态",
-  "最新状态",
-  "gm给出的当前场景",
-  "用户给出的当前场景",
-  "明确当前场景",
-] as const
-
 const CURRENT_SCENE_BLOCKED_SOURCE_MARKERS = [
   "encyclopedia",
   "lore entry",
@@ -204,23 +158,6 @@ const CURRENT_SCENE_BLOCKED_SOURCE_MARKERS = [
   "赏花场景",
   "结局场景",
 ] as const
-
-const CURRENT_SCENE_PATH_TOKENS = [
-  "session",
-  "turn",
-  "scene",
-  "chat",
-  "log",
-  "会话",
-  "回合",
-  "场景",
-  "团录",
-] as const
-
-const CURRENT_SCENE_DIALOGUE_MARKER = new RegExp(
-  "^(gm|dm|kp|mc|user|player|pc|assistant|主持人|守秘人|玩家)\\s*[:：]",
-  "im",
-)
 
 export function prepareExistingContentForRpgDynamicMerge(
   relativePath: string,
@@ -269,52 +206,22 @@ export function validateRpgDynamicWrite(
 
 function validateCurrentSceneWrite(
   relativePath: string,
-  content: string,
+  _content: string,
   context: RpgDynamicWriteValidationContext,
 ): RpgDynamicWriteValidation {
   const sourceSignal = [context.sourcePath ?? "", context.sourceText ?? ""]
     .filter(Boolean)
     .join("\n")
   const normalizedSignal = normalizeSourceSignal(sourceSignal)
-  const normalizedSourcePath = normalizeSourceSignal(context.sourcePath ?? "")
-  const hasLiveInputMarker = (context.sourceText ?? "").includes(RPG_LIVE_INPUT_MARKER)
-
   const matchedBlockedMarkers = CURRENT_SCENE_BLOCKED_SOURCE_MARKERS.filter((marker) =>
     normalizedSignal.includes(normalizeSourceSignal(marker)),
   )
-
-  const matchedRuntimeHints = CURRENT_SCENE_UNMARKED_RUNTIME_HINTS.filter((marker) =>
-    normalizedSignal.includes(normalizeSourceSignal(marker)),
-  )
-  const hasLivePathToken = CURRENT_SCENE_PATH_TOKENS.some((token) =>
-    normalizedSourcePath.includes(normalizeSourceSignal(token)),
-  )
-  const hasDialogueMarker = CURRENT_SCENE_DIALOGUE_MARKER.test(context.sourceText ?? "")
-
-  if (hasLiveInputMarker && content.includes(RPG_LIVE_INPUT_MARKER)) {
-    return {
-      allowWrite: false,
-      warnings: [
-        `Skipped "${relativePath}" because ${RPG_LIVE_INPUT_MARKER} is a control marker and must not be copied into wiki page content.`,
-      ],
-    }
-  }
-
-  if (hasLiveInputMarker) {
-    return { allowWrite: true, warnings: [] }
-  }
-
-  const hintSummary = [
-    matchedRuntimeHints.length > 0 ? `unmarked runtime hints: ${matchedRuntimeHints.slice(0, 3).join(", ")}` : "",
-    hasDialogueMarker ? "dialogue marker such as GM: or Player:" : "",
-    hasLivePathToken ? "source path token such as session, turn, scene, chat, or log" : "",
-  ].filter(Boolean).join("; ")
 
   if (matchedBlockedMarkers.length > 0) {
     return {
       allowWrite: false,
       warnings: [
-        `Skipped "${relativePath}" because wiki/current-scene/ may only be generated from live RPG runtime input that contains ${RPG_LIVE_INPUT_MARKER}, but the source looks like static lore or summary material (${matchedBlockedMarkers.slice(0, 3).join(", ")}). Unmarked static file inputs should route to wiki/events/, wiki/plot-arcs/, character state pages, or other RPG directories instead.`,
+        `Skipped "${relativePath}" because ordinary ingest must not generate or update wiki/current-scene/; the source looks like static lore or summary material (${matchedBlockedMarkers.slice(0, 3).join(", ")}). Route ordinary source material to wiki/events/, wiki/plot-arcs/, character state pages, or other non-current-scene RPG directories instead.`,
       ],
     }
   }
@@ -322,7 +229,7 @@ function validateCurrentSceneWrite(
   return {
     allowWrite: false,
     warnings: [
-      `Skipped "${relativePath}" because wiki/current-scene/ may only be generated from live RPG runtime input that contains ${RPG_LIVE_INPUT_MARKER}. Unmarked current-scene/session wording is not enough${hintSummary ? ` (${hintSummary})` : ""}; route static file input to wiki/events/, wiki/plot-arcs/, character state pages, or other RPG directories instead.`,
+      `Skipped "${relativePath}" because ordinary ingest must not generate or update wiki/current-scene/. current-scene is a runtime-owned snapshot maintained only by the RPG Play/Runtime apply flow; route ordinary source material to wiki/events/, wiki/plot-arcs/, character state pages, or other non-current-scene RPG directories instead.`,
     ],
   }
 }

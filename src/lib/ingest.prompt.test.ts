@@ -1,13 +1,55 @@
 import { beforeEach, describe, expect, it } from "vitest"
 import {
-  buildAnalysisPrompt,
-  buildGenerationPrompt,
   computeIngestGenerationMaxTokens,
   computeIngestReviewMaxTokens,
   computeIngestSourceBudget,
   splitSourceIntoSemanticChunks,
 } from "./ingest"
+import {
+  buildChunkAnalysisSystemPrompt,
+  buildChunkAnalysisUserPrompt,
+  buildRpgAnalysisPrompt,
+  buildRpgGenerationPrompt,
+} from "./rpg-interactions/source-ingest"
 import { useWikiStore } from "@/stores/wiki-store"
+
+const OLD_LIVE_MARKER = "[RPG" + "-LIVE]"
+const OLD_LIVE_MARKER_FIELD = "live_" + "input_marker"
+const OLD_LIVE_ALLOWED_FIELD = "live_" + "scene_allowed"
+
+function buildAnalysisPrompt(
+  purpose: string,
+  index: string,
+  sourceContent: string = "",
+  wikiMode = "llmwikirpg",
+): string {
+  void wikiMode
+  return buildRpgAnalysisPrompt(purpose, index, sourceContent)
+}
+
+function buildGenerationPrompt(
+  schema: string,
+  purpose: string,
+  index: string,
+  sourceFileName: string,
+  overview?: string,
+  sourceContent: string = "",
+  sourceSummaryPath?: string,
+  wikiMode = "llmwikirpg",
+  stage1Analysis?: string,
+): string {
+  void wikiMode
+  return buildRpgGenerationPrompt(
+    schema,
+    purpose,
+    index,
+    sourceFileName,
+    overview,
+    sourceContent,
+    sourceSummaryPath,
+    stage1Analysis,
+  )
+}
 
 beforeEach(() => {
   useWikiStore.getState().setOutputLanguage("auto")
@@ -15,24 +57,22 @@ beforeEach(() => {
 
 // 构造一段最小可用的 RPG Stage 1 Source Profile 测试文本。
 // 作用：让 Stage 2 prompt 相关测试可以快速模拟不同的 needed_categories
-// 和 live_scene_allowed 组合，而不必在每个用例里手写完整分析结果。
+// 组合，而不必在每个用例里手写完整分析结果。
 function sourceProfile(
   neededCategories: string,
   extra: string = "",
-  liveSceneAllowed = false,
 ): string {
   return [
     "## Source Profile",
     "- source_kind: mixed",
-    // liveSceneAllowed 为 true 时模拟带有 [RPG-LIVE] 的实时跑团输入；否则模拟普通静态来源。
-    `- live_input_marker: ${liveSceneAllowed ? "[RPG-LIVE]" : "none"}`,
     "- dominant_focus: focused test fixture",
     // neededCategories 是每个测试关注的核心变量，用来验证 Stage 2 是否只展开指定目录合约。
     `- needed_categories: ${neededCategories}`,
     "- suppressed_categories: []",
-    // live_scene_allowed 决定 current-scene 合约是否能被展开。
-    `- live_scene_allowed: ${liveSceneAllowed ? "true" : "false"}`,
     "- event_extraction_mode: none",
+    "- runtime_utility_focus: mixed",
+    "- noise_ratio: low",
+    "- recommended_ingest_mode: focused_pages",
     // extra 允许单个测试补充额外 profile 行，保持默认 fixture 简短。
     extra,
     "",
@@ -87,16 +127,20 @@ describe("buildAnalysisPrompt language directive", () => {
 
     expect(prompt).toContain("## RPG Wiki Extraction Guidance")
     expect(prompt).toContain("## Source Profile")
-    expect(prompt).toContain("source_kind: setting_encyclopedia | plot_character_analysis | canon_narrative | dialogue_corpus | live_runtime_input | mixed | unknown")
-    expect(prompt).toContain("live_input_marker: [RPG-LIVE] | none")
-    expect(prompt).toContain("[RPG-LIVE]")
+    expect(prompt).toContain("source_kind: setting_encyclopedia | plot_character_analysis | canon_narrative | dialogue_corpus | mixed | unknown")
+    expect(prompt).not.toContain(OLD_LIVE_MARKER)
+    expect(prompt).not.toContain(OLD_LIVE_MARKER_FIELD)
     expect(prompt).toContain("dominant_focus")
     expect(prompt).toContain("needed_categories")
     expect(prompt).toContain("suppressed_categories")
-    expect(prompt).toContain("live_scene_allowed: true | false")
-    expect(prompt).toContain("Set live_scene_allowed to true only when the source text contains the exact [RPG-LIVE] marker")
-    expect(prompt).toContain("Only put current-scene in needed_categories when [RPG-LIVE] is present and live_scene_allowed is true")
+    expect(prompt).not.toContain(OLD_LIVE_ALLOWED_FIELD)
+    expect(prompt).toContain("Ordinary ingest must not put current-scene in needed_categories")
+    expect(prompt).toContain("Ordinary ingest must not generate or update wiki/current-scene/scene_state.md")
+    expect(prompt).toContain("current-scene is owned by the RPG Play/Runtime apply flow")
     expect(prompt).toContain("event_extraction_mode: none | discrete_only | plot_arc_preferred | split_if_possible")
+    expect(prompt).toContain("runtime_utility_focus: npc_portrayal | player_action | plot_pressure | state_update | atmosphere_style | mixed | low")
+    expect(prompt).toContain("noise_ratio: low | medium | high")
+    expect(prompt).toContain("recommended_ingest_mode: source_only | capsule_pages | focused_pages | review_first")
     expect(prompt).toContain("Stage 2 will use only Source Profile needed_categories")
     expect(prompt).toContain("Do not include sources in needed_categories")
     expect(prompt).toContain("Choose at most 4 needed_categories")
@@ -104,10 +148,16 @@ describe("buildAnalysisPrompt language directive", () => {
     expect(prompt).toContain("object_type")
     expect(prompt).toContain("suggested_route")
     expect(prompt).toContain("action: create | update | merge-into | ignore")
+    expect(prompt).toContain("runtime_utility: 0 | 1 | 2 | 3 | 4 | 5")
+    expect(prompt).toContain("runtime_use")
     expect(prompt).toContain("evidence_summary")
     expect(prompt).toContain("brief_inference")
     expect(prompt).toContain("confidence")
+    expect(prompt).toContain("canon_status: canon | inferred_for_play | uncertain")
     expect(prompt).toContain("uncertainty")
+    expect(prompt).toContain("## RP Runtime Signals")
+    expect(prompt).toContain("kind: portrayal_rule | dialogue_style | behavior_boundary")
+    expect(prompt).toContain("utility_score: 0 | 1 | 2 | 3 | 4 | 5")
     expect(prompt).toContain("## Ignored Noise")
     expect(prompt).toContain("## Merge Targets")
     expect(prompt).toContain("## Open Questions")
@@ -116,7 +166,10 @@ describe("buildAnalysisPrompt language directive", () => {
     expect(prompt).toContain("Allowed suggested_route values:")
     expect(prompt).toContain("Allowed action values:")
     expect(prompt).toContain("For every candidate object, decide what the object is before choosing a folder")
-    expect(prompt).toContain("Allowed object_type values: source, world_fact, npc_character, player_character, location, faction, item, plot_arc, discrete_event, current_scene_state, relationship, character_trait_or_trivia, wiki_noise")
+    expect(prompt).toContain("Assess whether the source contains RPG-runtime-useful material")
+    expect(prompt).toContain("set noise_ratio to high")
+    expect(prompt).toContain("recommended_ingest_mode controls generation intensity")
+    expect(prompt).toContain("Allowed object_type values: source, world_fact, npc_character, player_character, location, faction, item, plot_arc, discrete_event, relationship, character_trait_or_trivia, wiki_noise")
     expect(prompt).toContain("Object type glossary:")
     expect(prompt).toContain("world_fact: stable or slowly changing setting facts")
     expect(prompt).toContain("story protagonists, viewpoint characters, and controllable source-fiction characters stay here")
@@ -127,14 +180,37 @@ describe("buildAnalysisPrompt language directive", () => {
     expect(prompt).toContain("item: important equipment, clues, key objects")
     expect(prompt).toContain("plot_arc: routes, storylines, timelines, multi-event courses")
     expect(prompt).toContain("discrete_event: one confirmed already-happened event")
-    expect(prompt).toContain("static lore, biographies, summaries, endings, and epilogues are not current_scene_state")
+    expect(prompt).toContain("If source text describes a scene from canon")
     expect(prompt).toContain("relationship state, trust, tension, conflict, dependency, misunderstandings, history, changes, or constraints, not duplicate character introductions")
     expect(prompt).toContain("Routing discipline:")
+    expect(prompt).toContain("Score every candidate with runtime_utility:")
+    expect(prompt).toContain("Do not create or update non-source RPG pages for candidates with runtime_utility below 3")
+    expect(prompt).toContain("RP Runtime Signals must list only signals")
+    expect(prompt).toContain("Do not list trivia as RP Runtime Signals")
     expect(prompt).not.toContain("Routing boundaries:")
     expect(prompt).toContain("evidence_summary must briefly list the source evidence")
     expect(prompt).toContain("brief_inference must be one or two concise sentences")
     expect(prompt).toContain("confidence must be high, medium, or low")
     expect(prompt).toContain("uncertainty must name evidence gaps")
+  })
+
+  it("adds D1 directory-boundary rules to the RPG analysis prompt", () => {
+    const prompt = buildAnalysisPrompt("", "", "", "llmwikirpg")
+
+    expect(prompt).toContain("## RPG Directory Boundary Guidance")
+    expect(prompt).toContain("Do not put quests, rules, or style in ordinary Source Profile needed_categories")
+    expect(prompt).toContain("PC subjective goals, wishes, promises, commitments, personal motives")
+    expect(prompt).toContain("do not classify plot pressure or game objective progress as player goals")
+    expect(prompt).toContain("Game-recognized, trackable objectives")
+    expect(prompt).toContain("player TODO/checklist or quest ledger")
+    expect(prompt).toContain("executable mechanics, limits, costs, checks, allowed/disallowed actions, success/failure boundaries")
+    expect(prompt).toContain("ordinary source ingest should emit REVIEW instead of writing rules/")
+    expect(prompt).toContain("global writing rules are control_doc_import material for REVIEW")
+    expect(prompt).toContain("Forbidden in ordinary Source Ingest")
+    expect(prompt).toContain("wiki/memory/**")
+    expect(prompt).toContain("wiki/outlines/**")
+    expect(prompt).toContain("character-specific voice, catchphrases, address habits, politeness level")
+    expect(prompt).toContain("player current holdings, quantity, equipped/backpack status")
   })
 
   it("keeps RPG analysis prompt free of default, page-contract, and domain-specific pollution", () => {
@@ -240,9 +316,9 @@ describe("buildGenerationPrompt language directive", () => {
     expect(prompt).not.toContain("Events contract:")
     expect(prompt).not.toContain("Plot-arcs contract:")
     expect(prompt).not.toContain("Relationships contract:")
-    expect(prompt).not.toContain("Locations short contract:")
-    expect(prompt).not.toContain("Factions short contract:")
-    expect(prompt).not.toContain("Items short contract:")
+    expect(prompt).not.toContain("Locations scene-card contract:")
+    expect(prompt).not.toContain("Factions pressure-source contract:")
+    expect(prompt).not.toContain("Items runtime-function contract:")
     expect(prompt).not.toContain("## What to generate")
     expect(prompt).not.toContain("Entity or schema-defined typed pages for key named things identified in the analysis")
     expect(prompt).not.toContain("Concept or schema-defined typed pages for key ideas, methods, techniques, and abstractions")
@@ -254,7 +330,6 @@ describe("buildGenerationPrompt language directive", () => {
       "- source_kind: mixed",
       "- dominant_focus: incomplete profile",
       "- suppressed_categories: []",
-      "- live_scene_allowed: false",
       "- event_extraction_mode: none",
     ].join("\n")
     const prompt = buildGenerationPrompt("", "", "", "rpg-session.md", undefined, "", undefined, "llmwikirpg", invalidProfile)
@@ -280,6 +355,11 @@ describe("buildGenerationPrompt language directive", () => {
     expect(prompt).toContain("## Focused RPG Page Guidance")
     expect(prompt).toContain("selected only from Stage 1 ## Source Profile needed_categories: world")
     expect(prompt).toContain("World contract:")
+    expect(prompt).toContain("Runtime Capsule")
+    expect(prompt).toContain("Runtime page soft budgets:")
+    expect(prompt).toContain("Use Stage 1 Candidate Objects and RP Runtime Signals as a utility gate")
+    expect(prompt).toContain("utility_score/runtime_utility 4-5: prioritize in Runtime Capsule")
+    expect(prompt).toContain("If ## Structured RP Runtime Signals is present")
     expect(prompt).not.toContain("### characters (wiki/characters/)")
     expect(prompt).not.toContain("Character page contract for wiki/characters/*.md")
     expect(prompt).not.toContain("Player contract:")
@@ -287,9 +367,9 @@ describe("buildGenerationPrompt language directive", () => {
     expect(prompt).not.toContain("Events contract:")
     expect(prompt).not.toContain("Plot-arcs contract:")
     expect(prompt).not.toContain("Relationships contract:")
-    expect(prompt).not.toContain("Locations short contract:")
-    expect(prompt).not.toContain("Factions short contract:")
-    expect(prompt).not.toContain("Items short contract:")
+    expect(prompt).not.toContain("Locations scene-card contract:")
+    expect(prompt).not.toContain("Factions pressure-source contract:")
+    expect(prompt).not.toContain("Items runtime-function contract:")
   })
 
   it("injects only character and relationship contracts from Source Profile needed_categories", () => {
@@ -306,19 +386,22 @@ describe("buildGenerationPrompt language directive", () => {
     )
 
     expect(prompt).toContain("Character page contract for wiki/characters/*.md")
-    expect(prompt).toContain("## Character Impression")
+    expect(prompt).toContain("## Runtime Capsule")
+    expect(prompt).toContain("Relationship Levers")
+    expect(prompt).toContain("Build a runtime-first NPC operation model")
+    expect(prompt).not.toContain("- ## Character Impression")
     expect(prompt).toContain("Relationships contract:")
     expect(prompt).not.toContain("World contract:")
     expect(prompt).not.toContain("Player contract:")
     expect(prompt).not.toContain("Current-scene contract:")
     expect(prompt).not.toContain("Events contract:")
     expect(prompt).not.toContain("Plot-arcs contract:")
-    expect(prompt).not.toContain("Locations short contract:")
-    expect(prompt).not.toContain("Factions short contract:")
-    expect(prompt).not.toContain("Items short contract:")
+    expect(prompt).not.toContain("Locations scene-card contract:")
+    expect(prompt).not.toContain("Factions pressure-source contract:")
+    expect(prompt).not.toContain("Items runtime-function contract:")
   })
 
-  it("does not expand the current-scene contract without live_scene_allowed true", () => {
+  it("does not expand the current-scene contract from ordinary needed_categories", () => {
     const prompt = buildGenerationPrompt(
       "",
       "",
@@ -331,12 +414,12 @@ describe("buildGenerationPrompt language directive", () => {
       sourceProfile("[current-scene]"),
     )
 
-    expect(prompt).toContain("REVIEW: current-scene was requested")
-    expect(prompt).toContain("[RPG-LIVE]")
+    expect(prompt).toContain("No valid ## Source Profile with needed_categories was found")
+    expect(prompt).not.toContain(OLD_LIVE_MARKER)
     expect(prompt).not.toContain("Current-scene contract:")
   })
 
-  it("expands the current-scene contract only when live_scene_allowed is true", () => {
+  it("does not expand the current-scene contract even if old live-scene text is present", () => {
     const prompt = buildGenerationPrompt(
       "",
       "",
@@ -346,13 +429,15 @@ describe("buildGenerationPrompt language directive", () => {
       "",
       undefined,
       "llmwikirpg",
-      sourceProfile("[current-scene]", "", true),
+      [
+        sourceProfile("[current-scene]", `- ${OLD_LIVE_ALLOWED_FIELD}: true`),
+        `- ${OLD_LIVE_MARKER_FIELD}: legacy`,
+      ].join("\n"),
     )
 
-    expect(prompt).toContain("Current-scene contract:")
-    expect(prompt).toContain("The source input must contain the exact [RPG-LIVE] marker")
-    expect(prompt).toContain("Use exactly wiki/current-scene/scene_state.md")
-    expect(prompt).toContain("Do not copy [RPG-LIVE] into page content")
+    expect(prompt).not.toContain("Current-scene contract:")
+    expect(prompt).not.toContain(OLD_LIVE_MARKER)
+    expect(prompt).toContain("No valid ## Source Profile with needed_categories was found")
   })
 
   it("does not infer focused RPG contracts from schema, purpose, source paths, object_type, or suggested_route", () => {
@@ -387,9 +472,9 @@ describe("buildGenerationPrompt language directive", () => {
     )
 
     expect(prompt).toContain("World contract:")
-    expect(prompt).toContain("Locations short contract:")
-    expect(prompt).toContain("Factions short contract:")
-    expect(prompt).toContain("Items short contract:")
+    expect(prompt).toContain("Locations scene-card contract:")
+    expect(prompt).toContain("Factions pressure-source contract:")
+    expect(prompt).toContain("Items runtime-function contract:")
     expect(prompt).not.toContain("Events contract:")
     expect(prompt).not.toContain("Sources contract:")
   })
@@ -401,7 +486,6 @@ describe("buildGenerationPrompt language directive", () => {
       "- dominant_focus: route-level narrative",
       "- needed_categories: [plot-arcs, events]",
       "- suppressed_categories: []",
-      "- live_scene_allowed: false",
       "- event_extraction_mode: plot_arc_preferred",
       "",
       "## Candidate Objects",
@@ -413,6 +497,61 @@ describe("buildGenerationPrompt language directive", () => {
     expect(prompt).toContain("Events contract:")
     expect(prompt).toContain("Source Profile event_extraction_mode: plot_arc_preferred")
     expect(prompt).toContain("prefer plot-arcs unless Stage 1 clearly split discrete confirmed events")
+  })
+
+  it("requires structured signal gating when Stage 2 sees long-source signals", () => {
+    const prompt = buildGenerationPrompt(
+      "",
+      "",
+      "",
+      "long-route.md",
+      undefined,
+      "",
+      undefined,
+      "llmwikirpg",
+      [
+        sourceProfile("[plot-arcs, events]", "- event_extraction_mode: split_if_possible"),
+        "## Structured RP Runtime Signals",
+        "- utilityScore 0-1: source summary / ignored noise only",
+      ].join("\n"),
+    )
+
+    expect(prompt).toContain("treat it as the authoritative utility-scored signal list")
+    expect(prompt).toContain("utility_score/runtime_utility 0-1: keep out of non-source pages and do not use them as page-generation material")
+    expect(prompt).toContain("utility_score/runtime_utility 2: use only as REVIEW or Evidence and Uncertainty")
+    expect(prompt).toContain("Do not compress long plot/course recaps into one wiki/events/ page")
+    expect(prompt).toContain("only confirmed discrete events go to wiki/events/")
+    expect(prompt).toContain("Unresolved conflicts, foreshadowing, possible developments, and progression conditions belong in wiki/plot-arcs/ or REVIEW")
+    expect(prompt).toContain("For structured signals scored 4-5, put the usable target-page material first in ## Runtime Capsule")
+  })
+
+  it("adds D1 directory-boundary rules to the RPG generation prompt", () => {
+    const prompt = buildGenerationPrompt(
+      "",
+      "",
+      "",
+      "session.md",
+      undefined,
+      "",
+      undefined,
+      "llmwikirpg",
+      sourceProfile("[player, plot-arcs, characters, items]"),
+    )
+
+    expect(prompt).toContain("## RPG Directory Boundary Guidance")
+    expect(prompt).toContain("PC subjective goals may enter wiki/player/goals.md only for an explicitly declared current PC")
+    expect(prompt).toContain("Do not create wiki/quests/*.md in ordinary Source Ingest")
+    expect(prompt).toContain("Plot pressure, unresolved conflict, foreshadowing, and possible development belong in wiki/plot-arcs/, not wiki/player/goals.md")
+    expect(prompt).toContain("Player TODO/checklists are REVIEW in ordinary Source Ingest")
+    expect(prompt).toContain("Global writing rules are control_doc_import material for REVIEW")
+    expect(prompt).toContain("character-specific voice, catchphrases, address habits, politeness level")
+    expect(prompt).toContain("Executable mechanics, limits, costs, checks")
+    expect(prompt).toContain("control_doc_import material for REVIEW")
+    expect(prompt).toContain("world/ should keep only background, common knowledge, history, society, geography, and stable setting facts")
+    expect(prompt).toContain("wiki/player/inventory.md is for current holdings")
+    expect(prompt).toContain("Do not store player TODO/checklists or quest progress ledgers in plot-arcs")
+    expect(prompt).toContain("Character-specific voice, catchphrases, address habits, politeness level, and avoided topics belong here, not in global wiki/style/")
+    expect(prompt).toContain("Do not replace wiki/player/inventory.md")
   })
 
   it("keeps domain guidance independent from the generic RPG generation prompt", () => {
@@ -492,5 +631,48 @@ describe("long-source ingest planning", () => {
     expect(chunks.some((chunk) => chunk.headingPath.includes("Section Two"))).toBe(true)
     expect(chunks[1].overlapBefore.length).toBeGreaterThan(0)
     expect(chunks[1].main.startsWith(chunks[0].main.slice(-200))).toBe(false)
+  })
+
+  it("asks each long-source chunk to output structured RP Runtime Signals JSON", () => {
+    const prompt = buildChunkAnalysisSystemPrompt("purpose", "schema", "index", "long source text")
+
+    expect(prompt).toContain("## RP Runtime Signals JSON")
+    expect(prompt).toContain("Output a fenced JSON array of RpgIngestSignal objects")
+    expect(prompt).toContain("JSON object fields: kind, optional targetPath, summary, rpUse, evidence, utilityScore, confidence, canonStatus")
+    expect(prompt).toContain("utilityScore rules: 0 noise discard/ignored noise; 1 source/archive value only; 2 weak or uncertain signal")
+    expect(prompt).toContain("4 strong source-ingest signal for Runtime Capsule")
+    expect(prompt).toContain("5 hard constraint")
+    expect(prompt).toContain("emit kind noise with utilityScore 0 or 1")
+    expect(prompt).toContain("emit state_change signals for wiki/events/ only when the main chunk contains a confirmed discrete already-happened event")
+    expect(prompt).toContain("## Source Ingest Target Policy")
+    expect(prompt).toContain("wiki/*/runtime/**")
+    expect(prompt).toContain("wiki/current-scene/**")
+    expect(prompt).toContain("Do not target wiki/quests/ in ordinary Source Ingest")
+    expect(prompt).toContain("Do not target wiki/player/goals.md for plot pressure")
+    expect(prompt).toContain("Do not turn player TODO/checklists into plot-arcs")
+    expect(prompt).toContain("Executable mechanics, limits, costs, checks, allowed/disallowed actions")
+    expect(prompt).toContain("campaign_setup_import")
+    expect(prompt).toContain("runtime_update_apply")
+  })
+
+  it("reminds long-source chunk user prompts to return all three sections", () => {
+    const prompt = buildChunkAnalysisUserPrompt(
+      "raw/sources/long.md",
+      undefined,
+      {
+        id: "chunk-1",
+        index: 1,
+        total: 2,
+        headingPath: "Chapter One",
+        overlapBefore: "",
+        main: "Main chunk text",
+      },
+      "digest",
+    )
+
+    expect(prompt).toContain("Return only the three requested sections")
+    expect(prompt).toContain("## Chunk Analysis")
+    expect(prompt).toContain("## RP Runtime Signals JSON")
+    expect(prompt).toContain("## Updated Global Digest")
   })
 })

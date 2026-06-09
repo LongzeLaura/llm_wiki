@@ -19,6 +19,10 @@ describe("getWikiTypeStyle", () => {
     expect(getWikiTypeStyle("  memory  ")).toBe(WIKI_TYPE_STYLES.memory)
   })
 
+  it("returns the RPG quests style", () => {
+    expect(getWikiTypeStyle("quests")).toBe(WIKI_TYPE_STYLES.quests)
+  })
+
   it("returns fallback for null", () => {
     expect(getWikiTypeStyle(null)).toBe(FALLBACK_TYPE_STYLE)
   })

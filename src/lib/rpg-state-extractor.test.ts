@@ -29,11 +29,12 @@ describe("RPG State Update Extractor", () => {
     const result = extractRpgStateUpdates({ turnRecord })
 
     expect(result.warnings).toEqual([])
-    expect(result.proposedUpdates).toHaveLength(5)
+    expect(result.proposedUpdates).toHaveLength(6)
     expect(result.proposedUpdates.map((update) => [update.targetPath, update.strategy])).toEqual([
       ["wiki/current-scene/scene_state.md", "overwrite"],
       ["wiki/events/canal-gate-sigil.md", "append"],
       ["wiki/player/player.md", "merge"],
+      ["wiki/quests/main.md", "merge"],
       ["wiki/relationships/iven-mira.md", "merge"],
       ["wiki/characters/runtime/mira.md", "merge"],
     ])
@@ -79,7 +80,7 @@ describe("RPG State Update Extractor", () => {
     expect(JSON.stringify(pending)).not.toContain(unchosenPlayerFacingText)
   })
 
-  it("supports current-scene, events, player, relationships, and runtime overlay targets", () => {
+  it("supports current-scene, events, player, quests, relationships, and runtime overlay targets", () => {
     const proposedUpdates = extractRpgStateUpdates({ turnRecord: sampleCompletedTurnRecord() }).proposedUpdates
 
     expect(proposedUpdates).toEqual(
@@ -87,6 +88,7 @@ describe("RPG State Update Extractor", () => {
         expect.objectContaining({ targetPath: "wiki/current-scene/scene_state.md", strategy: "overwrite" }),
         expect.objectContaining({ targetPath: "wiki/events/canal-gate-sigil.md", strategy: "append" }),
         expect.objectContaining({ targetPath: "wiki/player/player.md", strategy: "merge" }),
+        expect.objectContaining({ targetPath: "wiki/quests/main.md", strategy: "merge" }),
         expect.objectContaining({ targetPath: "wiki/relationships/iven-mira.md", strategy: "merge" }),
         expect.objectContaining({ targetPath: "wiki/characters/runtime/mira.md", strategy: "merge" }),
       ]),
@@ -114,6 +116,12 @@ describe("RPG State Update Extractor", () => {
           strategy: "merge",
           reason: "This legacy concept path must be filtered.",
           content: "LEGACY_CONCEPT_POISON",
+        },
+        {
+          targetPath: "wiki/memory/manual.md",
+          strategy: "merge",
+          reason: "Memory pages require explicit user action.",
+          content: "MEMORY_POISON",
         },
         {
           targetPath: "wiki/characters/mira.md",
@@ -166,7 +174,7 @@ describe("RPG State Update Extractor", () => {
 
     expect(result.proposedUpdates).toHaveLength(1)
     expect(result.proposedUpdates[0].targetPath).toBe("wiki/current-scene/scene_state.md")
-    expect(result.warnings).toHaveLength(9)
+    expect(result.warnings).toHaveLength(10)
     expect(serialized).not.toContain("LEGACY_ENTITY_POISON")
     expect(serialized).not.toContain("LEGACY_CONCEPT_POISON")
     expect(serialized).not.toContain("BASE_CHARACTER_POISON")
@@ -176,6 +184,7 @@ describe("RPG State Update Extractor", () => {
     expect(serialized).not.toContain("WORLD_POISON")
     expect(serialized).not.toContain("STYLE_POISON")
     expect(serialized).not.toContain("RULES_POISON")
+    expect(serialized).not.toContain("MEMORY_POISON")
     expect(result.proposedUpdates[0].references).toEqual(["wiki/current-scene/scene_state.md"])
   })
 
@@ -246,6 +255,12 @@ function sampleCompletedTurnRecord(): RpgTurnRecord {
         strategy: "merge",
         reason: "Update the player state after using the lantern key.",
         content: "## Current State\n\nIven knows the lantern key reacts to the canal gate's lowest sigil.",
+      },
+      {
+        targetPath: "wiki/quests/main.md",
+        strategy: "merge",
+        reason: "Track objective progress after the completed sigil inspection.",
+        content: "## Current Objective\n\nThe canal gate objective is blocked until Iven decides how to use the lantern key.",
       },
       {
         targetPath: "wiki/relationships/iven-mira.md",

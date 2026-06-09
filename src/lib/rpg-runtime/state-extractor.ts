@@ -1,3 +1,5 @@
+import { createRpgWikiUpdateBlockPattern } from "../rpg-interactions/runtime/runtime-update-protocol"
+import { validateRpgRuntimeUpdateTarget } from "../rpg-interactions/runtime/wiki-update-policy"
 import { cleanRpgReferences, type RpgTurnRecord } from "./turn-model"
 
 export type RpgUpdateStrategy = "overwrite" | "append" | "merge"
@@ -28,7 +30,7 @@ interface ParsedUpdateBlock {
   content: string
 }
 
-const UPDATE_BLOCK_PATTERN = /```rpg-wiki-update\s*\n([\s\S]*?)```/g
+const UPDATE_BLOCK_PATTERN = createRpgWikiUpdateBlockPattern()
 const HEADER_DELIMITER_PATTERN = /\r?\n---\r?\n/
 
 export function extractRpgStateUpdates(input: ExtractRpgStateUpdatesInput): ExtractRpgStateUpdatesResult {
@@ -39,7 +41,7 @@ export function extractRpgStateUpdates(input: ExtractRpgStateUpdatesInput): Extr
 
   const blocks = parseUpdateBlocks(input.turnRecord.generatedNarrative, warnings)
   blocks.forEach((block, index) => {
-    const validation = validateUpdateTarget(block.targetPath, block.strategy)
+    const validation = validateRpgRuntimeUpdateTarget(block.targetPath, block.strategy)
     if (!validation.ok) {
       warnings.push(`Skipped RPG update block ${index + 1}: ${validation.reason}`)
       return
@@ -104,65 +106,6 @@ function parseHeaderFields(header: string): Map<string, string> {
     if (key) fields.set(key, value)
   }
   return fields
-}
-
-type TargetValidation =
-  | { ok: true; targetPath: string; strategy: RpgUpdateStrategy }
-  | { ok: false; reason: string }
-
-function validateUpdateTarget(targetPath: string, strategy: string): TargetValidation {
-  const normalizedPath = normalizeWikiPath(targetPath)
-  if (!isRpgUpdateStrategy(strategy)) {
-    return { ok: false, reason: `strategy "${strategy}" is not allowed.` }
-  }
-
-  if (normalizedPath === "wiki/current-scene/scene_state.md") {
-    return requireStrategy(normalizedPath, strategy, "overwrite")
-  }
-
-  if (matchesDirectMarkdownChild(normalizedPath, "wiki/events/")) {
-    return requireStrategy(normalizedPath, strategy, "append")
-  }
-
-  if (
-    matchesDirectMarkdownChild(normalizedPath, "wiki/player/") ||
-    matchesDirectMarkdownChild(normalizedPath, "wiki/relationships/") ||
-    matchesDirectMarkdownChild(normalizedPath, "wiki/plot-arcs/") ||
-    matchesDirectMarkdownChild(normalizedPath, "wiki/characters/runtime/") ||
-    matchesDirectMarkdownChild(normalizedPath, "wiki/locations/runtime/") ||
-    matchesDirectMarkdownChild(normalizedPath, "wiki/factions/runtime/") ||
-    matchesDirectMarkdownChild(normalizedPath, "wiki/items/runtime/")
-  ) {
-    return requireStrategy(normalizedPath, strategy, "merge")
-  }
-
-  return { ok: false, reason: `targetPath "${normalizedPath}" is outside allowed runtime update paths.` }
-}
-
-function requireStrategy(
-  targetPath: string,
-  actual: RpgUpdateStrategy,
-  expected: RpgUpdateStrategy,
-): TargetValidation {
-  if (actual !== expected) {
-    return { ok: false, reason: `targetPath "${targetPath}" requires strategy "${expected}".` }
-  }
-  return { ok: true, targetPath, strategy: actual }
-}
-
-function isRpgUpdateStrategy(value: string): value is RpgUpdateStrategy {
-  return value === "overwrite" || value === "append" || value === "merge"
-}
-
-function matchesDirectMarkdownChild(path: string, prefix: string): boolean {
-  if (!path.startsWith(prefix) || !path.endsWith(".md")) return false
-
-  const rest = path.slice(prefix.length)
-  return rest.length > ".md".length && !rest.includes("/")
-}
-
-function normalizeWikiPath(path: string): string {
-  return path.trim().replace(/\\/g, "/").replace(/\/+/g, "/").replace(/^\.\//, "").replace(/^\/+/, "")
 }
 
 function createStableUpdateId(sourceTurnId: string, targetPath: string, index: number): string {

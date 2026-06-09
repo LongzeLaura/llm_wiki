@@ -3,9 +3,11 @@ import fs from "node:fs/promises"
 import { createTempProject, readFileRaw, realFs, writeFileRaw } from "@/test-helpers/fs-temp"
 import {
   createFixtureNarrationAdapter,
-  runRpgTurn,
   validateRpgTurnResult,
   type RpgNarrationPrompt,
+} from "./rpg-interactions/runtime"
+import {
+  runRpgTurn,
   type RpgTurnResult,
   type SubmittedAction,
 } from "./rpg-runtime"

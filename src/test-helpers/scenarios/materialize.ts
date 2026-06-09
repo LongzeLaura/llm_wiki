@@ -8,8 +8,8 @@ import path from "node:path"
 
 /**
  * Minimal shape every scenario shares: name, description, initialWiki,
- * optional llmResponse, expected. Scenario-specific fields (reviews for
- * sweep, pageToEnrich for enrich, etc.) are picked up opportunistically.
+ * optional llmResponse, expected. Scenario-specific fields such as reviews
+ * and ingest/search inputs are picked up opportunistically.
  */
 type AnyScenario = {
   name: string
@@ -19,7 +19,6 @@ type AnyScenario = {
   expected: unknown
   // optional per-domain fields
   reviews?: unknown
-  pageToEnrich?: string
   source?: { path: string; content: string }
   analysisResponse?: string
   generationResponse?: string
@@ -49,15 +48,6 @@ export async function materializeScenario(
     await fs.writeFile(
       path.join(scenarioPath, "reviews.json"),
       JSON.stringify(scenario.reviews, null, 2),
-      "utf-8",
-    )
-  }
-
-  // page-to-enrich.txt — only for enrich scenarios; stored as a pointer file
-  if (scenario.pageToEnrich !== undefined) {
-    await fs.writeFile(
-      path.join(scenarioPath, "page-to-enrich.txt"),
-      scenario.pageToEnrich,
       "utf-8",
     )
   }

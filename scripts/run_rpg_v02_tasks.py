@@ -55,7 +55,7 @@ v0.1 已经完成 RPG mode 的基础架构，但真实抽取中发现：
 - 缺少针对真实抽取问题的测试
 
 本轮要求：
-- 保持 legacy LLM Wiki 功能兼容
+- 按当前 RPG-only 项目边界执行，不为旧 default / legacy llm_wiki 设计兼容或迁移路径
 - 不要大规模重构 UI
 - 不要引入大型依赖
 - 不要写死 Fate 专有规则
@@ -177,7 +177,7 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--agent",
-        choices=("codex", "opencode"),
+        choices=("codex",),
         default="codex",
         help="Named agent preset used when --agent-command is not provided.",
     )
@@ -463,7 +463,6 @@ def determine_agent_command(args: argparse.Namespace) -> str:
 
     presets = {
         "codex": "codex exec",
-        "opencode": "opencode run",
     }
     return presets[args.agent]
 

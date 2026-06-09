@@ -52,7 +52,7 @@
 需要特别说明：
 
 - v0.1 的 smoke test 只能证明目录路由、写入策略和少量 helper 行为成立，不能证明真实 LLM 在语义分类上已经稳定。
-- v0.2 的重点不是重写架构，而是在保持 legacy/default 行为兼容的前提下，修复真实抽取里最常见的语义分类错误。
+- v0.2 的重点不是重写架构，而是在当时实现边界内修复真实抽取里最常见的语义分类错误；新的后续方案不再默认考虑旧项目兼容。
 
 当前这些问题主要靠 prompt/schema 修复：
 
@@ -82,7 +82,91 @@
 
 ---
 
+## Import Mode 与固定 Schema Slot 契约
+
+本节冻结 RPG import / apply 的文档契约。后续实现可以把这些契约转成 code-readable schema helper，但本阶段只定义名称、语义边界、路径边界和写入策略，不改变运行时代码、ordinary ingest、UI 或测试。
+
+### Import / Apply Mode
+
+| mode | 语义 | 典型输入 | 允许目标路径 | 禁止路径 / 禁止行为 | 写入策略边界 |
+|---|---|---|---|---|---|
+| `source_ingest` | 普通来源资料导入；有损编译器，把来源材料压缩成 runtime-useful wiki 页面。 | 原作设定、角色分析、人物百科、剧情梗概、对白语料、世界书、网络资料。 | `wiki/sources/`、`wiki/world/`、`wiki/characters/`、`wiki/locations/`、`wiki/factions/`、`wiki/items/`、`wiki/plot-arcs/`、`wiki/events/`、`wiki/relationships/`；只有来源明确声明当前 PC 时，才可写固定 `wiki/player/*.md` slot。 | 不写 `wiki/current-scene/`；不写 `wiki/rules/`、`wiki/style/`、`wiki/memory/`、`wiki/outlines/main.md` 或 `wiki/outlines/progress.md`；不把未来大纲、可能发展或候选行动写入 `events`；不把原作主角默认写入 `player`；不写 legacy `entities`、`concepts`、`queries` 等旧目录。 | 走 ordinary ingest 的安全写入边界；对固定 player slot 只能在明确 PC 语义下合并，不新增、不删除任意 `wiki/player/*.md` 文件。 |
+| `control_doc_import` | 控制文档导入；保真规范化器，保护用户显式控制语义。 | 主线大纲、章节安排、揭示顺序、跑团规则、世界规则、桌规、文风要求、禁用词、hard gate、玩家偏好、长期提示、会话笔记。 | 固定控制 slot：`wiki/outlines/main.md`、`wiki/outlines/progress.md`、`wiki/rules/core.md`、`wiki/rules/world.md`、`wiki/rules/table.md`、`wiki/style/narration.md`、`wiki/style/dialogue.md`、`wiki/style/forbidden.md`、`wiki/memory/long-term.md`、`wiki/memory/session-notes.md`、`wiki/memory/player-preferences.md`；可另存 `wiki/sources/imports/<source>.md` 作为 raw source anchor。 | 不写 `wiki/current-scene/`；不写 `events`；不把 `Possible Futures` 或未来 reveal 当作已发生事实；不丢弃 `{{setvar::...}}`、禁用词、hard gate 或用户显式控制块；不把规则、文风、偏好当作剧情状态。 | 默认 `manual_or_review_only`；只做结构化、frontmatter、section 规范化、wikilink enrichment 和必要 runtime-facing section 补齐。 |
+| `campaign_setup_import` | 战役初始化导入；开局状态 bootstrap，把 PC、序章事实、初始目标、初始关系和当前场景分层落位。 | 玩家角色设定、初始能力、背包、已知信息、开局目标、初始关系、已发生序章、游戏开始时当前场景、开局地点和在场人物。 | 固定 player slot、`wiki/current-scene/scene_state.md`、`wiki/events/prologue.md`、`wiki/quests/*.md`、`wiki/relationships/*.md`、`wiki/outlines/main.md`、`wiki/outlines/progress.md`、`wiki/plot-arcs/*.md`、`wiki/locations/runtime/*.md`、`wiki/items/runtime/*.md`。 | 不把开场场景混入 `source_ingest`；不把未来剧情写入 `events`；不把玩家能力拆入 `rules/`；不把 NPC 当前状态写入 base `characters/*.md`；不新增或删除任意 player 文件。 | `current-scene` 显式 bootstrap/overwrite；固定 player slot merge；序章事件 append/create；大纲和规则类内容仍按 review/manual 边界处理。 |
+| `runtime_update_apply` | 游玩中状态写回；runtime apply，不是文件导入，只应用已确认发生的回合结果。 | 已完成 RPG 回合记录、玩家已提交行动、已生成正文、已确认 references、accepted pending updates。 | `wiki/current-scene/scene_state.md`、`wiki/events/*.md`、固定 `wiki/player/*.md`、`wiki/quests/*.md`、`wiki/outlines/progress.md`、`wiki/relationships/runtime/*.md`、`wiki/plot-arcs/runtime/*.md`、`wiki/characters/runtime/*.md`、`wiki/locations/runtime/*.md`、`wiki/factions/runtime/*.md`、`wiki/items/runtime/*.md`。 | 不写 `wiki/sources/`、`wiki/world/`、`wiki/rules/`、`wiki/style/`、`wiki/memory/`、`wiki/outlines/main.md`、base `characters/locations/factions/items`、base `relationships/*.md`、base `plot-arcs/*.md` 或 legacy 目录；不写候选行动、未选择选项、未来可能和未确认推测。 | 只能通过 pending/review/apply 边界；`current-scene` overwrite；`events` append/create；player、quests、outline progress 和 runtime overlays merge。 |
+
+### 固定 Schema Slots
+
+这些 slot 是全新 `llmWikiRPG` 项目的固定入口文件，也是后续 Context Compiler 读取优先级和 import target policy 的基础。缺失固定 slot 表示新项目结构不完整，应产生 warning 或可修复结构提示；这不是旧项目迁移、legacy fallback 或旧路径保留场景。
+
+| slotId | path | owner | requiredForNewProject | runtimePriority | importPolicy | writePolicy |
+|---|---|---|---|---|---|---|
+| `main_outline` | `wiki/outlines/main.md` | `control_doc` | true | high | `controlled_canonicalize` | `manual_or_review_only` |
+| `outline_progress` | `wiki/outlines/progress.md` | `runtime` | true | high | `runtime_apply` | `merge` |
+| `rules_core` | `wiki/rules/core.md` | `control_doc` | true | critical | `controlled_canonicalize` | `manual_or_review_only` |
+| `rules_world` | `wiki/rules/world.md` | `control_doc` | true | high | `controlled_canonicalize` | `manual_or_review_only` |
+| `rules_table` | `wiki/rules/table.md` | `control_doc` | true | high | `controlled_canonicalize` | `manual_or_review_only` |
+| `style_narration` | `wiki/style/narration.md` | `control_doc` | true | high | `controlled_canonicalize` | `manual_or_review_only` |
+| `style_dialogue` | `wiki/style/dialogue.md` | `control_doc` | true | high | `controlled_canonicalize` | `manual_or_review_only` |
+| `style_forbidden` | `wiki/style/forbidden.md` | `control_doc` | true | critical | `controlled_canonicalize` | `manual_or_review_only` |
+| `memory_long_term` | `wiki/memory/long-term.md` | `control_doc` | true | normal | `controlled_canonicalize` | `manual_or_review_only` |
+| `memory_session_notes` | `wiki/memory/session-notes.md` | `control_doc` | true | reference | `controlled_canonicalize` | `manual_or_review_only` |
+| `memory_player_preferences` | `wiki/memory/player-preferences.md` | `control_doc` | true | critical | `controlled_canonicalize` | `manual_or_review_only` |
+| `current_scene` | `wiki/current-scene/scene_state.md` | `runtime` | true | critical | `runtime_apply` | `overwrite` |
+| `player_main` | `wiki/player/player.md` | `campaign_setup` | true | critical | `campaign_bootstrap` | `merge` |
+| `player_abilities` | `wiki/player/abilities.md` | `campaign_setup` | true | high | `campaign_bootstrap` | `merge` |
+| `player_inventory` | `wiki/player/inventory.md` | `campaign_setup` | true | high | `campaign_bootstrap` | `merge` |
+| `player_goals` | `wiki/player/goals.md` | `campaign_setup` | true | high | `campaign_bootstrap` | `merge` |
+| `player_known_information` | `wiki/player/known_information.md` | `campaign_setup` | true | high | `campaign_bootstrap` | `merge` |
+
+`owner` 表示该 slot 的主要语义拥有者；显式的 `campaign_setup_import` 或 `control_doc_import` 可以初始化对应 slot，但后续 runtime 写回仍必须遵守该 slot 的 `writePolicy` 和 mode 禁止路径。
+
+### 固定 `player/` 文件集合
+
+`wiki/player/` 固定包含以下文件：
+
+```text
+wiki/player/player.md
+wiki/player/abilities.md
+wiki/player/inventory.md
+wiki/player/goals.md
+wiki/player/known_information.md
+```
+
+约定：
+
+- `player/player.md`：PC 身份、背景、稳定设定、当前状态摘要。
+- `player/abilities.md`：玩家能力、技能、限制、代价、熟练度、当前可用性；不拆到 `rules/`。
+- `player/inventory.md`：玩家当前持有、数量、装备状态、消耗状态。
+- `player/goals.md`：玩家/PC 的主观目标、愿望、承诺、个人动机。
+- `player/known_information.md`：玩家已知信息、误解、只对玩家可见或玩家尚不知道的信息边界。
+- import framework 和 runtime apply 不应新增或删除 `wiki/player/*.md`；额外 player 子主题应合并进上述固定 slot。
+
+### `outlines/main.md` 与 `outlines/progress.md`
+
+`outlines/main.md` 是作者/GM 侧主线大纲、章节结构、揭示顺序和未来剧情指导，默认 `manual_or_review_only`，不被 runtime 每轮直接改写。
+
+`outlines/progress.md` 是当前游玩过程相对大纲的位置记录，可由 `runtime_update_apply` 在 pending/review 边界内 merge 更新，用来记录当前处于哪一幕、哪些 beat 已完成/跳过/提前/延后、下一步自然承接哪个 beat。
+
+未来剧情、分支条件和 delayed reveal 可以存在于 `outlines/main.md`，但不能被写入 `events`。已发生事实进入 `events`；相对大纲的进度进入 `outlines/progress.md`。
+
+### Base / Runtime Overlay 边界
+
+base 页保存初始/稳定结构，runtime overlay 保存本战役游玩中持续变化：
+
+```text
+characters/*.md              + characters/runtime/*.md
+locations/*.md               + locations/runtime/*.md
+factions/*.md                + factions/runtime/*.md
+items/*.md                   + items/runtime/*.md
+relationships/*.md           + relationships/runtime/*.md
+plot-arcs/*.md               + plot-arcs/runtime/*.md
+```
+
+Context Compiler 读取时先读 base，再叠加 runtime overlay，得到当前战役视角。overlay 是分层读取/组织模型；merge 是更新单个目标文件的写入策略。`runtime_update_apply` 不直接改写 base `relationships/*.md` 或 base `plot-arcs/*.md`，关系和剧情弧的运行时变化写入对应 `runtime/` overlay。
+
 # 目录定义
+
 
 ## `sources/`
 
@@ -175,9 +259,9 @@ world/supernatural_presence.md
 world/social_structure.md
 ```
 
-### 与 legacy `concepts/` 的兼容边界
+### 与旧 `concepts/` 路径的切分边界
 
-为兼容 legacy `concepts/`，RPG 模式下只应把以下内容独立写入 `concepts/`：
+如果代码中仍存在旧 `concepts/` 路径，RPG 模式下也只应把以下内容独立写入 `concepts/`；后续新方案不应为了旧项目兼容继续扩展这个路径：
 
 * 魔术体系
 * 能力机制
@@ -397,21 +481,17 @@ characters/caster.md
 
 ### 推荐页面粒度
 
-第一版可以先用一个主文件：
+第一版固定使用以下文件集合：
 
 ```text
-player/profile.md
+player/player.md
 player/abilities.md
 player/inventory.md
 player/goals.md
 player/known_information.md
 ```
 
-如果想更简单，也可以先只用：
-
-```text
-player/player.md
-```
+不允许由 import/runtime 在 `player/` 下自由新增或删除其他文件；额外子主题应合并进这些固定 slot。
 
 ---
 
@@ -579,13 +659,14 @@ items/player_inventory.md
 
 ### 定义
 
-存放主线、支线、伏笔、冲突、悬念和待推进剧情。
+存放运行时剧情弧状态，包括支线、角色线、伏笔、冲突、悬念、压力、阻碍和待推进剧情。
 
 `plot-arcs/` 回答的问题是：
 
-> 故事正在往哪里走？有哪些未解决问题？哪些矛盾需要推进？
+> 当前故事结构里有哪些未解决问题？哪些矛盾、伏笔和压力需要推进？
 
 这是 llmWikiRPG 中非常关键的目录，用于解决“跑了很多轮之后主线散掉”的问题。
+但 `plot-arcs/` 不是作者/GM 侧完整大纲目录；主线大纲、章节安排、揭示顺序和未来剧情指导应放入 `outlines/`。
 
 ### 需要抽取的信息
 
@@ -609,6 +690,8 @@ items/player_inventory.md
 
 ### 不应放入的信息
 
+不要存放完整主线大纲、章节总纲、未来剧情蓝图或 GM 剧透笔记。
+这类作者侧控制材料应进入 `outlines/`。
 不要把已经发生的每一轮细节都塞进来。
 已发生事件应进入 `events/`，`plot-arcs/` 只维护剧情结构和推进方向。
 如果一个页面更像“某条路线”“剧情线”“完整经过”或跨很多天/多年的叙事结构，也应优先放入 `plot-arcs/`，而不是作为单一 event。
@@ -654,6 +737,107 @@ plot-arcs/player_power_mystery.md
 - 近期可以推进什么
 - 中期可以爆发什么
 - 暂时不要提前揭示什么
+```
+
+---
+
+## `outlines/`
+
+### 定义
+
+存放作者/GM 侧剧情大纲、章节结构、揭示顺序、未来剧情指导、不可提前揭露的信息和长期节奏控制。
+
+`outlines/` 回答的问题是：
+
+> 这场战役原本打算如何展开？哪些内容应在什么节奏下揭示？玩家偏离后，大纲应该如何被审阅式修订？
+
+`outlines/` 属于控制层，不是已发生事实层，也不是运行时状态层。它可以指导 Context Compiler 和 narration，但不能被当成已经发生的事件。
+
+### 需要抽取的信息
+
+包括：
+
+* 主线大纲
+* 章节 / 幕结构
+* 关键揭示顺序
+* 未来剧情指导
+* 暂时不能揭露的真相
+* 分支条件
+* 必须保留的主题、冲突和长期张力
+* 玩家偏离后可审阅的大纲修订提案
+
+### 不应放入的信息
+
+不要把每轮已经发生的事实写入 `outlines/`。
+已发生事实进入 `events/`。
+不要把普通未解决伏笔和运行时压力都塞进大纲。
+运行时剧情弧状态进入 `plot-arcs/`。
+
+### 推荐页面粒度
+
+第一版推荐固定主线和进度入口：
+
+```text
+outlines/main.md
+outlines/progress.md
+```
+
+后续可以按战役复杂度拆分：
+
+```text
+outlines/act_1.md
+outlines/reveal_schedule.md
+outlines/branch_conditions.md
+```
+
+### 推荐结构
+
+```md
+# 主线大纲
+
+## Runtime Capsule
+- 本轮上下文编译时最需要保留的大纲指导。
+
+## Campaign Premise
+- 战役核心前提。
+
+## Act Structure
+- 第一幕：
+- 第二幕：
+- 第三幕：
+
+## Intended Reveals
+- 应在何时揭示什么。
+
+## Delayed Reveals
+- 暂时不能提前揭示什么。
+
+## Branch Conditions
+- 什么玩家行动会改变后续路线。
+
+## Must Not Contradict
+- 后续修订也不能违反的长期约束。
+```
+
+`outlines/progress.md` 推荐记录：
+
+```md
+# 大纲进度
+
+## Runtime Capsule
+- 本轮上下文编译时最需要保留的当前进度。
+
+## Current Stage
+- 当前处于哪一幕 / 哪个章节 / 哪个 beat。
+
+## Completed Beats
+- 已完成、跳过、提前或延后的 beat。
+
+## Divergence Notes
+- 玩家路线相对主线大纲的偏离。
+
+## Next Useful Beats
+- 下一步最自然承接的 beat。
 ```
 
 ---
@@ -774,8 +958,9 @@ events/event_002.md
 不要在这里保存长期世界观、完整人物设定、完整事件历史。
 这里只保留“当前场景必需信息”。
 普通文件输入（`setting_encyclopedia`、`plot_character_analysis`、`canon_narrative`、`dialogue_corpus`）默认不能生成 `current-scene/`。
-只有源输入包含精确控制标记 `[RPG-LIVE]` 时，Stage 1 / Stage 2 和 writer 才允许生成或更新 `wiki/current-scene/scene_state.md`。
-`[RPG-LIVE]` 只是输入门控标记，不能保存进任何 wiki 页面正文、标题、证据文本或来源摘要。
+普通 ingest 不生成、不更新 `wiki/current-scene/scene_state.md`，也不应把 `current-scene` 放入 `needed_categories`。
+`current-scene` 是 RPG Play/Runtime apply 链路拥有的当前快照；只有 runtime 专用写回路径在用户接受 pending update 后可以覆盖该文件。
+如果普通来源描述了某个正史场景、结局、回忆或团录片段，应按语义写入 `events/`、`plot-arcs/`、`locations/`、`characters/`、`relationships/`、`player/`、`world/` 或 `sources/`，不能当作 live current scene。
 
 ### 推荐页面粒度
 
@@ -903,23 +1088,23 @@ relationships/rin_caster.md
 * 禁止事项
 * 不希望出现的模型坏习惯
 * 输出格式要求
-* 角色口癖和说话习惯
+* 全局对白原则
 * 原作风格参考
 
 ### 不应放入的信息
 
 不要在这里放世界观事实和剧情事件。
 `style/` 是“怎么写”，不是“写什么”。
+不要把单个角色专属口癖、称呼习惯、礼貌等级或回避话题提升为全局 `style/`；这类信息应进入 `characters/*.md` 或 `relationships/*.md`。
 
 ### 推荐页面粒度
 
-第一版可以包括：
+第一版固定包括：
 
 ```text
-style/narrative_style.md
-style/dialogue_style.md
-style/forbidden_patterns.md
-style/output_format.md
+style/narration.md
+style/dialogue.md
+style/forbidden.md
 ```
 
 ---
@@ -964,16 +1149,15 @@ style/output_format.md
 
 ### 推荐页面粒度
 
-按照规则系统拆分。
-
-示例：
+第一版固定包括：
 
 ```text
-rules/magic_system.md
-rules/combat_rules.md
-rules/player_ability_rules.md
-rules/information_rules.md
+rules/core.md
+rules/world.md
+rules/table.md
 ```
+
+更细的规则主题可以在固定文件内分节维护；玩家个人能力、技能、限制和当前可用性应进入 `player/abilities.md`，不拆到 `rules/`。
 
 ---
 
@@ -1139,6 +1323,7 @@ current-scene/
 characters/
 player/
 relationships/
+outlines/
 plot-arcs/
 style/
 rules/
@@ -1183,6 +1368,7 @@ locations/         地点是什么，现在怎样
 factions/          势力是谁，彼此怎样
 items/             物品是什么，谁持有
 events/            已经发生了什么
+outlines/          作者/GM 侧未来大纲和揭示节奏
 plot-arcs/         剧情正在往哪里走
 relationships/     角色关系如何变化
 current-scene/     当前这一刻发生在什么状态下

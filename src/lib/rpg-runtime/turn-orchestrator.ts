@@ -1,6 +1,8 @@
-import { buildRpgNarrationPrompt } from "./narration-prompts"
-import type { RpgNarrationAdapter } from "./narration-adapter"
-import { validateRpgTurnResult } from "./narration-adapter"
+import {
+  buildRpgNarrationPrompt,
+  type RpgNarrationAdapter,
+  validateRpgTurnResult,
+} from "../rpg-interactions/runtime"
 import { runRpgRuntimePreview } from "./runtime-agent"
 import { createRpgTurnRecord, type RpgTurnRecord, type RpgTurnResult } from "./turn-model"
 import type { CompactStoryBrief, SubmittedAction } from "./types"
@@ -26,8 +28,9 @@ export async function runRpgTurn(input: RunRpgTurnInput): Promise<RunRpgTurnResu
     wikiMode: input.wikiMode,
   })
 
-  const prompt = buildRpgNarrationPrompt({ brief: preview.brief })
-  const turnResult = validateRpgTurnResult(await input.narrationAdapter.generateTurn(prompt))
+  const promptInput = { brief: preview.brief }
+  const prompt = buildRpgNarrationPrompt(promptInput)
+  const turnResult = validateRpgTurnResult(await input.narrationAdapter.generateTurn(prompt, promptInput))
   const turnRecord = createRpgTurnRecord({
     submittedAction: input.submittedAction,
     turnResult,

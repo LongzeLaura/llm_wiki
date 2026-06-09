@@ -47,6 +47,7 @@ describe("inferWikiTypeFromPath", () => {
 describe("wikiTypeLabel", () => {
   it("uses readable labels for RPG and custom types", () => {
     expect(wikiTypeLabel("current-scene")).toBe("Current Scene")
+    expect(wikiTypeLabel("quests")).toBe("Quests")
     expect(wikiTypeLabel("custom-topic")).toBe("Custom Topic")
   })
 

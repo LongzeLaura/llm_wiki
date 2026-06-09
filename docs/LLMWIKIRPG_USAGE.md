@@ -2,7 +2,7 @@
 
 ## Purpose
 
-This document describes how to use the first-version llmWikiRPG flow implemented in Stages 03 through 11, and what boundaries still apply after Stage 12 cleanup.
+This document describes how to use the first-version llmWikiRPG flow and the current runtime contract through Stage 6.12.
 
 ## When To Use RPG Mode
 
@@ -11,16 +11,16 @@ Use RPG mode when the project is meant to maintain interactive-fiction or tablet
 The preferred activation method is an explicit text marker:
 
 ```md
-wikiMode: rpg
+wikiMode: llmwikirpg
 ```
 
 Place that marker in project text such as `schema.md` or `purpose.md`.
 
-If the marker is absent, the current implementation may still infer RPG mode from schema or directory shape, but explicit marking is recommended because it is more predictable and is the intended Stage 09 compatibility path.
+Legacy/default projects are no longer the product path. Existing projects should carry explicit `llmwikirpg` metadata or `wikiMode: llmwikirpg`; old `wikiMode: rpg` markers are accepted only as compatibility input where the code still normalizes them.
 
 ## First-Version RPG Directories
 
-The first-version migration targets these 11 directories:
+The current RPG wiki contract uses these directories:
 
 - `wiki/sources/`
 - `wiki/world/`
@@ -33,6 +33,10 @@ The first-version migration targets these 11 directories:
 - `wiki/events/`
 - `wiki/current-scene/`
 - `wiki/relationships/`
+- `wiki/style/`
+- `wiki/rules/`
+- `wiki/quests/`
+- `wiki/memory/`
 
 ## Category Boundaries
 
@@ -45,14 +49,19 @@ The first-version migration targets these 11 directories:
 - `items`: notable equipment, artifacts, clues, and key objects.
 - `plot-arcs`: unresolved threads, conflicts, foreshadowing, and possible development directions.
 - `events`: confirmed past events only.
-- `current-scene`: current snapshot only; writing it requires live input marked with `[RPG-LIVE]`.
+- `current-scene`: runtime-owned current snapshot only; ordinary ingest must not write it.
 - `relationships`: relationship changes, trust, conflict, dependence, and tension between actors.
+- `style`: manual tone, narration style, voice, variables, and presentation conventions.
+- `rules`: manual house rules, system rulings, safety boundaries, and runtime constraints.
+- `quests`: objective tracking for goals, missions, tasks, blockers, completion state, and accepted runtime objective changes.
+- `memory`: explicit user-approved memory and reminders; not inferred or written automatically.
 
 ## Update Semantics
 
-- `wiki/current-scene/scene_state.md` is the canonical first-version current-scene file, is overwrite-oriented, and can only be generated from source input containing `[RPG-LIVE]`.
+- `wiki/current-scene/scene_state.md` is the canonical first-version current-scene file, is overwrite-oriented, and is maintained only by the RPG Play/Runtime apply flow after the user accepts a pending runtime update.
 - `wiki/events/timeline.md` is append-oriented and keeps event history.
-- `player`, `characters`, `relationships`, and `plot-arcs` use merge-style updates, with Stage 07 cleanup rules intended to replace stale dynamic sections instead of letting them linger.
+- `player`, `characters`, `relationships`, `plot-arcs`, and `quests` use merge-style updates, with Stage 07 cleanup rules intended to replace stale dynamic sections instead of letting them linger.
+- Runtime update/write policy allows `wiki/quests/*.md` only with `merge`; `overwrite` and `append` are rejected for quests.
 - `world`, `locations`, `factions`, and `items` remain merge-oriented knowledge pages.
 - `sources` stays compatibility-shaped and continues using legacy source-summary behavior in frontmatter/type handling.
 
@@ -67,21 +76,12 @@ The current implementation is suited for these source classes:
 
 ## Practical Workflow
 
-1. Mark the project with `wikiMode: rpg`.
-2. Ingest setting files, character material, and static plot/canon text through the normal pipeline without `[RPG-LIVE]`.
-3. For active play or turn-runtime input that should update `wiki/current-scene/scene_state.md`, include `[RPG-LIVE]` in the source text.
+1. Use an `llmwikirpg` project with `wikiMode: llmwikirpg`.
+2. Ingest setting files, character material, session notes, and static plot/canon text through the normal pipeline for non-current-scene directories.
+3. Use the dedicated RPG runtime Play view for active play. Accepted runtime pending updates are the only path that should overwrite `wiki/current-scene/scene_state.md`.
 4. Confirm that outputs are routed into RPG directories rather than legacy `wiki/entities/` or `wiki/concepts/`.
 5. Review the separation between `current-scene`, `events`, and `plot-arcs`.
-6. Use chat/query flows against the project; Stage 08 and Stage 09 prioritize live RPG pages when the project is detected as RPG mode.
-
-Example live input:
-
-```md
-[RPG-LIVE]
-当前场景：玩家站在冬木市教会门口，准备进入。
-```
-
-Do not add `[RPG-LIVE]` when importing setting, character, plot-analysis, canon narrative, or dialogue-corpus files unless that source is truly the current active play turn.
+6. Use the dedicated RPG runtime Play view for turn-by-turn play; normal chat/search remain supporting wiki tools rather than the main runtime loop.
 
 ## High-Value Review Checks
 
@@ -93,13 +93,14 @@ Do not add `[RPG-LIVE]` when importing setting, character, plot-analysis, canon 
 
 ## Compatibility Notes
 
-- Legacy `entities`, `concepts`, `sources`, and `queries` behavior is still present and must remain available.
-- RPG-first prompt and retrieval behavior is gated by project mode detection rather than globally replacing the default wiki flow.
-- Project skeleton creation is still legacy-oriented; RPG directories are created lazily when pages are first written.
+- Legacy `entities`, `concepts`, and `queries` are no longer product write targets for llmWikiRPG projects.
+- `wiki/sources/` remains a valid RPG evidence layer; it is not a legacy query/entity directory.
+- New project creation is RPG-oriented and should create RPG directories directly. Existing legacy files may remain on disk, but UI/prompt/ingest/runtime should not route new llmWikiRPG content into legacy directories.
 
 ## Current Limits
 
-- No first-class persisted UI setting for wiki mode exists yet.
-- No real-model extraction benchmark exists yet; current automated evidence is based on mocked-LLM smoke coverage plus prompt/schema review.
-- No dedicated runtime context-pack compiler, contradiction engine, or deeper multi-page state reconciler exists yet.
-- `style`, `rules`, and `runtime` remain documented design areas, not first-version implemented category targets.
+- Runtime review metadata is now recoverable through `.llm-wiki/runtime/`, but there is still no audit UI, compaction, or migration tooling for those metadata files.
+- Applying accepted updates refreshes affected project files, data-version subscribers, and current-scene display when the canonical scene snapshot is overwritten.
+- Current runtime merge behavior is conservative append-style; section-aware merge and stronger semantic validation are still future work.
+- Context Compiler v1 still needs better use of selected options, `likelyAffectedPaths`, recent accepted events, runtime overlays, and richer objective/quest retrieval.
+- Relationship/tension derivation, outline impact detection, outline regeneration, and real-model long-turn evaluation remain future architecture work.

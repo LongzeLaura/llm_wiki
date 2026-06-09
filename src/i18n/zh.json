@@ -118,7 +118,96 @@
     "confirm": "确认",
     "loadingMore": "加载更多资料...",
     "sourceCount": "{{count}} 个资料",
-    "sourceCount_plural": "{{count}} 个资料"
+    "sourceCount_plural": "{{count}} 个资料",
+    "rpgImport": {
+      "openButton": "导入到 RPG 项目",
+      "title": "导入到 RPG 项目",
+      "description": "选择这份文件在 RPG Wiki 中的导入语义。",
+      "semanticLabel": "导入语义",
+      "chooseFiles": "选择文件",
+      "chooseFile": "选择单个文件",
+      "noFileSelected": "请先选择要导入的文件。",
+      "singleFileRequired": "该导入语义一次只处理一个文件。",
+      "questName": "任务名称（可选）",
+      "questNamePlaceholder": "例如：月门之约",
+      "relationshipName": "关系对象名称（可选）",
+      "relationshipNamePlaceholder": "例如：米拉",
+      "confirmCurrentScene": "确认初始化当前场景",
+      "confirmCurrentSceneHint": "勾选后会把该文件作为开局当前场景快照写入 current-scene。",
+      "confirmControlOverwrite": "允许覆盖已有控制文档",
+      "confirmControlOverwriteHint": "未勾选时，已有高风险控制文档会进入审阅或 skipped，不会静默替换。",
+      "selectedFiles": "已选择文件",
+      "noFiles": "尚未选择文件",
+      "resultsTitle": "导入结果",
+      "addedToReview": "已加入待审阅 {{count}} 项",
+      "actions": {
+        "openRelated": "打开相关页面",
+        "skip": "跳过"
+      },
+      "results": {
+        "warnings": "警告",
+        "reviewItems": "审阅项",
+        "writtenPaths": "写入路径",
+        "skipped": "跳过路径",
+        "none": "无"
+      },
+      "close": "关闭",
+      "import": "导入",
+      "groups": {
+        "controlDoc": "控制文档",
+        "campaignSetup": "战役初始化"
+      },
+      "options": {
+        "sourceIngest": {
+          "label": "普通资料",
+          "description": "复制到 raw/sources，并按普通来源资料进入现有提取队列。"
+        },
+        "controlDoc": {
+          "main_outline": {
+            "label": "控制文档：主线大纲",
+            "description": "导入到 wiki/outlines/main.md，默认要求审阅或显式确认。"
+          },
+          "outline_progress": {
+            "label": "控制文档：大纲进度",
+            "description": "导入到 wiki/outlines/progress.md，用于初始化相对大纲的游玩进度。"
+          },
+          "rules_core": {
+            "label": "控制文档：核心规则",
+            "description": "导入到 wiki/rules/core.md，保留规则语义，不走普通资料抽取。"
+          },
+          "style_narration": {
+            "label": "控制文档：叙事文风",
+            "description": "导入到 wiki/style/narration.md，保留全局叙事要求。"
+          }
+        },
+        "campaignSetup": {
+          "player_main": {
+            "label": "战役初始化：玩家档案",
+            "description": "导入到 wiki/player/player.md，作为固定 player slot 的开局档案。"
+          },
+          "current_scene": {
+            "label": "战役初始化：当前场景",
+            "description": "导入到 wiki/current-scene/scene_state.md，需要显式初始化确认。"
+          },
+          "events_prologue": {
+            "label": "战役初始化：序章事件",
+            "description": "导入到 wiki/events/prologue.md，只记录已经发生的序章事实。"
+          },
+          "main_quest": {
+            "label": "战役初始化：主任务",
+            "description": "导入到 wiki/quests/main.md，记录开局可追踪目标。"
+          },
+          "quest": {
+            "label": "战役初始化：任务",
+            "description": "导入到 wiki/quests/<名称>.md，可填写任务名称。"
+          },
+          "player_relationship": {
+            "label": "战役初始化：玩家关系",
+            "description": "导入到 wiki/relationships/player-<名称>.md，可填写关系对象名称。"
+          }
+        }
+      }
+    }
   },
   "chat": {
     "placeholder": "向你的 Wiki 提问...",
@@ -302,11 +391,7 @@
         "lastErrorHeading": "上次 embedding 错误",
         "reindexAll": "重新索引全部页面",
         "reindexing": "索引中 {{done}}/{{total}}…",
-        "reindexDone": "已索引 {{count}} 个页面。",
-        "legacyPromptTitle": "检测到旧版（按页）索引",
-        "legacyPromptBody": "当前项目在旧版按页向量存储里有 {{count}} 条记录。新版按 chunk 索引检索质量更高,但需要一次性重新 embed。点击\"重新索引全部页面\"完成升级。",
-        "dropLegacy": "删除旧版索引",
-        "dropLegacyDone": "旧版索引已删除。"
+        "reindexDone": "已索引 {{count}} 个页面。"
       },
       "multimodal": {
         "title": "图片描述",
@@ -497,34 +582,10 @@
       },
       "maintenance": {
         "title": "维护",
-        "description": "这里后续只放 RPG runtime 维护工具。旧实体/概念重复清理入口已经隐藏。",
+        "description": "这里后续只放 RPG runtime 审计和维护工具。",
         "rpgOnly": {
           "title": "RPG runtime 维护",
-          "description": "llmWikiRPG 不再暴露 legacy llm_wiki 清理动作。后续维护操作应面向 current-scene、events、relationships、memory 等 RPG runtime 目录。"
-        },
-        "noProject": "请先打开一个项目。",
-        "noLlm": "请先配置 LLM 服务。",
-        "dedup": {
-          "title": "检测重复实体 / 概念",
-          "description": "让 LLM 扫描全部 entity / concept 页面，把可能指向同一主题但用了不同名字的页面分组（中英对照、单复数、缩写与全称等）。每一组都需要你确认后才会合并。合并任务会进入串行队列依次执行，避免交叉引用被并发改写覆盖。",
-          "scanButton": "扫描重复项",
-          "scanning": "扫描中…",
-          "noneFound": "未发现重复分组，wiki 很干净。",
-          "candidates": "{{n}} 个候选",
-          "canonicalLabel": "保留以下 slug 作为主条目：",
-          "mergeButton": "合并到 {{slug}}",
-          "merging": "合并中…",
-          "queued": "排队中",
-          "queuedAhead": "排队中（前面还有 {{n}} 个）",
-          "failed": "失败（{{retries}}/3）",
-          "cancel": "取消",
-          "retry": "重试",
-          "delete": "删除",
-          "queueTitle": "进行中的合并",
-          "queueDescription": "上次扫描后排进队列、还未跑完的合并任务。每次只跑一个。",
-          "notDuplicates": "不是重复",
-          "merged": "已合并",
-          "skipped": "已标记为不重复"
+          "description": "后续维护操作应面向 current-scene、events、relationships、memory 等 RPG runtime 目录。"
         }
       },
       "changelog": {

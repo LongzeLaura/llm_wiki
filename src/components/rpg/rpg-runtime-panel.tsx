@@ -1,13 +1,26 @@
-import { useEffect, useMemo, useRef, useState } from "react"
+import { useEffect, useMemo, useRef, useState, type Dispatch, type SetStateAction } from "react"
 import { AlertTriangle, Loader2 } from "lucide-react"
-import { readFile } from "@/commands/fs"
+import { listDirectory, readFile } from "@/commands/fs"
 import { useWikiStore, type LlmConfig } from "@/stores/wiki-store"
-import type { RpgNarrationAdapter } from "@/lib/rpg-runtime/narration-adapter"
-import { createLlmRpgNarrationAdapter } from "@/lib/rpg-runtime/llm-narration-adapter"
+import {
+  createLlmRpgNarrationAdapter,
+  createLlmRpgRuntimeUpdateInteractionAdapter,
+  type RpgNarrationAdapter,
+  type RpgRuntimeUpdateInteractionAdapter,
+} from "@/lib/rpg-interactions/runtime"
 import {
   runRpgRuntimeTurnFlow,
   type RunRpgRuntimeTurnFlowResult,
+  type RpgRuntimeTurnPersistence,
 } from "@/lib/rpg-runtime/runtime-controller"
+import {
+  appendRpgApplyJournalEntry,
+  appendRpgTurnJournalEntry,
+  loadRpgRuntimeSnapshot,
+  saveRpgPendingUpdates,
+  type RuntimeApplyJournalEntry,
+  type RuntimeTurnJournalEntry,
+} from "@/lib/rpg-runtime/runtime-persistence"
 import type { RpgActionOption } from "@/lib/rpg-runtime/turn-model"
 import type { SubmittedAction } from "@/lib/rpg-runtime/types"
 import {
@@ -28,13 +41,27 @@ const CURRENT_SCENE_PATH = "wiki/current-scene/scene_state.md"
 export interface RpgRuntimePanelDependencies {
   readFile: (path: string) => Promise<string>
   createNarrationAdapter: (input: { llmConfig: LlmConfig; signal?: AbortSignal }) => RpgNarrationAdapter
+  createUpdateInteractionAdapter: (input: {
+    llmConfig: LlmConfig
+    signal?: AbortSignal
+  }) => RpgRuntimeUpdateInteractionAdapter
   runTurnFlow: (input: {
     projectPath: string
     wikiMode: "llmwikirpg"
     submittedAction: SubmittedAction
     narrationAdapter: RpgNarrationAdapter
+    updateInteractionAdapter: RpgRuntimeUpdateInteractionAdapter
+    runtimePersistence?: RpgRuntimeTurnPersistence
   }) => Promise<RunRpgRuntimeTurnFlowResult>
   applyPendingUpdates: (input: ApplyRpgPendingUpdatesInput) => Promise<ApplyRpgPendingUpdatesResult>
+  loadRuntimeSnapshot: (projectPath: string) => Promise<{ pendingUpdates: PendingRpgUpdate[]; warnings: string[] }>
+  savePendingUpdates: (projectPath: string, updates: PendingRpgUpdate[]) => Promise<{ warnings?: string[] }>
+  appendTurnJournalEntry: (projectPath: string, entry: RuntimeTurnJournalEntry) => Promise<{ warnings?: string[] } | void>
+  appendApplyJournalEntry: (projectPath: string, entry: RuntimeApplyJournalEntry) => Promise<{ warnings?: string[] } | void>
+  reloadProjectFiles: (
+    projectPath: string,
+    affectedPaths: string[],
+  ) => Promise<{ warnings?: string[] } | void>
 }
 
 export interface RpgRuntimePanelState {
@@ -63,13 +90,20 @@ export interface RpgRuntimePanelProps {
   llmConfig?: LlmConfig
   dependencies?: Partial<RpgRuntimePanelDependencies>
   initialState?: Partial<RpgRuntimePanelState>
+  onProjectFilesChanged?: (affectedPaths: string[]) => void | Promise<void>
 }
 
 const defaultDependencies: RpgRuntimePanelDependencies = {
   readFile,
   createNarrationAdapter: createLlmRpgNarrationAdapter,
+  createUpdateInteractionAdapter: createLlmRpgRuntimeUpdateInteractionAdapter,
   runTurnFlow: runRpgRuntimeTurnFlow,
   applyPendingUpdates: applyRpgPendingUpdates,
+  loadRuntimeSnapshot: loadRpgRuntimeSnapshot,
+  savePendingUpdates: saveRpgPendingUpdates,
+  appendTurnJournalEntry: appendRpgTurnJournalEntry,
+  appendApplyJournalEntry: appendRpgApplyJournalEntry,
+  reloadProjectFiles: reloadRpgProjectFiles,
 }
 
 export async function loadRpgCurrentScene(
@@ -100,10 +134,19 @@ export async function submitRpgRuntimePanelAction(input: {
   llmConfig: LlmConfig
   submittedAction: SubmittedAction
   signal?: AbortSignal
-  dependencies?: Partial<Pick<RpgRuntimePanelDependencies, "createNarrationAdapter" | "runTurnFlow">>
+  dependencies?: Partial<
+    Pick<
+      RpgRuntimePanelDependencies,
+      "createNarrationAdapter" | "createUpdateInteractionAdapter" | "runTurnFlow" | "appendTurnJournalEntry" | "savePendingUpdates"
+    >
+  >
 }): Promise<RpgRuntimePanelSubmitResult> {
   const dependencies = { ...defaultDependencies, ...input.dependencies }
   const narrationAdapter = dependencies.createNarrationAdapter({
+    llmConfig: input.llmConfig,
+    signal: input.signal,
+  })
+  const updateInteractionAdapter = dependencies.createUpdateInteractionAdapter({
     llmConfig: input.llmConfig,
     signal: input.signal,
   })
@@ -112,24 +155,54 @@ export async function submitRpgRuntimePanelAction(input: {
     wikiMode: "llmwikirpg",
     submittedAction: input.submittedAction,
     narrationAdapter,
+    updateInteractionAdapter,
+    runtimePersistence: {
+      appendTurnJournalEntry: dependencies.appendTurnJournalEntry,
+    },
   })
+  const persistenceResult = await dependencies.savePendingUpdates(input.projectPath, result.pendingUpdates)
 
   return {
     lastNarrative: result.turnResult.narrative,
     nextActionOptions: result.turnResult.nextActionOptions,
-    warnings: result.warnings,
+    warnings: [...result.warnings, ...(persistenceResult.warnings ?? [])],
     pendingUpdates: result.pendingUpdates,
   }
+}
+
+export async function loadRpgRuntimePanelPendingUpdates(
+  projectPath: string,
+  dependencies: Pick<RpgRuntimePanelDependencies, "loadRuntimeSnapshot"> = defaultDependencies,
+): Promise<{ pendingUpdates: PendingRpgUpdate[]; warnings: string[] }> {
+  if (!projectPath.trim()) return { pendingUpdates: [], warnings: [] }
+  return dependencies.loadRuntimeSnapshot(projectPath)
+}
+
+export async function saveRpgRuntimePanelPendingUpdates(input: {
+  projectPath: string
+  updates: PendingRpgUpdate[]
+  dependencies?: Partial<Pick<RpgRuntimePanelDependencies, "savePendingUpdates">>
+}): Promise<{ warnings: string[] }> {
+  const dependencies = { ...defaultDependencies, ...input.dependencies }
+  const result = await dependencies.savePendingUpdates(input.projectPath, input.updates)
+  return { warnings: result.warnings ?? [] }
 }
 
 export async function applyRpgRuntimePanelAcceptedUpdates(input: {
   projectPath: string
   updates: PendingRpgUpdate[]
-  dependencies?: Partial<Pick<RpgRuntimePanelDependencies, "applyPendingUpdates">>
+  dependencies?: Partial<
+    Pick<
+      RpgRuntimePanelDependencies,
+      "applyPendingUpdates" | "savePendingUpdates" | "appendApplyJournalEntry" | "readFile" | "reloadProjectFiles"
+    >
+  >
 }): Promise<{
   pendingUpdates: PendingRpgUpdate[]
   applyResult: ApplyRpgPendingUpdatesResult
   skippedApplyReasons: Record<string, string>
+  affectedPaths: string[]
+  refreshedCurrentScene?: string
 }> {
   const dependencies = { ...defaultDependencies, ...input.dependencies }
   const acceptedUpdates = input.updates.filter((update) => update.status === "accepted")
@@ -141,11 +214,41 @@ export async function applyRpgRuntimePanelAcceptedUpdates(input: {
   const skippedApplyReasons = Object.fromEntries(
     applyResult.skippedUpdates.map((update) => [update.id, update.reason]),
   )
+  const affectedPaths = getAppliedRpgUpdatePaths(applyResult)
+  const remainingPendingUpdates = input.updates.filter((update) => !appliedIds.has(update.id))
+  const persistenceWarnings = await appendAndSaveApplyPersistence(input.projectPath, {
+    attemptedUpdates: acceptedUpdates,
+    remainingPendingUpdates,
+    applyResult,
+    dependencies,
+  })
+  const refreshWarnings: string[] = []
+  let refreshedCurrentScene: string | undefined
+
+  if (affectedPaths.length > 0) {
+    try {
+      const reloadResult = await dependencies.reloadProjectFiles(input.projectPath, affectedPaths)
+      refreshWarnings.push(...(reloadResult?.warnings ?? []))
+    } catch (error) {
+      refreshWarnings.push(`Could not refresh project files after RPG apply: ${error instanceof Error ? error.message : String(error)}`)
+    }
+  }
+
+  if (didApplyCurrentSceneOverwrite(applyResult)) {
+    const sceneResult = await loadRpgCurrentScene(input.projectPath, dependencies)
+    refreshedCurrentScene = sceneResult.currentScene
+    refreshWarnings.push(...sceneResult.warnings)
+  }
 
   return {
-    pendingUpdates: input.updates.filter((update) => !appliedIds.has(update.id)),
-    applyResult,
+    pendingUpdates: remainingPendingUpdates,
+    applyResult: {
+      ...applyResult,
+      warnings: [...applyResult.warnings, ...persistenceWarnings, ...refreshWarnings],
+    },
     skippedApplyReasons,
+    affectedPaths,
+    refreshedCurrentScene,
   }
 }
 
@@ -154,6 +257,7 @@ export function RpgRuntimePanel({
   llmConfig,
   dependencies,
   initialState,
+  onProjectFilesChanged,
 }: RpgRuntimePanelProps) {
   const storeProject = useWikiStore((state) => state.project)
   const storeLlmConfig = useWikiStore((state) => state.llmConfig)
@@ -194,7 +298,7 @@ export function RpgRuntimePanel({
       setState((current) => ({
         ...current,
         currentScene: result.currentScene,
-        warnings: result.warnings,
+        warnings: mergeWarnings(current.warnings, result.warnings),
         isLoadingScene: false,
       }))
     })
@@ -203,6 +307,24 @@ export function RpgRuntimePanel({
       cancelled = true
     }
   }, [effectiveProjectPath, initialState?.currentScene, resolvedDependencies])
+
+  useEffect(() => {
+    if (initialState?.pendingUpdates !== undefined || !effectiveProjectPath) return
+
+    let cancelled = false
+    loadRpgRuntimePanelPendingUpdates(effectiveProjectPath, resolvedDependencies).then((result) => {
+      if (cancelled) return
+      setState((current) => ({
+        ...current,
+        pendingUpdates: result.pendingUpdates,
+        warnings: mergeWarnings(current.warnings, result.warnings),
+      }))
+    })
+
+    return () => {
+      cancelled = true
+    }
+  }, [effectiveProjectPath, initialState?.pendingUpdates, resolvedDependencies])
 
   useEffect(() => {
     return () => abortRef.current?.abort()
@@ -256,17 +378,21 @@ export function RpgRuntimePanel({
   }
 
   const handleAcceptUpdate = (id: string) => {
+    const pendingUpdates = acceptPendingRpgUpdate(state.pendingUpdates, id)
+    void persistPendingQueue(effectiveProjectPath, pendingUpdates, resolvedDependencies, setState)
     setState((current) => ({
       ...current,
-      pendingUpdates: acceptPendingRpgUpdate(current.pendingUpdates, id),
+      pendingUpdates,
       skippedApplyReasons: withoutKey(current.skippedApplyReasons, id),
     }))
   }
 
   const handleRejectUpdate = (id: string) => {
+    const pendingUpdates = rejectPendingRpgUpdate(state.pendingUpdates, id)
+    void persistPendingQueue(effectiveProjectPath, pendingUpdates, resolvedDependencies, setState)
     setState((current) => ({
       ...current,
-      pendingUpdates: rejectPendingRpgUpdate(current.pendingUpdates, id),
+      pendingUpdates,
       skippedApplyReasons: withoutKey(current.skippedApplyReasons, id),
     }))
   }
@@ -290,10 +416,22 @@ export function RpgRuntimePanel({
       const result = await applyRpgRuntimePanelAcceptedUpdates({
         projectPath: effectiveProjectPath,
         updates: state.pendingUpdates,
-        dependencies: resolvedDependencies,
+        dependencies: {
+          ...resolvedDependencies,
+          reloadProjectFiles: async (currentProjectPath, affectedPaths) => {
+            if (onProjectFilesChanged) {
+              await onProjectFilesChanged(affectedPaths)
+              return undefined
+            }
+            return resolvedDependencies.reloadProjectFiles(currentProjectPath, affectedPaths)
+          },
+        },
       })
       setState((current) => ({
         ...current,
+        ...(result.refreshedCurrentScene !== undefined
+          ? { currentScene: result.refreshedCurrentScene }
+          : {}),
         pendingUpdates: result.pendingUpdates,
         lastApplyResult: result.applyResult,
         skippedApplyReasons: result.skippedApplyReasons,
@@ -398,4 +536,103 @@ function withoutKey(record: Record<string, string>, key: string): Record<string,
   const next = { ...record }
   delete next[key]
   return next
+}
+
+export function getAppliedRpgUpdatePaths(applyResult: ApplyRpgPendingUpdatesResult): string[] {
+  return uniqueNormalizedPaths(applyResult.appliedUpdates.map((update) => update.targetPath))
+}
+
+export function didApplyCurrentSceneOverwrite(applyResult: ApplyRpgPendingUpdatesResult): boolean {
+  return applyResult.appliedUpdates.some(
+    (update) => normalizeRpgApplyPath(update.targetPath) === CURRENT_SCENE_PATH && update.strategy === "overwrite",
+  )
+}
+
+async function reloadRpgProjectFiles(
+  projectPath: string,
+  affectedPaths: string[],
+): Promise<{ warnings?: string[] } | void> {
+  if (affectedPaths.length === 0) return undefined
+  const normalizedProjectPath = projectPath.trim().replace(/\\/g, "/").replace(/\/+$/, "")
+  if (!normalizedProjectPath) {
+    return { warnings: ["Could not refresh project files after RPG apply: projectPath is required."] }
+  }
+
+  const tree = await listDirectory(normalizedProjectPath)
+  const store = useWikiStore.getState()
+  store.setFileTree(tree)
+  store.bumpDataVersion()
+  return undefined
+}
+
+async function appendAndSaveApplyPersistence(
+  projectPath: string,
+  input: {
+    attemptedUpdates: PendingRpgUpdate[]
+    remainingPendingUpdates: PendingRpgUpdate[]
+    applyResult: ApplyRpgPendingUpdatesResult
+    dependencies: Pick<RpgRuntimePanelDependencies, "appendApplyJournalEntry" | "savePendingUpdates">
+  },
+): Promise<string[]> {
+  const entry: RuntimeApplyJournalEntry = {
+    timestamp: new Date().toISOString(),
+    attemptedUpdateIds: input.attemptedUpdates.map((update) => update.id),
+    appliedUpdateIds: input.applyResult.appliedUpdates.map((update) => update.id),
+    remainingPendingUpdateIds: input.remainingPendingUpdates.map((update) => update.id),
+    applyResult: input.applyResult,
+  }
+
+  const warnings: string[] = []
+  try {
+    const journalResult = await input.dependencies.appendApplyJournalEntry(projectPath, entry)
+    warnings.push(...(journalResult?.warnings ?? []))
+  } catch (error) {
+    warnings.push(`Could not append RPG apply journal entry: ${error instanceof Error ? error.message : String(error)}`)
+  }
+
+  try {
+    const saveResult = await input.dependencies.savePendingUpdates(projectPath, input.remainingPendingUpdates)
+    warnings.push(...(saveResult.warnings ?? []))
+  } catch (error) {
+    warnings.push(`Could not save RPG pending updates: ${error instanceof Error ? error.message : String(error)}`)
+  }
+
+  return warnings
+}
+
+async function persistPendingQueue(
+  projectPath: string,
+  updates: PendingRpgUpdate[],
+  dependencies: Pick<RpgRuntimePanelDependencies, "savePendingUpdates">,
+  setState: Dispatch<SetStateAction<RpgRuntimePanelState>>,
+): Promise<void> {
+  if (!projectPath) return
+
+  try {
+    const result = await dependencies.savePendingUpdates(projectPath, updates)
+    if (!result.warnings?.length) return
+    setState((current) => ({
+      ...current,
+      warnings: mergeWarnings(current.warnings, result.warnings ?? []),
+    }))
+  } catch (error) {
+    setState((current) => ({
+      ...current,
+      warnings: mergeWarnings(current.warnings, [
+        `Could not save RPG pending updates: ${error instanceof Error ? error.message : String(error)}`,
+      ]),
+    }))
+  }
+}
+
+function mergeWarnings(current: string[], next: string[]): string[] {
+  return [...new Set([...current, ...next])]
+}
+
+function uniqueNormalizedPaths(paths: string[]): string[] {
+  return [...new Set(paths.map(normalizeRpgApplyPath).filter(Boolean))]
+}
+
+function normalizeRpgApplyPath(path: string): string {
+  return path.trim().replace(/\\/g, "/").replace(/\/+/g, "/").replace(/^\.\//, "").replace(/^\/+/, "")
 }

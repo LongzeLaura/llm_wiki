@@ -109,13 +109,17 @@ afterEach(async () => {
 })
 
 describe("Stage 10 RPG smoke test", () => {
-  it("routes sample RPG material into first-version RPG directories and preserves live-state semantics", async () => {
+  it("routes sample RPG material into first-version RPG directories while ordinary ingest leaves current-scene runtime-owned", async () => {
     ctx = { tmp: await createTempProject("rpg-smoke-test") }
     const projectPath = ctx.tmp.path
 
     await writeFileRaw(`${projectPath}/schema.md`, RPG_SCHEMA)
     await writeFileRaw(`${projectPath}/purpose.md`, "# Purpose\n\nTrack a story-driven tabletop RPG campaign.\n")
     await writeFileRaw(`${projectPath}/wiki/index.md`, "# Index\n\n- [[world/basic-overview]]\n")
+    await writeFileRaw(
+      `${projectPath}/wiki/current-scene/scene_state.md`,
+      "# Current Scene\n\nRuntime-owned snapshot before ordinary ingest.",
+    )
 
     const worldSourcePath = `${projectPath}/raw/sources/world-guide.md`
     const heroSourcePath = `${projectPath}/raw/sources/hero-sheet.md`
@@ -144,8 +148,6 @@ describe("Stage 10 RPG smoke test", () => {
     await writeFileRaw(
       turnOneSourcePath,
       [
-        "[RPG-LIVE]",
-        "",
         "# Session 01",
         "",
         "Iven and Mira descend into the flooded customs tunnel.",
@@ -155,8 +157,6 @@ describe("Stage 10 RPG smoke test", () => {
     await writeFileRaw(
       turnTwoSourcePath,
       [
-        "[RPG-LIVE]",
-        "",
         "# Session 02",
         "",
         "The canal gate is locked from above.",
@@ -321,23 +321,10 @@ describe("Stage 10 RPG smoke test", () => {
     queueIngest(
       [
         "## RPG Extraction",
-        "- current-scene/state.md",
         "- events/canal-gate-incident.md",
         "- plot-arcs/shadow-below-the-port.md",
       ].join("\n"),
       [
-        "---FILE: wiki/current-scene/state.md---",
-        "---",
-        'type: "current-scene"',
-        'title: "Current Scene"',
-        'sources: ["session-01.md"]',
-        "---",
-        "",
-        "# Current Scene",
-        "",
-        "Iven and Mira stand in the flooded customs tunnel while warning bells echo overhead.",
-        "---END FILE---",
-        "",
         "---FILE: wiki/events/canal-gate-incident.md---",
         "---",
         'type: "events"',
@@ -379,22 +366,9 @@ describe("Stage 10 RPG smoke test", () => {
     queueIngest(
       [
         "## RPG Extraction",
-        "- current-scene/scene_state.md",
         "- events/canal-gate-incident.md",
       ].join("\n"),
       [
-        "---FILE: wiki/current-scene/scene_state.md---",
-        "---",
-        'type: "current-scene"',
-        'title: "Current Scene"',
-        'sources: ["session-02.md"]',
-        "---",
-        "",
-        "# Current Scene",
-        "",
-        "The canal gate is now locked from above while Mira bargains with a dock runner and Iven hides the lantern key under his coat.",
-        "---END FILE---",
-        "",
         "---FILE: wiki/events/canal-gate-incident.md---",
         "---",
         'type: "events"',
@@ -453,7 +427,8 @@ describe("Stage 10 RPG smoke test", () => {
     expect(await fileExists(`${projectPath}/wiki/current-scene/state.md`)).toBe(false)
 
     const sceneState = await readFileRaw(`${projectPath}/wiki/current-scene/scene_state.md`)
-    expect(sceneState).toContain("locked from above")
+    expect(sceneState).toContain("Runtime-owned snapshot before ordinary ingest.")
+    expect(sceneState).not.toContain("locked from above")
     expect(sceneState).not.toContain("warning bells echo overhead")
 
     const eventLog = await readFileRaw(`${projectPath}/wiki/events/canal-gate-incident.md`)
@@ -485,6 +460,6 @@ describe("Stage 10 RPG smoke test", () => {
       "events",
     ])
 
-    expect(useReviewStore.getState().items).toHaveLength(0)
+    expect(useReviewStore.getState().items.some((item) => item.title.includes("RPG runtime lint"))).toBe(true)
   })
 })
