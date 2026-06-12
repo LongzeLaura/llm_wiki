@@ -185,6 +185,22 @@
             "label": "Campaign setup: player profile",
             "description": "Import into wiki/player/player.md as the opening fixed player slot profile."
           },
+          "player_abilities": {
+            "label": "Campaign setup: player abilities",
+            "description": "Import into wiki/player/abilities.md for opening PC abilities, skills, limits, costs, and availability."
+          },
+          "player_inventory": {
+            "label": "Campaign setup: player inventory",
+            "description": "Import into wiki/player/inventory.md for opening PC items, quantities, equipped state, and resources."
+          },
+          "player_goals": {
+            "label": "Campaign setup: player goals",
+            "description": "Import into wiki/player/goals.md for opening PC goals, promises, priorities, and motivations."
+          },
+          "player_known_information": {
+            "label": "Campaign setup: player known information",
+            "description": "Import into wiki/player/known_information.md for starting PC knowledge, suspicions, misunderstandings, and hidden boundaries."
+          },
           "current_scene": {
             "label": "Campaign setup: current scene",
             "description": "Import into wiki/current-scene/scene_state.md with explicit bootstrap confirmation."

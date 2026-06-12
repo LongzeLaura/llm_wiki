@@ -89,7 +89,7 @@ export const ingestScenarios: IngestScenario[] = [
       "  - uncertainty: none",
     ].join("\n"),
     generationResponse: [
-      "---FILE: wiki/world/moonwell-oath.md---",
+      "---FILE: wiki/world/supernatural_presence.md---",
       "---",
       'type: "world"',
       'title: "Moonwell Oath"',
@@ -137,12 +137,12 @@ export const ingestScenarios: IngestScenario[] = [
     ].join("\n"),
     expected: {
       writtenPaths: [
-        "wiki/world/moonwell-oath.md",
+        "wiki/world/supernatural_presence.md",
         "wiki/locations/old-bell-tower.md",
         "wiki/sources/moonwell-lore.md",
       ],
       fileContains: {
-        "wiki/world/moonwell-oath.md": ["Moonwell oath binds harbor bells"],
+        "wiki/world/supernatural_presence.md": ["Moonwell oath binds harbor bells"],
         "wiki/locations/old-bell-tower.md": ["public tide records"],
         "wiki/sources/moonwell-lore.md": ["moonwell-lore.md"],
       },

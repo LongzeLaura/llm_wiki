@@ -309,7 +309,7 @@ export function validateRpgExtraction(
       )
       pushReviewOnce(
         `RPG Source Ingest boundary: ${sourceIngestValidationTargetLabel(block.path)} target skipped`,
-        `Ordinary Source Ingest can write only wiki/sources/, wiki/world/, wiki/characters/, fixed wiki/player/ slots, wiki/locations/, wiki/factions/, wiki/items/, wiki/plot-arcs/, wiki/events/, wiki/relationships/, and structural wiki/index.md, wiki/overview.md, wiki/log.md.`,
+        `Ordinary Source Ingest can write only wiki/sources/, fixed wiki/world/ slots, wiki/characters/, fixed wiki/player/ slots, wiki/locations/, wiki/factions/, wiki/items/, wiki/plot-arcs/, wiki/events/, wiki/relationships/, and structural wiki/index.md, wiki/overview.md, wiki/log.md.`,
         [block.path],
       )
     }
@@ -410,7 +410,7 @@ export function validateRpgExtraction(
       )
       pushReviewOnce(
         `RPG extraction lint: legacy path rejected`,
-        `llmWikiRPG no longer writes legacy llm_wiki directories. Move "${block.title}" to an ordinary Source Ingest directory such as wiki/sources/, wiki/world/, wiki/characters/, fixed wiki/player/ slots, wiki/locations/, wiki/factions/, wiki/items/, wiki/plot-arcs/, wiki/events/, or wiki/relationships/. Control, setup, quest, current-scene, and runtime-overlay material should stay REVIEW-only for the matching mode.`,
+        `llmWikiRPG no longer writes legacy llm_wiki directories. Move "${block.title}" to an ordinary Source Ingest directory such as wiki/sources/, fixed wiki/world/ slots, wiki/characters/, fixed wiki/player/ slots, wiki/locations/, wiki/factions/, wiki/items/, wiki/plot-arcs/, wiki/events/, or wiki/relationships/. Control, setup, quest, current-scene, and runtime-overlay material should stay REVIEW-only for the matching mode.`,
         [block.path],
       )
     }

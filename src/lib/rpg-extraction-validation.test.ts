@@ -121,7 +121,7 @@ describe("validateRpgExtraction", () => {
 
   it("creates omission reviews when obvious locations or factions are present but their directories stay empty", () => {
     const result = validateRpgExtraction([
-      makePage("wiki/world/war.md", "圣杯战争", `${runtimeCapsule()}冬木市、柳洞寺、魔术协会、圣堂教会都被卷入冲突。`, "world"),
+      makePage("wiki/world/basic_overview.md", "圣杯战争", `${runtimeCapsule()}冬木市、柳洞寺、魔术协会、圣堂教会都被卷入冲突。`, "world"),
     ], {
       sourcePath: "raw/sources/war-summary.md",
       sourceText: "冬木市、柳洞寺、魔术协会、圣堂教会都被卷入冲突。",

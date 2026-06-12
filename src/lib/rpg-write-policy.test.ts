@@ -11,6 +11,10 @@ import {
   type RpgUpdateStrategy,
 } from "./rpg-runtime"
 import { createTempProject, fileExists, readFileRaw, writeFileRaw } from "@/test-helpers/fs-temp"
+import {
+  sampleTurnNarration,
+  sampleTurnRecordRuntimeParts,
+} from "./rpg-runtime-test-fixtures"
 
 interface Ctx {
   tmp: { path: string; cleanup: () => Promise<void> }
@@ -414,7 +418,7 @@ describe("RPG Runtime Write Policy", () => {
     ctx = { tmp: await createTempProject("rpg-write-policy-stable") }
     const projectPath = ctx.tmp.path
     const stableTargets = [
-      "wiki/world/city.md",
+      "wiki/world/basic_overview.md",
       "wiki/style/narrative.md",
       "wiki/rules/magic.md",
       "wiki/sources/campaign-notes.md",
@@ -515,8 +519,11 @@ describe("RPG Runtime Write Policy", () => {
       ],
       references: ["wiki/events/canal-gate-sigil.md"],
     }
+    const submittedAction = { id: "turn-options", text: "Wait for Mira.", source: "freeform" } as const
     const turnRecord = createRpgTurnRecord({
-      submittedAction: { id: "turn-options", text: "Wait for Mira.", source: "freeform" },
+      submittedAction,
+      ...sampleTurnRecordRuntimeParts(submittedAction),
+      turnNarration: sampleTurnNarration({ playerFacingText: turnResult.narrative }),
       turnResult,
     })
     const pending = createPendingRpgUpdates(extractRpgStateUpdates({ turnRecord }).proposedUpdates)

@@ -203,13 +203,17 @@ fn is_llmwikirpg_project_root(root: &Path) -> Result<bool, String> {
         }
     }
 
-    let schema = fs::read_to_string(root.join("schema.md")).unwrap_or_default().to_lowercase();
+    let schema = fs::read_to_string(root.join("schema.md"))
+        .unwrap_or_default()
+        .to_lowercase();
     if schema.contains("wikimode: default") || schema.contains("wikimode = \"default\"") {
         return Ok(false);
     }
 
-    Ok((schema.contains("wikimode: llmwikirpg") || schema.contains("wikimode: rpg"))
-        && has_core_rpg_dirs(root))
+    Ok(
+        (schema.contains("wikimode: llmwikirpg") || schema.contains("wikimode: rpg"))
+            && has_core_rpg_dirs(root),
+    )
 }
 
 fn has_core_rpg_dirs(root: &Path) -> bool {
@@ -245,6 +249,26 @@ fn write_file_inner(path: std::path::PathBuf, contents: &str) -> Result<(), Stri
 }
 
 const RPG_SCHEMA_SLOT_TEMPLATES: &[(&str, &str)] = &[
+    (
+        "wiki/world/basic_overview.md",
+        "# World Basic Overview\n\n## Runtime Capsule\n\n<!-- Core premise, era, primary stage, genre, atmosphere, and broad world background. -->\n",
+    ),
+    (
+        "wiki/world/history.md",
+        "# World History\n\n## Runtime Capsule\n\n<!-- Established world history, eras, and public past events. Current campaign events belong in wiki/events/. -->\n",
+    ),
+    (
+        "wiki/world/common_sense.md",
+        "# World Common Sense\n\n## Runtime Capsule\n\n<!-- Public knowledge, everyday assumptions, customs, taboos, and common beliefs. -->\n",
+    ),
+    (
+        "wiki/world/supernatural_presence.md",
+        "# Supernatural Presence\n\n## Runtime Capsule\n\n<!-- How magic, technology, monsters, anomalies, mysteries, or other extraordinary elements visibly exist. Mechanics belong in wiki/rules/. -->\n",
+    ),
+    (
+        "wiki/world/social_structure.md",
+        "# Social Structure\n\n## Runtime Capsule\n\n<!-- Social order, law, economy, public power structure, and broad institutions. Specific organizations belong in wiki/factions/. -->\n",
+    ),
     (
         "wiki/outlines/main.md",
         "# Main Outline\n\n## Runtime Capsule\n\n<!-- Author/GM-side future outline. Keep empty until explicitly filled. -->\n\n## Act Structure\n\n<!-- Planned beats, reveal order, and branch conditions. -->\n",
@@ -291,27 +315,254 @@ const RPG_SCHEMA_SLOT_TEMPLATES: &[(&str, &str)] = &[
     ),
     (
         "wiki/current-scene/scene_state.md",
-        "# Current Scene\n\n## Runtime Capsule\n\n<!-- Latest immediate scene snapshot for the next turn. Overwrite through reviewed runtime apply. -->\n",
+        r#"# Current Scene
+
+## Runtime Capsule
+
+Latest immediate scene snapshot for the next turn. This page is overwrite-only: keep only the state needed to start the next playable turn.
+
+## Campaign Setup Import Shape
+
+Use the `current_scene` campaign setup slot for a file that answers:
+
+- When and where is the first playable moment?
+- Who is present, what are they doing, and what is immediately visible?
+- What just happened that matters right now?
+- What active danger, clock, countdown, or pending reaction must the next turn inherit?
+
+Recommended source headings:
+
+```markdown
+# Opening Scene
+
+## Time And Place
+...
+
+## Present Characters
+...
+
+## Immediate Situation
+...
+
+## Visible Objects And Clues
+...
+
+## Active Pressure
+...
+
+## Player's Immediate Choices
+...
+```
+
+## Do Not Put Here
+
+- Full backstory or prologue history; put confirmed past events in `wiki/events/prologue.md`.
+- Future plans, unrevealed GM notes, or possible routes; keep those in outlines or plot-arcs after review.
+- Stable character profiles; put those in `wiki/characters/`.
+- Long-term player preferences or table rules; put those in `wiki/memory/` or `wiki/rules/`.
+"#,
     ),
     (
         "wiki/player/player.md",
-        "# Player\n\n## Runtime Capsule\n\n<!-- Current PC identity, background, stable facts, and current status summary. -->\n",
+        r#"# Player
+
+## Runtime Capsule
+
+Current player character identity, background, stable facts, and current status summary.
+
+## Campaign Setup Import Shape
+
+Use the `player_main` campaign setup slot for a player profile file. `campaign_setup_import` v0 does not ask an LLM to split or rewrite the profile, so make the source easy to review.
+
+Recommended source headings:
+
+```markdown
+# Player Character
+
+## Identity
+- Name:
+- Pronouns:
+- Role/archetype:
+
+## Background
+- Origin:
+- Important history:
+- Ties to the campaign:
+
+## Current Status
+- Location:
+- Condition:
+- Reputation/standing:
+
+## Stable Facts
+- Canonical facts that should stay true unless play changes them:
+```
+
+If the same source also includes abilities, inventory, goals, or known information, keep those under clear headings so review/manual merge can move them into the fixed player slots.
+
+## Fixed Player Slots
+
+- `wiki/player/player.md`: identity, background, current status, stable PC facts.
+- `wiki/player/abilities.md`: abilities, skills, limits, costs, current availability.
+- `wiki/player/inventory.md`: held items, quantities, equipped state, consumed/lost state.
+- `wiki/player/goals.md`: PC goals, promises, priorities, motivations.
+- `wiki/player/known_information.md`: what the PC knows, suspects, misunderstands, or must not yet know.
+
+## Do Not Put Here
+
+- NPC profiles; put those in `wiki/characters/`.
+- Table rules or power system rules; put those in `wiki/rules/`.
+- Future GM-only plans; keep those in outlines or plot-arcs after review.
+"#,
     ),
     (
         "wiki/player/abilities.md",
-        "# Player Abilities\n\n## Runtime Capsule\n\n<!-- Player abilities, skills, limits, costs, and current availability. -->\n",
+        r#"# Player Abilities
+
+## Runtime Capsule
+
+Player abilities, skills, limits, costs, and current availability.
+
+## Campaign Setup Source Shape
+
+If you import a player profile, put ability-like content under a clear heading so review can route it here. `campaign_setup_import` v0 warns about ability-like text but does not automatically split it out of `player_main`.
+
+Recommended source headings:
+
+```markdown
+## Abilities
+- Ability name:
+  - What it does:
+  - Cost or cooldown:
+  - Limits:
+  - Current availability:
+
+## Skills
+- Skill name:
+  - Rank/level:
+  - Use cases:
+  - Limits:
+```
+
+## Do Not Put Here
+
+- Global game rules or world laws; put those in `wiki/rules/`.
+- NPC abilities; put stable NPC capabilities in `wiki/characters/`.
+- One-turn temporary effects unless they must persist into later play.
+"#,
     ),
     (
         "wiki/player/inventory.md",
-        "# Player Inventory\n\n## Runtime Capsule\n\n<!-- Current held items, quantities, equipped state, and consumption state. -->\n",
+        r#"# Player Inventory
+
+## Runtime Capsule
+
+Current held items, quantities, equipped state, and consumption state.
+
+## Campaign Setup Source Shape
+
+Use a clear inventory section in the player profile or a separate manual note. `campaign_setup_import` v0 does not automatically split inventory from `player_main`.
+
+Recommended source headings:
+
+```markdown
+## Inventory
+- Item:
+  - Quantity:
+  - Equipped/held/stored:
+  - Condition:
+  - Known properties:
+  - Source or owner:
+
+## Resources
+- Currency:
+- Consumables:
+- Ammunition/charges:
+```
+
+## Do Not Put Here
+
+- General item lore with no current PC ownership; put that in `wiki/items/`.
+- Items merely seen in the scene; put immediate interactables in `wiki/current-scene/scene_state.md`.
+- Future rewards not yet obtained.
+"#,
     ),
     (
         "wiki/player/goals.md",
-        "# Player Goals\n\n## Runtime Capsule\n\n<!-- PC subjective goals, promises, priorities, and motivations. -->\n",
+        r#"# Player Goals
+
+## Runtime Capsule
+
+PC subjective goals, promises, priorities, and motivations.
+
+## Campaign Setup Source Shape
+
+Use this slot for goals the player character currently recognizes at campaign start. `campaign_setup_import` v0 does not automatically split goals from `player_main`.
+
+Recommended source headings:
+
+```markdown
+## Goals
+- Goal:
+  - Why it matters:
+  - Current blocker:
+  - Urgency:
+  - Success condition:
+
+## Promises And Obligations
+- Promise/obligation:
+  - To whom:
+  - Consequence if ignored:
+```
+
+## Do Not Put Here
+
+- GM-only future plot plans; put those in `wiki/outlines/main.md`.
+- Confirmed historical events; put those in `wiki/events/`.
+- Quest tracking shared by the campaign; put objective records in `wiki/quests/`.
+"#,
     ),
     (
         "wiki/player/known_information.md",
-        "# Player Known Information\n\n## Runtime Capsule\n\n<!-- Information the player/PC knows, suspects, misunderstands, or must not yet know. -->\n",
+        r#"# Player Known Information
+
+## Runtime Capsule
+
+Information the player character knows, suspects, misunderstands, or must not yet know.
+
+## Campaign Setup Source Shape
+
+Use this slot for starting knowledge boundaries. `campaign_setup_import` v0 does not automatically split knowledge from `player_main`, so put knowledge in an obvious section if it is part of the imported player profile.
+
+Recommended source headings:
+
+```markdown
+## Known To The PC
+- Fact:
+  - Source:
+  - Confidence:
+
+## Suspicions
+- Suspicion:
+  - Evidence:
+  - Confidence:
+
+## Misunderstandings
+- Belief:
+  - Why it is wrong or incomplete:
+
+## Not Yet Known To The PC
+- Hidden fact:
+  - Who knows it:
+  - Reveal boundary:
+```
+
+## Do Not Put Here
+
+- Information only the real user saw in a parallel scene unless the PC also learned it.
+- GM-only future reveals as if the PC knows them.
+- Stable world lore unrelated to PC knowledge; put that in `wiki/world/`.
+"#,
     ),
 ];
 
@@ -330,7 +581,7 @@ const RPG_SCHEMA: &str = r#"wikiMode: llmwikirpg
 | Path | Layer | Write policy | Contract |
 |------|-------|--------------|----------|
 | `wiki/sources/` | Evidence | ingest merge/append | Source evidence layer, imported material summaries, provenance, and document-level notes. |
-| `wiki/world/` | Stable base | ingest/manual merge; runtime blocked | Stable setting, lore, history, social rules, and world systems. |
+| `wiki/world/` | Fixed stable base slots | ingest/manual merge into fixed slots; runtime blocked | Stable setting, lore, history, common sense, supernatural presence, and social structure. Do not create arbitrary world pages. |
 | `wiki/characters/` | Stable base | ingest/manual merge; runtime must not rewrite base pages | Base character models, canon facts, portrayal rules, and source-supported stable traits. |
 | `wiki/characters/runtime/` | Runtime overlay | runtime merge | Current campaign status overlays for characters: condition, intent, temporary resources, and scene-relevant changes. |
 | `wiki/player/` | Runtime/base state | runtime/manual merge | Player character identity, abilities, inventory, goals, knowledge, and accepted state. |
@@ -361,6 +612,11 @@ New projects must create these fixed slot files. Missing slots mean the project 
 
 | slotId | path | owner | write policy |
 |---|---|---|---|
+| `world_basic_overview` | `wiki/world/basic_overview.md` | source_ingest | merge |
+| `world_history` | `wiki/world/history.md` | source_ingest | merge |
+| `world_common_sense` | `wiki/world/common_sense.md` | source_ingest | merge |
+| `world_supernatural_presence` | `wiki/world/supernatural_presence.md` | source_ingest | merge |
+| `world_social_structure` | `wiki/world/social_structure.md` | source_ingest | merge |
 | `main_outline` | `wiki/outlines/main.md` | control_doc | manual_or_review_only |
 | `outline_progress` | `wiki/outlines/progress.md` | runtime | merge through pending/review |
 | `rules_core` | `wiki/rules/core.md` | control_doc | manual_or_review_only |
@@ -380,6 +636,7 @@ New projects must create these fixed slot files. Missing slots mean the project 
 | `player_known_information` | `wiki/player/known_information.md` | campaign_setup | merge |
 
 - `rules/`, `style/`, `wiki/memory/player-preferences.md`, and `wiki/outlines/main.md` are manual_or_review_only control files.
+- `wiki/world/` is a fixed slot set. Do not create arbitrary world files; merge extra world subtopics into the five fixed world slots.
 - `wiki/outlines/progress.md` is the runtime outline progress slot; runtime may merge it only inside the pending/review apply boundary.
 - `wiki/player/` is a fixed slot set. Do not create arbitrary player files; merge extra player subtopics into the five fixed player slots.
 
@@ -394,6 +651,7 @@ New projects must create these fixed slot files. Missing slots mean the project 
 ## Dynamic Update Rules
 
 - Static ingest output for `characters`, `locations`, `factions`, and `items` writes stable facts to base directories; runtime state writes to the matching `runtime/` overlay.
+- Static ingest output for `world` writes only to the five fixed world slots.
 - `wiki/current-scene/scene_state.md` is a snapshot and should be overwritten on each accepted scene advance.
 - `wiki/events/` is append/create-only history for confirmed happened events.
 - `wiki/plot-arcs/` may contain foreshadowing, unresolved questions, and future pressure, but must not invent events as already happened.
@@ -536,6 +794,59 @@ mod tests {
             assert!(
                 root.join(relative_path).is_file(),
                 "missing required slot file: {relative_path}"
+            );
+        }
+
+        fs::remove_dir_all(&temp_root).expect("temp root should be removed");
+    }
+
+    #[test]
+    fn create_project_writes_campaign_setup_starter_schema_guidance() {
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("system clock should be after epoch")
+            .as_nanos();
+        let temp_root =
+            std::env::temp_dir().join(format!("llmwikirpg-starter-schema-test-{unique}"));
+        fs::create_dir_all(&temp_root).expect("temp root should be created");
+
+        let result = create_project_impl(
+            "starter-schema-project".to_string(),
+            temp_root.to_string_lossy().to_string(),
+        )
+        .expect("project should be created");
+        let root = Path::new(&result.path);
+
+        let player = fs::read_to_string(root.join("wiki/player/player.md"))
+            .expect("player starter file should be readable");
+        assert!(player.contains("## Campaign Setup Import Shape"));
+        assert!(player.contains("`campaign_setup_import` v0 does not ask an LLM"));
+        assert!(player.contains("## Fixed Player Slots"));
+        assert!(player.contains("`wiki/player/known_information.md`"));
+
+        let current_scene = fs::read_to_string(root.join("wiki/current-scene/scene_state.md"))
+            .expect("current scene starter file should be readable");
+        assert!(current_scene.contains("Use the `current_scene` campaign setup slot"));
+        assert!(current_scene.contains("## Do Not Put Here"));
+
+        for (relative_path, expected) in [
+            ("wiki/player/abilities.md", "## Campaign Setup Source Shape"),
+            ("wiki/player/inventory.md", "## Campaign Setup Source Shape"),
+            ("wiki/player/goals.md", "## Campaign Setup Source Shape"),
+            (
+                "wiki/player/known_information.md",
+                "## Campaign Setup Source Shape",
+            ),
+        ] {
+            let content = fs::read_to_string(root.join(relative_path))
+                .unwrap_or_else(|_| panic!("{relative_path} should be readable"));
+            assert!(
+                content.contains(expected),
+                "{relative_path} missing source-shape guidance"
+            );
+            assert!(
+                content.contains("## Do Not Put Here"),
+                "{relative_path} missing boundary guidance"
             );
         }
 

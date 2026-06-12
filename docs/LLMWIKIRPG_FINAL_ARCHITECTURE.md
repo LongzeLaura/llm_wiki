@@ -82,68 +82,157 @@ wiki/thesis/
 
 ```mermaid
 flowchart TB
-  User[用户 / 玩家] --> UI[桌面 UI]
+  User[用户 / 玩家 / GM] --> UI[桌面 UI]
   Wiki[(Markdown RPG Wiki)]
+  RuntimeMeta[(.llm-wiki/runtime<br/>回合日志 / pending 队列 / 审计)]
+  Search[搜索 / 图谱 / 向量检索]
+  Review[审阅 / 暂存队列<br/>已接入, 仍需统一化]
 
-  subgraph Setup[项目初始化与资料导入]
-    Project[llmWikiRPG 项目管理器]
-    Import[源文件导入]
-    Ingest[RPG Ingest 流程]
-    Classify[对象优先分类]
-    WritePolicy[Ingest 写入策略]
-    Derive[关系与张力推导器]
-    Review[审阅 / 暂存队列]
+  subgraph Legend[状态图例]
+    Done[已接入 / 已实现]
+    Partial[v0 已实现, 需要完善]
+    NotWired[代码存在, 未接入产品闭环]
+    Missing[未实现]
+  end
+
+  subgraph CampaignSetup[Campaign Setup / 项目初始化]
+    Project[llmWikiRPG 项目管理器<br/>已接入]
+    Skeleton[RPG 目录与固定 schema slots<br/>已接入]
+    Seed[初始战役信息 / 角色 / 规则]
+    SetupImport[Campaign Setup Import<br/>v0 已接入]
   end
 
   UI --> Project
-  Project --> Wiki
-  UI --> Import
-  Import --> Ingest
-  Ingest --> Classify
-  Classify --> WritePolicy
-  WritePolicy --> Wiki
-  Wiki --> Derive
-  Derive --> Review
-  Review --> Wiki
+  Project --> Skeleton
+  Skeleton --> Wiki
+  UI --> Seed
+  Seed --> SetupImport
+  SetupImport --> Review
 
-  subgraph PlayTurn[单回合运行时]
+  subgraph ControlDoc[Control Doc / 控制文档导入]
+    ControlInput[主线大纲 / GM 指令 / 文风规则 / 桌规]
+    Canonicalize[控制文档规范化<br/>v0 已接入]
+    ControlWrite[写入 outlines / style / rules / memory<br/>v0 已接入]
+  end
+
+  UI --> ControlInput
+  ControlInput --> Canonicalize
+  Canonicalize --> Review
+  Review --> ControlWrite
+  ControlWrite --> Wiki
+
+  subgraph SourceIngest[Source Ingest / 来源资料导入]
+    SourceInput[网页 / PDF / 文本 / 对白语料]
+    SourceAnalysis[来源分析 / RP 信号抽取<br/>已接入, 质量需评估]
+    SourceGeneration[对象优先生成 RPG 页面草案<br/>已接入]
+    ImportLint[导入质量校验 / 路由校验<br/>轻量版已接入]
+    Distill[Post-Ingest Distiller / Runtime Capsule 压缩<br/>v0 已实现, 应用策略需完善]
+    RelationshipDerive[关系 / 张力推导器<br/>已实现, 未接入产品闭环]
+  end
+
+  UI --> SourceInput
+  SourceInput --> SourceAnalysis
+  SourceAnalysis --> SourceGeneration
+  SourceGeneration --> ImportLint
+  ImportLint --> Distill
+  Distill --> RelationshipDerive
+  RelationshipDerive --> Review
+
+  subgraph MergeLayer[Merge / Wiki 写入层]
+    MergeSpec[Page Merge Interaction<br/>已接入]
+    MergePolicy[目录写入策略<br/>已接入]
+    SectionMerge[Section-aware Merge<br/>已接入, 语义仍需打磨]
+    IngestWrite[写入 sources / world / characters / locations / factions / items / events / plot-arcs / relationships<br/>已接入]
+  end
+
+  Review --> MergeSpec
+  MergeSpec --> MergePolicy
+  MergePolicy --> SectionMerge
+  SectionMerge --> IngestWrite
+  IngestWrite --> Wiki
+
+  subgraph RuntimeTurn[Runtime / 单回合游玩闭环]
     SubmittedAction[玩家提交的行动]
-    Runtime[RPG Runtime Agent]
-    Context[上下文编译器]
-    Brief[紧凑剧情生成简报]
-    Narration[叙事生成器]
+    ActionInput[Action Resolver input builder<br/>已接入; module-specific reader]
+    ActionResolver[Action Resolver<br/>已接入]
+    WorldTickInput[World Tick input builder<br/>已接入; module-specific reader]
+    WorldTick[World Tick / Reaction<br/>已接入]
+    TurnState[PostActionWorkingState + visible selection<br/>本地结构化 handoff]
+    RecallInput[Recall Selector input builder<br/>已接入; retrieval index builder]
+    Recall[Recall Selector<br/>已接入]
+    RecallHandoff[Recall handoff / recalledMaterials<br/>已接入; allowlist reader]
+    OutlineInput[Outline Brief input builder<br/>已接入; controlled outline reader]
+    OutlineBrief[Outline-aware Brief + Impact<br/>已接入]
+    OutlineRegen[可选 Story Outline Regenerator<br/>runRpgTurn 条件支持; UI 默认未注入 adapter]
+    NarrationInput[Narration input builder<br/>已接入; style/rules/memory reader]
+    Narration[Narration Generator<br/>已接入]
     TurnResult[玩家可见叙事 + 下一步选项]
-    TurnRecord[已完成行动 + 生成叙事]
-    UpdateExtract[状态更新抽取器]
-    RuntimeGuard[运行时写入守卫]
-    StagedUpdates[待确认更新]
-    Apply[确认 / 应用]
-    OutlineImpact[剧情大纲影响检测器]
-    Replan[剧情大纲再生成器]
+    TurnRecord[结构化回合记录]
+    UpdateProposalInput[Runtime Update Proposal input<br/>从 turnRecord 构建]
+    UpdateProposal[Runtime Update Proposal<br/>已接入]
+    UpdateValidation[运行时更新校验<br/>已接入]
+    PendingUpdates[待确认 runtime updates<br/>已接入]
+    RuntimeGuard[运行时写入守卫<br/>已接入]
+    RuntimeApply[确认 / 应用<br/>已接入]
+  end
+
+  subgraph AuditLayer[Project Audit / Evaluation]
+    ProjectAudit[整项目审计 / 评估工具<br/>未实现]
+    RealModelEval[真实模型长回合评估<br/>未实现]
   end
 
   UI -->|选项或自由文本| SubmittedAction
-  SubmittedAction --> Runtime
-  Runtime --> Context
-  Wiki --> Context
-  Search[搜索 / 图谱 / 向量检索] --> Context
-  Context -->|多轮压缩| Brief
-  Brief --> Narration
+  SubmittedAction --> ActionInput
+  Wiki --> ActionInput
+  ActionInput --> ActionResolver
+  SubmittedAction --> WorldTickInput
+  ActionInput --> WorldTickInput
+  ActionResolver --> WorldTickInput
+  Wiki --> WorldTickInput
+  WorldTickInput --> WorldTick
+  ActionResolver --> TurnState
+  WorldTick --> TurnState
+  TurnState --> RecallInput
+  Wiki --> RecallInput
+  RecallInput --> Recall
+  Recall --> RecallHandoff
+  Wiki --> RecallHandoff
+  TurnState --> OutlineInput
+  RecallHandoff --> OutlineInput
+  Wiki --> OutlineInput
+  OutlineInput --> OutlineBrief
+  OutlineBrief -->|重大偏离且允许| OutlineRegen
+  TurnState --> NarrationInput
+  RecallHandoff --> NarrationInput
+  OutlineBrief --> NarrationInput
+  OutlineRegen --> NarrationInput
+  Wiki --> NarrationInput
+  NarrationInput --> Narration
   Narration --> TurnResult
   TurnResult --> UI
 
-  SubmittedAction --> TurnRecord
+  ActionResolver --> TurnRecord
+  WorldTick --> TurnRecord
+  Recall --> TurnRecord
+  OutlineBrief --> TurnRecord
+  OutlineRegen --> TurnRecord
   Narration --> TurnRecord
-  TurnRecord --> UpdateExtract
-  UpdateExtract --> RuntimeGuard
-  RuntimeGuard --> StagedUpdates
-  StagedUpdates --> Apply
-  Apply --> Wiki
+  TurnRecord --> RuntimeMeta
+  RuntimeMeta --> UI
+  TurnRecord --> UpdateProposalInput
+  UpdateProposalInput --> UpdateProposal
+  UpdateProposal --> UpdateValidation
+  UpdateValidation --> PendingUpdates
+  PendingUpdates --> Review
+  Review --> RuntimeGuard
+  RuntimeGuard --> RuntimeApply
+  RuntimeApply --> Wiki
+  RuntimeApply --> RuntimeMeta
 
-  Apply --> OutlineImpact
-  Wiki --> OutlineImpact
-  OutlineImpact -->|重大偏离| Replan
-  Replan --> Wiki
+  Wiki --> Search
+  Wiki -.-> ProjectAudit
+  RuntimeMeta -.-> ProjectAudit
+  ProjectAudit -.-> RealModelEval
 ```
 
 ## 核心分层
@@ -172,7 +261,7 @@ wiki/locations/church.md
 wiki/locations/runtime/church.md
 ```
 
-运行时上下文编译器先读取稳定页，再叠加运行时页。这样既保留原始设定资料，又提供会持续变化的战役状态。
+各 runtime module-specific input builders / runtime handoff readers 先读取稳定页，再叠加运行时页。这样既保留原始设定资料，又提供会持续变化的战役状态。当前 runtime 主链路已经不再通过中心化总 brief 组装上下文；各模块由自己的 input builder 或 handoff reader 供给。
 
 ### 2. Ingest 层
 
@@ -193,7 +282,7 @@ ingest 应被视为有损编译器。它不应问“这段资料里有什么设�
 - 分类必须对象优先，但不能止步于对象分类：先判断片段是角色模型、关系线索、事件、世界事实、地点、势力、物品、文风笔记、规则、任务线索还是噪声，再判断它对 RPG 运行是否有用。
 - 所有来源片段都要通过 RP utility gate：它是否改变 NPC 表演、玩家行动、关系张力、场景钩子、剧情压力、状态后果、文风规则或硬设定边界。
 - 低价值百科信息、粉丝标签、版本信息、长篇路线流水、声优 / 制作 trivia、无行动价值的背景解释，不应进入 runtime-facing 页面；最多进入 `sources/`、review，或作为噪声丢弃。
-- 非 `sources/` 页面应逐步包含 `Runtime Capsule`，作为运行时上下文编译器优先读取的短入口，而不是默认让 runtime 读取整页。
+- 非 `sources/` 页面应逐步包含 `Runtime Capsule`，作为各模块 input builder / handoff reader 优先读取的短入口，而不是默认让 runtime 读取整页。
 - 生成页面必须可用于 RPG：角色页应是 NPC 操作模型，地点页应像场景卡，势力页应像压力源，物品页应强调用法 / 代价 / 风险，关系页应强调信任、张力和变化触发器。
 - 长来源应先分块抽取 RP 信号，再全局去重、合并、评分、排序，最后只用高价值信号生成目标页面；不应把 chunk 摘要直接拼成百科页。
 - 页面应有软长度预算。超过预算时应触发 review、压缩或 post-ingest distiller，而不是静默增长。
@@ -305,7 +394,7 @@ wiki/memory/manual-notes.md
 }}
 ```
 
-运行时上下文编译器应能解析或保留这些块，并把它们作为高优先级指令注入叙事提示词中。它们属于用户手写控制文件，ingest 和运行时状态抽取都不应自动改写。
+对应的 module-specific input builders / narration handoff readers 应能解析或保留这些块，并把它们作为高优先级指令注入相关提示词中。它们属于用户手写控制文件，ingest 和运行时状态抽取都不应自动改写。
 
 ### 5. RPG Runtime Agent
 
@@ -315,9 +404,9 @@ wiki/memory/manual-notes.md
 
 1. 接收玩家行动，可以是选项，也可以是自由输入。
 2. 在把下一回合视为“就绪”之前，先完成上一玩家行动以及由它生成的叙事回写。展示给玩家的下一步选项只是可能性，不是已经发生的事件。
-3. 编译必要上下文：当前场景、玩家状态、目标/任务进度、最近事件、活动剧情弧、相关关系/张力、相关角色/地点/势力/物品、文风/规则/手动上下文。
-4. 执行多轮上下文压缩，形成紧凑剧情生成简报。
-5. 将简报、玩家行动和高优先级规则发送给叙事生成器。
+3. 先由 action resolver 专属 input builder 读取当前场景、玩家状态、规则、相关角色/地点/势力/物品和任务目标，构建 `ActionResolverInput`。
+4. 执行 `action_resolver`，得到结构化行动裁判结果。
+5. 后续模块分别通过自己的 input builder / handoff reader 读取所需材料，依次形成 `world_tick`、`recall_selector`、`outline_brief`、可选 `story_outline_regenerator` 与 `narration_generator` 的结构化 handoff；当前主链路不再保留中心化总 brief。
 6. 生成玩家可见剧情。
 7. 生成 3 到 5 个下一步行动选项。未选择的选项不得写入 wiki。
 8. 从“已完成行动 + 叙事”中抽取候选状态变更。
@@ -373,8 +462,8 @@ interface RpgActionOption {
 - RPG 启动目录和后端直接创建 RPG skeleton。
 - RPG 分类、schema、prompt、写入策略和动态校验。
 - 最终 schema overlay 契约已经落到前后端 bootstrap、category/schema 文案和测试：`characters`、`locations`、`factions`、`items` 的 base 页承载稳定设定，`runtime/` 子目录承载游玩中变化。
-- 运行时基础链路已经建立：Runtime Agent / Context Compiler、Turn Model、Narration Interaction、Runtime Update Interaction、Pending Updates、Runtime Write Policy、RPG Play Panel 与 Pending Review / Apply UI。
-- Stage 6.12 已把 `wiki/quests/` 明确为 objective tracking / runtime merge 目录，并对齐 bootstrap、reference allowlist、context compiler、runtime update target policy、write policy、UI type/display 和文档契约。
+- 运行时基础链路已经建立：Action Resolver、World Tick、Recall Selector、Outline Brief、Narration Generator 的专属 input builder / handoff reader、Turn Model、Runtime Update Proposal、Pending Updates、Runtime Write Policy、RPG Play Panel 与 Pending Review / Apply UI。
+- Stage 6.12 已把 `wiki/quests/` 明确为 objective tracking / runtime merge 目录，并对齐 bootstrap、reference allowlist、runtime readers、runtime update target policy、write policy、UI type/display 和文档契约。
 - 旧 default prompt/template 分支已移除。
 - ingest 写入边界会拒绝 legacy 目录。
 - `Save to Memory` 写入 `wiki/memory/`。
@@ -385,18 +474,22 @@ interface RpgActionOption {
 1. 建立 runtime persistence：持久化 `RpgTurnRecord`、pending updates、accept/reject/apply 结果和审计日志，避免刷新或重开项目后丢失运行时审阅状态。
 2. 增强 apply 后可靠性：应用 accepted updates 后刷新 current-scene、文件树和相关 UI 状态，让玩家看到的运行态与已写入 wiki 保持一致。
 3. 增强 runtime update 语义校验和 merge 语义：在 pending 前阻止 future plan 写入 `events`、候选选项污染事实、current-scene 长期设定污染，并把 append-style merge 升级为 section-aware merge。
-4. 升级 Context Compiler v1：利用 selected option、`likelyAffectedPaths`、recent accepted events、runtime overlays、relationships、plot-arcs 和 objective/quest 信息做更准确的上下文预算。
+4. 继续打磨 module-specific input builders / handoff readers：利用 selected option、`likelyAffectedPaths`、recent accepted events、runtime overlays、relationships、plot-arcs 和 objective/quest 信息做更准确的模块级上下文预算，并避免重新形成新的总装 brief。
 5. 将关系/张力推导做成独立后置任务，默认进入 review/pending，避免把推测伪装成原作事实。
-6. 在 runtime 状态更稳定后增加剧情大纲影响检测器和大纲再生成器；大纲再生成应生成可审阅提案，而不是自动覆盖未来剧情。
+6. 在 runtime 状态更稳定后完善剧情大纲影响检测器和大纲再生成器的 UI 注入与审阅体验；大纲再生成应生成可审阅提案，而不是自动覆盖未来剧情。
 7. 增加整项目审计 / 评估工具，检查错误路由、状态污染、未选选项污染、运行时越权写入、角色卡结构漂移和真实模型长回合稳定性。
 
 ## 建议的最终模块边界
 
 ```text
 src/lib/rpg-runtime/
-  context-compiler.ts
-  context-compressor.ts
-  narration-prompts.ts
+  wiki-readers.ts
+  action-resolver-input-builder.ts
+  world-tick-input-builder.ts
+  recall-selector-input-builder.ts
+  outline-brief-input-builder.ts
+  narration-input-builder.ts
+  runtime-update-proposal-handoff.ts
   action-options.ts
   state-extractor.ts
   update-validation.ts

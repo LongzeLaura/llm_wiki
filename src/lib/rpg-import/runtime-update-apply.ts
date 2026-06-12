@@ -16,6 +16,8 @@ import {
   createPendingRpgUpdates,
   type PendingRpgUpdate,
 } from "../rpg-runtime/update-staging"
+import { buildRuntimeUpdateProposalInputFromTurnRecord } from "../rpg-runtime/runtime-update-proposal-handoff"
+import type { RuntimeUpdateProposalResult } from "../rpg-runtime/types"
 import type { RpgImportModeSpec, RpgImportRequest, RpgImportResult } from "./types"
 
 export const RUNTIME_UPDATE_APPLY_OPERATIONS = [
@@ -36,6 +38,11 @@ export interface RuntimeUpdateApplyResult extends RpgImportResult {
 
 interface ResolvedRuntimeUpdateProposals {
   proposedUpdates: ProposedWikiUpdate[]
+  outlineRevisionReviewItems: RuntimeUpdateProposalResult["outlineRevisionReviewItems"]
+  journalEntries: RuntimeUpdateProposalResult["journalEntries"]
+  skippedDeltas: RuntimeUpdateProposalResult["skippedDeltas"]
+  pacingUpdateProposal: RuntimeUpdateProposalResult["pacingUpdateProposal"]
+  proposalGroups: RuntimeUpdateProposalResult["proposalGroups"]
   warnings: string[]
 }
 
@@ -70,8 +77,8 @@ async function runStagePending(request: RpgImportRequest): Promise<RuntimeUpdate
     mode: "runtime_update_apply",
     operation: "stage_pending",
     writtenPaths: [],
-    reviewItems: buildStagePendingReviewItems(runtimeUpdateValidation, pendingUpdates, resolved.warnings),
-    warnings: [...resolved.warnings, ...runtimeUpdateValidation.warnings],
+    reviewItems: buildStagePendingReviewItems(runtimeUpdateValidation, pendingUpdates, resolved),
+    warnings: [...resolved.warnings, ...buildStagePendingAuditWarnings(resolved), ...runtimeUpdateValidation.warnings],
     skipped: skippedPathsFromValidation(runtimeUpdateValidation),
     proposedUpdates: resolved.proposedUpdates,
     pendingUpdates,
@@ -116,6 +123,11 @@ function resolveStagePendingProposals(request: RpgImportRequest): ResolvedRuntim
   if (request.options?.proposedUpdates !== undefined) {
     return {
       proposedUpdates: resolveProposedUpdates(request.options.proposedUpdates),
+      outlineRevisionReviewItems: [],
+      journalEntries: [],
+      skippedDeltas: [],
+      pacingUpdateProposal: null,
+      proposalGroups: [],
       warnings: [],
     }
   }
@@ -125,16 +137,37 @@ function resolveStagePendingProposals(request: RpgImportRequest): ResolvedRuntim
     if (!turnRecord) {
       throw new Error("runtime_update_apply stage_pending with sourceText requires options.turnRecord.")
     }
-    return runtimeUpdateInteractionSpec.parseOutput(request.sourceText, { turnRecord })
+    return runtimeUpdateProposalResultToResolvedProposals(
+      runtimeUpdateInteractionSpec.parseOutput(request.sourceText, buildRuntimeUpdateProposalInputFromTurnRecord(turnRecord)),
+    )
   }
 
   if (turnRecord) {
-    return runtimeUpdateInteractionSpec.parseOutput(turnRecord.generatedNarrative, { turnRecord })
+    return runtimeUpdateProposalResultToResolvedProposals(
+      runtimeUpdateInteractionSpec.parseOutput(
+        turnRecord.generatedNarrative,
+        buildRuntimeUpdateProposalInputFromTurnRecord(turnRecord),
+      ),
+    )
   }
 
   throw new Error(
     "runtime_update_apply stage_pending requires options.proposedUpdates, or options.turnRecord with optional sourceText runtime update output.",
   )
+}
+
+function runtimeUpdateProposalResultToResolvedProposals(
+  result: ReturnType<typeof runtimeUpdateInteractionSpec.parseOutput>,
+): ResolvedRuntimeUpdateProposals {
+  return {
+    proposedUpdates: result.proposedWikiUpdates,
+    outlineRevisionReviewItems: result.outlineRevisionReviewItems,
+    journalEntries: result.journalEntries,
+    skippedDeltas: result.skippedDeltas,
+    pacingUpdateProposal: result.pacingUpdateProposal,
+    proposalGroups: result.proposalGroups,
+    warnings: result.warnings,
+  }
 }
 
 function validateRuntimeUpdateApplyProposals(
@@ -213,6 +246,19 @@ function resolveOptionalTurnRecord(value: unknown): RpgTurnRecord | undefined {
         ? { selectedOptionId: value.submittedAction.selectedOptionId }
         : {}),
     },
+    actionResolution: value.actionResolution,
+    worldTickResult: value.worldTickResult,
+    visibleSelection: value.visibleSelection,
+    postActionWorkingState: value.postActionWorkingState,
+    recallSelection: value.recallSelection,
+    recalledMaterials: [...value.recalledMaterials],
+    outlineAwareNarrationBrief: value.outlineAwareNarrationBrief,
+    outlineImpactReport: value.outlineImpactReport,
+    ...(value.regenerationRequest ? { regenerationRequest: value.regenerationRequest } : {}),
+    ...(value.provisionalOutlinePatch ? { provisionalOutlinePatch: value.provisionalOutlinePatch } : {}),
+    ...(value.outlineRevisionProposal ? { outlineRevisionProposal: value.outlineRevisionProposal } : {}),
+    ...(value.regenerationSafetyReport ? { regenerationSafetyReport: value.regenerationSafetyReport } : {}),
+    ...(value.turnNarration ? { turnNarration: value.turnNarration } : {}),
     generatedNarrative: value.generatedNarrative,
     references: [...value.references],
   }
@@ -226,6 +272,19 @@ function isTurnRecord(value: unknown): value is RpgTurnRecord {
     typeof action.text === "string" &&
     (action.source === "selected_option" || action.source === "freeform") &&
     (action.selectedOptionId === undefined || typeof action.selectedOptionId === "string") &&
+    isRecord(value.actionResolution) &&
+    isRecord(value.worldTickResult) &&
+    isRecord(value.visibleSelection) &&
+    isRecord(value.postActionWorkingState) &&
+    isRecord(value.recallSelection) &&
+    Array.isArray(value.recalledMaterials) &&
+    isRecord(value.outlineAwareNarrationBrief) &&
+    isRecord(value.outlineImpactReport) &&
+    (value.regenerationRequest === undefined || isRecord(value.regenerationRequest)) &&
+    (value.provisionalOutlinePatch === undefined || isRecord(value.provisionalOutlinePatch)) &&
+    (value.outlineRevisionProposal === undefined || isRecord(value.outlineRevisionProposal)) &&
+    (value.regenerationSafetyReport === undefined || isRecord(value.regenerationSafetyReport)) &&
+    (value.turnNarration === undefined || isRecord(value.turnNarration)) &&
     typeof value.generatedNarrative === "string" &&
     isStringArray(value.references)
   )
@@ -299,7 +358,7 @@ function stripPendingStatus(update: PendingRpgUpdate): ProposedWikiUpdate {
 function buildStagePendingReviewItems(
   validation: RpgRuntimeUpdateValidationResult,
   pendingUpdates: PendingRpgUpdate[],
-  parseWarnings: string[],
+  resolved: ResolvedRuntimeUpdateProposals,
 ): Record<string, unknown>[] {
   const reviewItems: Record<string, unknown>[] = []
 
@@ -341,7 +400,7 @@ function buildStagePendingReviewItems(
     })
   }
 
-  for (const warning of parseWarnings) {
+  for (const warning of resolved.warnings) {
     reviewItems.push({
       type: "runtime-update-warning",
       title: "Runtime update parse warning",
@@ -351,7 +410,102 @@ function buildStagePendingReviewItems(
     })
   }
 
+  reviewItems.push(...buildStagePendingAuditReviewItems(resolved))
+
   return reviewItems
+}
+
+function buildStagePendingAuditReviewItems(resolved: ResolvedRuntimeUpdateProposals): Record<string, unknown>[] {
+  const reviewItems: Record<string, unknown>[] = []
+
+  for (const skippedDelta of resolved.skippedDeltas) {
+    reviewItems.push({
+      type: "runtime-update-skipped-delta",
+      title: `Skipped runtime delta ${skippedDelta.skipId}`,
+      description: `${skippedDelta.code}: ${skippedDelta.reason}`,
+      affectedPages: skippedDelta.sourceDelta.affectedPaths,
+      skipId: skippedDelta.skipId,
+      sourceDeltaId: skippedDelta.sourceDelta.deltaId,
+      reviewPolicy: skippedDelta.reviewPolicy,
+      status: "review",
+    })
+  }
+
+  for (const item of resolved.outlineRevisionReviewItems) {
+    reviewItems.push({
+      type: "outline-revision-review",
+      title: `Outline revision review ${item.reviewItemId}`,
+      description: item.summary,
+      affectedPages: item.targetOutlineRefs.map((ref) => ref.path),
+      reviewItemId: item.reviewItemId,
+      sourceProposalId: item.sourceProposalId,
+      reviewPolicy: item.reviewPolicy,
+      ordinaryRuntimeUpdate: false,
+      proposedWikiUpdate: false,
+      autoWriteMainOutline: false,
+      status: "review",
+    })
+  }
+
+  for (const [index, entry] of resolved.journalEntries.entries()) {
+    reviewItems.push({
+      type: "runtime-update-journal-entry",
+      title: `Runtime update journal entry ${index + 1}`,
+      description: entry,
+      affectedPages: [],
+      status: "review",
+    })
+  }
+
+  if (resolved.pacingUpdateProposal) {
+    const proposal = resolved.pacingUpdateProposal
+    reviewItems.push({
+      type: "runtime-update-pacing-proposal",
+      title: `Runtime pacing proposal ${proposal.proposalId}`,
+      description: proposal.campaignDelta,
+      affectedPages: proposal.targetPath === "journal_only" ? [] : [proposal.targetPath],
+      proposalId: proposal.proposalId,
+      sourceDeltaIds: proposal.sourceDeltaIds,
+      reviewPolicy: proposal.reviewPolicy,
+      pacingDebtChange: proposal.pacingDebtChange,
+      status: "review",
+    })
+  }
+
+  for (const group of resolved.proposalGroups) {
+    reviewItems.push({
+      type: "runtime-update-proposal-group",
+      title: group.title,
+      description: group.reason,
+      affectedPages: [],
+      groupId: group.groupId,
+      updateIds: group.updateIds,
+      skippedDeltaIds: group.skippedDeltaIds,
+      sourceDeltaIds: group.sourceDeltaIds,
+      reviewPolicy: group.reviewPolicy,
+      status: "review",
+    })
+  }
+
+  return reviewItems
+}
+
+function buildStagePendingAuditWarnings(resolved: ResolvedRuntimeUpdateProposals): string[] {
+  return [
+    ...resolved.skippedDeltas.map(
+      (delta) => `Runtime update skipped delta ${delta.skipId}: ${delta.code}: ${delta.reason}`,
+    ),
+    ...resolved.outlineRevisionReviewItems.map(
+      (item) => `Runtime update outline revision review ${item.reviewItemId}: ${item.summary}`,
+    ),
+    ...resolved.journalEntries.map((entry) => `Runtime update proposal journal: ${entry}`),
+    ...(resolved.pacingUpdateProposal
+      ? [
+          `Runtime update pacing proposal ${resolved.pacingUpdateProposal.proposalId}: ${resolved.pacingUpdateProposal.campaignDelta}`,
+        ]
+      : []),
+    ...resolved.proposalGroups.map((group) => `Runtime update proposal group ${group.groupId}: ${group.reason}`),
+  ]
 }
 
 function buildApplyPendingReviewItems(

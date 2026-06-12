@@ -30,6 +30,10 @@ describe("RPG import campaign_setup_import", () => {
   it("exposes supported Stage F target paths", () => {
     expect(CAMPAIGN_SETUP_IMPORT_TARGET_SLOTS).toEqual([
       "player_main",
+      "player_abilities",
+      "player_inventory",
+      "player_goals",
+      "player_known_information",
       "current_scene",
       "events_prologue",
       "main_quest",
@@ -37,6 +41,10 @@ describe("RPG import campaign_setup_import", () => {
       "player_relationship",
     ])
     expect(getCampaignSetupImportTargetPath("player_main")).toBe("wiki/player/player.md")
+    expect(getCampaignSetupImportTargetPath("player_abilities")).toBe("wiki/player/abilities.md")
+    expect(getCampaignSetupImportTargetPath("player_inventory")).toBe("wiki/player/inventory.md")
+    expect(getCampaignSetupImportTargetPath("player_goals")).toBe("wiki/player/goals.md")
+    expect(getCampaignSetupImportTargetPath("player_known_information")).toBe("wiki/player/known_information.md")
     expect(getCampaignSetupImportTargetPath("current_scene")).toBe("wiki/current-scene/scene_state.md")
     expect(getCampaignSetupImportTargetPath("events_prologue")).toBe("wiki/events/prologue.md")
     expect(getCampaignSetupImportTargetPath("main_quest")).toBe("wiki/quests/main.md")
@@ -80,6 +88,60 @@ describe("RPG import campaign_setup_import", () => {
     expect(await fileExists(`${projectPath}/wiki/player/status.md`)).toBe(false)
     expect(await fileExists(`${projectPath}/wiki/player/abilities.md`)).toBe(false)
     expect(await fileExists(`${projectPath}/wiki/rules/core.md`)).toBe(false)
+  })
+
+  it("writes player subslot imports directly to their fixed player files", async () => {
+    const projectPath = await createProject("campaign-player-subslots")
+    const cases = [
+      {
+        targetSlot: "player_abilities",
+        path: "wiki/player/abilities.md",
+        text: "Ability: moon-map reading. Cost: one candle mark.",
+        bodyHeading: "## Player Abilities",
+      },
+      {
+        targetSlot: "player_inventory",
+        path: "wiki/player/inventory.md",
+        text: "Inventory: one brass lantern, two chalk sticks.",
+        bodyHeading: "## Player Inventory",
+      },
+      {
+        targetSlot: "player_goals",
+        path: "wiki/player/goals.md",
+        text: "Goal: recover the sealed moon map before dawn.",
+        bodyHeading: "## Player Goals",
+      },
+      {
+        targetSlot: "player_known_information",
+        path: "wiki/player/known_information.md",
+        text: "Known: Mara has the western stair key. Suspicion: the archive bell is a warning.",
+        bodyHeading: "## Player Known Information",
+      },
+    ] as const
+
+    for (const testCase of cases) {
+      const result = await runRpgImport({
+        mode: "campaign_setup_import",
+        projectPath,
+        sourceText: testCase.text,
+        sourceFileName: `${testCase.targetSlot}.md`,
+        targetSlot: testCase.targetSlot,
+        options: { now: "2026-06-08T03:30:00.000Z" },
+      })
+
+      expect(result.writtenPaths).toContain(testCase.path)
+      expect(result.skipped).toEqual([])
+
+      const content = await readFileRaw(`${projectPath}/${testCase.path}`)
+      expect(content).toContain(`slot_id: "${testCase.targetSlot}"`)
+      expect(content).toContain('import_mode: "campaign_setup_import"')
+      expect(content).toContain(testCase.bodyHeading)
+      expect(content).toContain(testCase.text)
+      expect(content).toContain(`Fixed player slot: \`${testCase.path}\``)
+    }
+
+    const player = await fileExists(`${projectPath}/wiki/player/player.md`)
+    expect(player).toBe(false)
   })
 
   it("requires targetSlot and sourceText or sourcePath", async () => {

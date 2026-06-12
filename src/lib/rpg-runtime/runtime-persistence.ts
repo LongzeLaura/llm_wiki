@@ -4,20 +4,82 @@ import type { ApplyRpgPendingUpdatesResult } from "./write-policy"
 import type { PendingRpgUpdate } from "./update-staging"
 import type { ProposedWikiUpdate } from "./state-extractor"
 import type { RpgTurnRecord, RpgTurnResult } from "./turn-model"
-import type { SubmittedAction } from "./types"
+import type {
+  ActionResolution,
+  OutlineAwareNarrationBrief,
+  OutlineImpactReport,
+  OutlineRevisionProposal,
+  PostActionWorkingState,
+  ProvisionalOutlinePatch,
+  RecalledMaterial,
+  RecallSelection,
+  RegenerationSafetyReport,
+  RegenerationRequest,
+  SubmittedAction,
+  TurnNarration,
+  WorldTickResult,
+  WorldTickVisibleSelection,
+} from "./types"
 
 export type RuntimeUpdateProposalSource = "interaction"
 
 export interface RuntimeTurnJournalEntry {
   timestamp: string
   submittedAction: SubmittedAction
+  actionResolution: ActionResolution
+  worldTickResult: WorldTickResult
+  visibleSelection: WorldTickVisibleSelection
+  postActionWorkingState: PostActionWorkingState
+  recallSelection: RecallSelection
+  recalledMaterials: RecalledMaterial[]
+  outlineAwareNarrationBrief: OutlineAwareNarrationBrief
+  outlineImpactReport: OutlineImpactReport
+  regenerationRequest?: RegenerationRequest
+  provisionalOutlinePatch?: ProvisionalOutlinePatch
+  outlineRevisionProposal?: OutlineRevisionProposal
+  regenerationSafetyReport?: RegenerationSafetyReport
+  turnNarration: TurnNarration
   turnResult: RpgTurnResult
   turnRecord: RpgTurnRecord
   proposedUpdates: ProposedWikiUpdate[]
   pendingUpdateIds: string[]
   warnings: string[]
   proposalSource: RuntimeUpdateProposalSource
+  runtimeUpdateProposalAudit?: RuntimeUpdateProposalAuditSummary
   runtimeUpdateValidation?: RuntimeUpdateValidationJournalSummary
+}
+
+export interface RuntimeUpdateProposalAuditSummary {
+  proposedWikiUpdateIds: string[]
+  journalEntries: string[]
+  skippedDeltas: Array<{
+    skipId: string
+    sourceDeltaId: string
+    code: string
+    reason: string
+    reviewPolicy: string
+  }>
+  pacingUpdateProposal?: {
+    proposalId: string
+    sourceDeltaIds: string[]
+    targetPath: string
+    reviewPolicy: string
+    pacingDebtChange: string
+  }
+  proposalGroups: Array<{
+    groupId: string
+    updateIds: string[]
+    skippedDeltaIds: string[]
+    sourceDeltaIds: string[]
+    reviewPolicy: string
+  }>
+  outlineRevisionReviewItems: Array<{
+    reviewItemId: string
+    sourceProposalId: string
+    outlineImpactLevel: string
+    reviewPolicy: string
+  }>
+  warnings: string[]
 }
 
 export interface RuntimeUpdateValidationJournalSummary {

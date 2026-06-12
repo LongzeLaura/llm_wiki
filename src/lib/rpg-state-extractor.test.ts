@@ -8,6 +8,10 @@ import {
   type RpgTurnRecord,
   type RpgTurnResult,
 } from "./rpg-runtime"
+import {
+  sampleTurnNarration,
+  sampleTurnRecordRuntimeParts,
+} from "./rpg-runtime-test-fixtures"
 
 interface Ctx {
   tmp: { path: string; cleanup: () => Promise<void> }
@@ -35,7 +39,7 @@ describe("RPG State Update Extractor", () => {
       ["wiki/events/canal-gate-sigil.md", "append"],
       ["wiki/player/player.md", "merge"],
       ["wiki/quests/main.md", "merge"],
-      ["wiki/relationships/iven-mira.md", "merge"],
+      ["wiki/relationships/runtime/iven-mira.md", "merge"],
       ["wiki/characters/runtime/mira.md", "merge"],
     ])
     expect(result.proposedUpdates.every((update) => update.sourceTurnId === "turn-5")).toBe(true)
@@ -67,8 +71,11 @@ describe("RPG State Update Extractor", () => {
       ],
       references: ["wiki/events/canal-gate-sigil.md"],
     }
+    const submittedAction = { id: "turn-6", text: "Wait for Mira to inspect the sigil.", source: "freeform" } as const
     const turnRecord = createRpgTurnRecord({
-      submittedAction: { id: "turn-6", text: "Wait for Mira to inspect the sigil.", source: "freeform" },
+      submittedAction,
+      ...sampleTurnRecordRuntimeParts(submittedAction),
+      turnNarration: sampleTurnNarration({ playerFacingText: turnResult.narrative }),
       turnResult,
     })
 
@@ -89,83 +96,86 @@ describe("RPG State Update Extractor", () => {
         expect.objectContaining({ targetPath: "wiki/events/canal-gate-sigil.md", strategy: "append" }),
         expect.objectContaining({ targetPath: "wiki/player/player.md", strategy: "merge" }),
         expect.objectContaining({ targetPath: "wiki/quests/main.md", strategy: "merge" }),
-        expect.objectContaining({ targetPath: "wiki/relationships/iven-mira.md", strategy: "merge" }),
+        expect.objectContaining({ targetPath: "wiki/relationships/runtime/iven-mira.md", strategy: "merge" }),
         expect.objectContaining({ targetPath: "wiki/characters/runtime/mira.md", strategy: "merge" }),
       ]),
     )
   })
 
   it("filters legacy paths and base entity pages instead of proposing runtime updates for them", () => {
+    const generatedNarrative = updateBlocks([
+      {
+        targetPath: "wiki/current-scene/scene_state.md",
+        strategy: "overwrite",
+        reason: "Keep the next-turn snapshot current.",
+        content: "# Current Scene\n\nIven studies the shrine ledger.",
+      },
+      {
+        targetPath: "wiki/entities/legacy-ledger.md",
+        strategy: "merge",
+        reason: "This legacy path must be filtered.",
+        content: "LEGACY_ENTITY_POISON",
+      },
+      {
+        targetPath: "wiki/concepts/ledger-theory.md",
+        strategy: "merge",
+        reason: "This legacy concept path must be filtered.",
+        content: "LEGACY_CONCEPT_POISON",
+      },
+      {
+        targetPath: "wiki/memory/manual.md",
+        strategy: "merge",
+        reason: "Memory pages require explicit user action.",
+        content: "MEMORY_POISON",
+      },
+      {
+        targetPath: "wiki/characters/mira.md",
+        strategy: "merge",
+        reason: "Base character pages are stable setting, not runtime update targets.",
+        content: "BASE_CHARACTER_POISON",
+      },
+      {
+        targetPath: "wiki/locations/river-port.md",
+        strategy: "merge",
+        reason: "Base location pages are stable setting, not runtime update targets.",
+        content: "BASE_LOCATION_POISON",
+      },
+      {
+        targetPath: "wiki/factions/harbor-watch.md",
+        strategy: "merge",
+        reason: "Base faction pages are stable setting, not runtime update targets.",
+        content: "BASE_FACTION_POISON",
+      },
+      {
+        targetPath: "wiki/items/lantern-key.md",
+        strategy: "merge",
+        reason: "Base item pages are stable setting, not runtime update targets.",
+        content: "BASE_ITEM_POISON",
+      },
+      {
+        targetPath: "wiki/world/basic_overview.md",
+        strategy: "merge",
+        reason: "World pages are stable setting.",
+        content: "WORLD_POISON",
+      },
+      {
+        targetPath: "wiki/style/narrative.md",
+        strategy: "merge",
+        reason: "Style pages are manually controlled.",
+        content: "STYLE_POISON",
+      },
+      {
+        targetPath: "wiki/rules/magic.md",
+        strategy: "merge",
+        reason: "Rules pages are manually controlled.",
+        content: "RULES_POISON",
+      },
+    ])
     const turnRecord: RpgTurnRecord = {
       submittedAction: { id: "turn-7", text: "Check the shrine ledger.", source: "freeform" },
-      generatedNarrative: updateBlocks([
-        {
-          targetPath: "wiki/current-scene/scene_state.md",
-          strategy: "overwrite",
-          reason: "Keep the next-turn snapshot current.",
-          content: "# Current Scene\n\nIven studies the shrine ledger.",
-        },
-        {
-          targetPath: "wiki/entities/legacy-ledger.md",
-          strategy: "merge",
-          reason: "This legacy path must be filtered.",
-          content: "LEGACY_ENTITY_POISON",
-        },
-        {
-          targetPath: "wiki/concepts/ledger-theory.md",
-          strategy: "merge",
-          reason: "This legacy concept path must be filtered.",
-          content: "LEGACY_CONCEPT_POISON",
-        },
-        {
-          targetPath: "wiki/memory/manual.md",
-          strategy: "merge",
-          reason: "Memory pages require explicit user action.",
-          content: "MEMORY_POISON",
-        },
-        {
-          targetPath: "wiki/characters/mira.md",
-          strategy: "merge",
-          reason: "Base character pages are stable setting, not runtime update targets.",
-          content: "BASE_CHARACTER_POISON",
-        },
-        {
-          targetPath: "wiki/locations/river-port.md",
-          strategy: "merge",
-          reason: "Base location pages are stable setting, not runtime update targets.",
-          content: "BASE_LOCATION_POISON",
-        },
-        {
-          targetPath: "wiki/factions/harbor-watch.md",
-          strategy: "merge",
-          reason: "Base faction pages are stable setting, not runtime update targets.",
-          content: "BASE_FACTION_POISON",
-        },
-        {
-          targetPath: "wiki/items/lantern-key.md",
-          strategy: "merge",
-          reason: "Base item pages are stable setting, not runtime update targets.",
-          content: "BASE_ITEM_POISON",
-        },
-        {
-          targetPath: "wiki/world/river-port.md",
-          strategy: "merge",
-          reason: "World pages are stable setting.",
-          content: "WORLD_POISON",
-        },
-        {
-          targetPath: "wiki/style/narrative.md",
-          strategy: "merge",
-          reason: "Style pages are manually controlled.",
-          content: "STYLE_POISON",
-        },
-        {
-          targetPath: "wiki/rules/magic.md",
-          strategy: "merge",
-          reason: "Rules pages are manually controlled.",
-          content: "RULES_POISON",
-        },
-      ]),
+      ...sampleTurnRecordRuntimeParts({ id: "turn-7", text: "Check the shrine ledger.", source: "freeform" }),
+      turnNarration: sampleTurnNarration({ playerFacingText: generatedNarrative }),
+      generatedNarrative,
       references: ["wiki/current-scene/scene_state.md", "wiki/entities/legacy-ledger.md"],
     }
 
@@ -189,22 +199,25 @@ describe("RPG State Update Extractor", () => {
   })
 
   it("filters blocks whose strategy does not match the target path", () => {
+    const generatedNarrative = updateBlocks([
+      {
+        targetPath: "wiki/current-scene/scene_state.md",
+        strategy: "merge",
+        reason: "Wrong strategy for current scene.",
+        content: "# Current Scene\n\nWrong strategy.",
+      },
+      {
+        targetPath: "wiki/events/lower-lock.md",
+        strategy: "merge",
+        reason: "Wrong strategy for events.",
+        content: "# Lower Lock\n\nWrong strategy.",
+      },
+    ])
     const turnRecord: RpgTurnRecord = {
       submittedAction: { id: "turn-8", text: "Open the lower lock.", source: "freeform" },
-      generatedNarrative: updateBlocks([
-        {
-          targetPath: "wiki/current-scene/scene_state.md",
-          strategy: "merge",
-          reason: "Wrong strategy for current scene.",
-          content: "# Current Scene\n\nWrong strategy.",
-        },
-        {
-          targetPath: "wiki/events/lower-lock.md",
-          strategy: "merge",
-          reason: "Wrong strategy for events.",
-          content: "# Lower Lock\n\nWrong strategy.",
-        },
-      ]),
+      ...sampleTurnRecordRuntimeParts({ id: "turn-8", text: "Open the lower lock.", source: "freeform" }),
+      turnNarration: sampleTurnNarration({ playerFacingText: generatedNarrative }),
+      generatedNarrative,
       references: [],
     }
 
@@ -231,50 +244,54 @@ describe("RPG State Update Extractor", () => {
 })
 
 function sampleCompletedTurnRecord(): RpgTurnRecord {
-  return {
-    submittedAction: {
-      id: "turn-5",
-      text: "Ask Mira to inspect the canal gate sigil before I use the lantern key.",
-      source: "freeform",
+  const submittedAction = {
+    id: "turn-5",
+    text: "Ask Mira to inspect the canal gate sigil before I use the lantern key.",
+    source: "freeform" as const,
+  }
+  const generatedNarrative = updateBlocks([
+    {
+      targetPath: "wiki/current-scene/scene_state.md",
+      strategy: "overwrite",
+      reason: "Keep the next-turn scene snapshot aligned with the completed turn.",
+      content: "# Current Scene\n\nIven and Mira remain at the locked canal gate while the lowest sigil glows.",
     },
-    generatedNarrative: updateBlocks([
-      {
-        targetPath: "wiki/current-scene/scene_state.md",
-        strategy: "overwrite",
-        reason: "Keep the next-turn scene snapshot aligned with the completed turn.",
-        content: "# Current Scene\n\nIven and Mira remain at the locked canal gate while the lowest sigil glows.",
-      },
-      {
-        targetPath: "wiki/events/canal-gate-sigil.md",
-        strategy: "append",
-        reason: "Record the completed sigil inspection as happened history.",
-        content: "# Canal Gate Sigil\n\nMira inspected the lowest sigil and Iven's lantern key answered with brass light.",
-      },
-      {
-        targetPath: "wiki/player/player.md",
-        strategy: "merge",
-        reason: "Update the player state after using the lantern key.",
-        content: "## Current State\n\nIven knows the lantern key reacts to the canal gate's lowest sigil.",
-      },
-      {
-        targetPath: "wiki/quests/main.md",
-        strategy: "merge",
-        reason: "Track objective progress after the completed sigil inspection.",
-        content: "## Current Objective\n\nThe canal gate objective is blocked until Iven decides how to use the lantern key.",
-      },
-      {
-        targetPath: "wiki/relationships/iven-mira.md",
-        strategy: "merge",
-        reason: "Update trust after Iven waited for Mira's reading.",
-        content: "## Current Tension\n\nMira is wary but appreciates that Iven did not force the gate.",
-      },
-      {
-        targetPath: "wiki/characters/runtime/mira.md",
-        strategy: "merge",
-        reason: "Update Mira's runtime-only condition.",
-        content: "## Current State\n\nMira is limping but focused on reading canal sigils.",
-      },
-    ]),
+    {
+      targetPath: "wiki/events/canal-gate-sigil.md",
+      strategy: "append",
+      reason: "Record the completed sigil inspection as happened history.",
+      content: "# Canal Gate Sigil\n\nMira inspected the lowest sigil and Iven's lantern key answered with brass light.",
+    },
+    {
+      targetPath: "wiki/player/player.md",
+      strategy: "merge",
+      reason: "Update the player state after using the lantern key.",
+      content: "## Current State\n\nIven knows the lantern key reacts to the canal gate's lowest sigil.",
+    },
+    {
+      targetPath: "wiki/quests/main.md",
+      strategy: "merge",
+      reason: "Track objective progress after the completed sigil inspection.",
+      content: "## Current Objective\n\nThe canal gate objective is blocked until Iven decides how to use the lantern key.",
+    },
+    {
+      targetPath: "wiki/relationships/runtime/iven-mira.md",
+      strategy: "merge",
+      reason: "Update trust after Iven waited for Mira's reading.",
+      content: "## Current Tension\n\nMira is wary but appreciates that Iven did not force the gate.",
+    },
+    {
+      targetPath: "wiki/characters/runtime/mira.md",
+      strategy: "merge",
+      reason: "Update Mira's runtime-only condition.",
+      content: "## Current State\n\nMira is limping but focused on reading canal sigils.",
+    },
+  ])
+  return {
+    submittedAction,
+    ...sampleTurnRecordRuntimeParts(submittedAction),
+    turnNarration: sampleTurnNarration({ playerFacingText: generatedNarrative }),
+    generatedNarrative,
     references: [
       "wiki/current-scene/scene_state.md",
       "wiki/player/player.md",

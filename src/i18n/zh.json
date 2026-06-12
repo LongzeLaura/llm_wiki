@@ -185,6 +185,22 @@
             "label": "战役初始化：玩家档案",
             "description": "导入到 wiki/player/player.md，作为固定 player slot 的开局档案。"
           },
+          "player_abilities": {
+            "label": "战役初始化：玩家能力",
+            "description": "导入到 wiki/player/abilities.md，记录开局 PC 能力、技能、限制、消耗和可用性。"
+          },
+          "player_inventory": {
+            "label": "战役初始化：玩家背包",
+            "description": "导入到 wiki/player/inventory.md，记录开局 PC 物品、数量、装备状态和资源。"
+          },
+          "player_goals": {
+            "label": "战役初始化：玩家目标",
+            "description": "导入到 wiki/player/goals.md，记录开局 PC 目标、承诺、优先级和动机。"
+          },
+          "player_known_information": {
+            "label": "战役初始化：玩家已知信息",
+            "description": "导入到 wiki/player/known_information.md，记录开局 PC 知识、怀疑、误解和隐藏边界。"
+          },
           "current_scene": {
             "label": "战役初始化：当前场景",
             "description": "导入到 wiki/current-scene/scene_state.md，需要显式初始化确认。"

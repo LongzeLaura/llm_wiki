@@ -173,7 +173,7 @@ describe("RpgIngestSignal merge", () => {
 describe("structured long-source signal context", () => {
   it("routes utilityScore 3-5, 2, and 0-1 into separate Stage 2 sections", () => {
     const context = buildStructuredRpgSignalContext([
-      signal({ utilityScore: 5, summary: "Hard gate rule", kind: "world_constraint", targetPath: "wiki/world/tide-gates.md" }),
+      signal({ utilityScore: 5, summary: "Hard gate rule", kind: "world_constraint", targetPath: "wiki/world/supernatural_presence.md" }),
       signal({ utilityScore: 3, summary: "Usable action hook", kind: "action_hook", targetPath: "wiki/plot-arcs/gate-pressure.md" }),
       signal({ utilityScore: 2, summary: "Weak rumor", kind: "plot_pressure", targetPath: "wiki/plot-arcs/gate-rumor.md", canonStatus: "uncertain" }),
       signal({ utilityScore: 1, summary: "Voice actor trivia", kind: "noise", targetPath: undefined, confidence: "low", canonStatus: "uncertain" }),

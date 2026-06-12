@@ -4,6 +4,10 @@ import { makeQuerySlug } from "@/lib/wiki-filename"
 
 export const CAMPAIGN_SETUP_IMPORT_TARGET_SLOTS = [
   "player_main",
+  "player_abilities",
+  "player_inventory",
+  "player_goals",
+  "player_known_information",
   "current_scene",
   "events_prologue",
   "main_quest",
@@ -52,6 +56,7 @@ export const CAMPAIGN_SETUP_REVIEW_BOUNDARY_NOTES = [
 export const CAMPAIGN_SETUP_CANONICALIZATION_BOUNDARY_NOTES = [
   "Canonicalization is deterministic bootstrap shaping, not lossy model extraction.",
   "player_main is fixed to wiki/player/player.md.",
+  "player_abilities, player_inventory, player_goals, and player_known_information write directly to their fixed wiki/player/*.md slots.",
   "current_scene is an overwrite-only latest scene snapshot for the first playable turn.",
   "events_prologue may contain only already-happened setup facts.",
   "main_quest, quest, and player_relationship are merged setup pages, not runtime overlays.",
@@ -76,6 +81,10 @@ export const CAMPAIGN_SETUP_CURRENT_SCENE_BOOTSTRAP_BOUNDARY_NOTES = [
 
 export const CAMPAIGN_SETUP_WRITE_POLICIES: Record<CampaignSetupImportTargetSlot, CampaignSetupWritePolicy> = {
   player_main: "merge",
+  player_abilities: "merge",
+  player_inventory: "merge",
+  player_goals: "merge",
+  player_known_information: "merge",
   current_scene: "overwrite",
   events_prologue: "append",
   main_quest: "merge",
@@ -122,6 +131,58 @@ export function resolveCampaignSetupImportSlot(
       writePolicy: "merge",
       reviewPolicy: "campaign_bootstrap_not_runtime_update",
       canonicalizationNote: "deterministic_player_profile_bootstrap_fixed_player_slot_only",
+      contentType: "player",
+    }
+  }
+
+  if (slotId === "player_abilities") {
+    const schemaSlot = requireSchemaSlot(slotId)
+    return {
+      slotId,
+      title: "Player Abilities",
+      targetPath: schemaSlot.path,
+      writePolicy: "merge",
+      reviewPolicy: "campaign_bootstrap_not_runtime_update",
+      canonicalizationNote: "deterministic_player_abilities_bootstrap_fixed_player_slot_only",
+      contentType: "player",
+    }
+  }
+
+  if (slotId === "player_inventory") {
+    const schemaSlot = requireSchemaSlot(slotId)
+    return {
+      slotId,
+      title: "Player Inventory",
+      targetPath: schemaSlot.path,
+      writePolicy: "merge",
+      reviewPolicy: "campaign_bootstrap_not_runtime_update",
+      canonicalizationNote: "deterministic_player_inventory_bootstrap_fixed_player_slot_only",
+      contentType: "player",
+    }
+  }
+
+  if (slotId === "player_goals") {
+    const schemaSlot = requireSchemaSlot(slotId)
+    return {
+      slotId,
+      title: "Player Goals",
+      targetPath: schemaSlot.path,
+      writePolicy: "merge",
+      reviewPolicy: "campaign_bootstrap_not_runtime_update",
+      canonicalizationNote: "deterministic_player_goals_bootstrap_fixed_player_slot_only",
+      contentType: "player",
+    }
+  }
+
+  if (slotId === "player_known_information") {
+    const schemaSlot = requireSchemaSlot(slotId)
+    return {
+      slotId,
+      title: "Player Known Information",
+      targetPath: schemaSlot.path,
+      writePolicy: "merge",
+      reviewPolicy: "campaign_bootstrap_not_runtime_update",
+      canonicalizationNote: "deterministic_player_knowledge_bootstrap_fixed_player_slot_only",
       contentType: "player",
     }
   }

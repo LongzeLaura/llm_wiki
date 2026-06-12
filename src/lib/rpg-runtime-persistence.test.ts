@@ -11,6 +11,12 @@ import {
   type RuntimeApplyJournalEntry,
   type RuntimeTurnJournalEntry,
 } from "./rpg-runtime"
+import {
+  sampleRecalledMaterials,
+  sampleRecallSelection,
+  sampleTurnNarration,
+  sampleTurnRecordRuntimeParts,
+} from "./rpg-runtime-test-fixtures"
 
 interface Ctx {
   tmp: { path: string; cleanup: () => Promise<void> }
@@ -94,6 +100,35 @@ describe("RPG Runtime Persistence", () => {
       "turn-1",
       "turn-2",
     ])
+    expect((JSON.parse(lines[0]) as RuntimeTurnJournalEntry).actionResolution.eventDraft.status).toBe(
+      "attempted_not_confirmed",
+    )
+    expect((JSON.parse(lines[0]) as RuntimeTurnJournalEntry).worldTickResult.tickId).toBe("world-tick-turn-1")
+    expect((JSON.parse(lines[0]) as RuntimeTurnJournalEntry).visibleSelection.parallelLensCandidates[0]).toMatchObject({
+      grantsPcKnowledge: false,
+      pcKnowledgeBoundaryPath: "wiki/player/known_information.md",
+    })
+    expect((JSON.parse(lines[0]) as RuntimeTurnJournalEntry).postActionWorkingState.campaignDelta).toContain(
+      "patrol clock",
+    )
+    expect((JSON.parse(lines[0]) as RuntimeTurnJournalEntry).recallSelection.selectionId).toBe("recall-selection-act-1")
+    expect((JSON.parse(lines[0]) as RuntimeTurnJournalEntry).recalledMaterials[0]).toMatchObject({
+      path: "wiki/current-scene/scene_state.md",
+    })
+    expect((JSON.parse(lines[0]) as RuntimeTurnJournalEntry).outlineAwareNarrationBrief.briefId).toBe(
+      "outline-brief-turn-1",
+    )
+    expect((JSON.parse(lines[0]) as RuntimeTurnJournalEntry).outlineImpactReport.requiresRegeneration).toBe(false)
+    expect((JSON.parse(lines[0]) as RuntimeTurnJournalEntry).turnNarration.playerFacingText).toBe("Mira reads the sigil.")
+    expect((JSON.parse(lines[0]) as RuntimeTurnJournalEntry).turnRecord.turnNarration?.displayPolicy).toMatchObject({
+      tensionBriefIsReviewHandoff: true,
+      parallelLineGrantsPcKnowledge: false,
+    })
+    expect((JSON.parse(lines[0]) as RuntimeTurnJournalEntry).runtimeUpdateProposalAudit).toMatchObject({
+      proposedWikiUpdateIds: ["update-turn-1"],
+      skippedDeltas: [expect.objectContaining({ skipId: "skip-turn-1" })],
+      outlineRevisionReviewItems: [expect.objectContaining({ reviewItemId: "outline-review-turn-1" })],
+    })
   })
 
   it("appends apply journal entries as one JSON object per line", async () => {
@@ -155,10 +190,15 @@ function sampleTurnJournalEntry(turnId: string): RuntimeTurnJournalEntry {
     text: "Inspect the canal gate.",
     source: "freeform" as const,
   }
+  const runtimeParts = sampleTurnRecordRuntimeParts(submittedAction, {
+    recalledMaterials: sampleRecalledMaterials(),
+  })
+  const turnNarration = sampleTurnNarration({ playerFacingText: "Mira reads the sigil." })
 
   return {
     timestamp: "2026-06-06T00:00:00.000Z",
     submittedAction,
+    ...runtimeParts,
     turnResult: {
       narrative: "Mira reads the sigil.",
       nextActionOptions: [
@@ -186,15 +226,63 @@ function sampleTurnJournalEntry(turnId: string): RuntimeTurnJournalEntry {
       ],
       references: ["wiki/current-scene/scene_state.md"],
     },
+    turnNarration,
     turnRecord: {
       submittedAction,
+      actionResolution: runtimeParts.actionResolution,
+      worldTickResult: runtimeParts.worldTickResult,
+      visibleSelection: runtimeParts.visibleSelection,
+      postActionWorkingState: runtimeParts.postActionWorkingState,
+      recallSelection: sampleRecallSelection(),
+      recalledMaterials: [],
+      outlineAwareNarrationBrief: runtimeParts.outlineAwareNarrationBrief,
+      outlineImpactReport: runtimeParts.outlineImpactReport,
+      turnNarration,
       generatedNarrative: "Mira reads the sigil.",
-      references: ["wiki/current-scene/scene_state.md"],
+      references: ["wiki/current-scene/scene_state.md", "wiki/factions/runtime/harbor-watch.md", "wiki/rules/core.md"],
     },
     proposedUpdates: [],
     pendingUpdateIds: [],
     warnings: [],
     proposalSource: "interaction",
+    runtimeUpdateProposalAudit: {
+      proposedWikiUpdateIds: [`update-${turnId}`],
+      journalEntries: [`Structured proposal audit for ${turnId}.`],
+      skippedDeltas: [
+        {
+          skipId: `skip-${turnId}`,
+          sourceDeltaId: `source-delta-skip-${turnId}`,
+          code: "review_only_parallel_line",
+          reason: "Parallel-line material is not ordinary pending.",
+          reviewPolicy: "review_only",
+        },
+      ],
+      pacingUpdateProposal: {
+        proposalId: `pacing-${turnId}`,
+        sourceDeltaIds: [`source-delta-${turnId}`],
+        targetPath: "journal_only",
+        reviewPolicy: "review_only",
+        pacingDebtChange: "unchanged",
+      },
+      proposalGroups: [
+        {
+          groupId: `group-${turnId}`,
+          updateIds: [`update-${turnId}`],
+          skippedDeltaIds: [`skip-${turnId}`],
+          sourceDeltaIds: [`source-delta-${turnId}`, `source-delta-skip-${turnId}`],
+          reviewPolicy: "review_only",
+        },
+      ],
+      outlineRevisionReviewItems: [
+        {
+          reviewItemId: `outline-review-${turnId}`,
+          sourceProposalId: `outline-proposal-${turnId}`,
+          outlineImpactLevel: "major_rewrite_required",
+          reviewPolicy: "manual_review",
+        },
+      ],
+      warnings: [],
+    },
   }
 }
 

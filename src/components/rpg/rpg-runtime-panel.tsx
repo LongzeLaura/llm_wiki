@@ -3,10 +3,18 @@ import { AlertTriangle, Loader2 } from "lucide-react"
 import { listDirectory, readFile } from "@/commands/fs"
 import { useWikiStore, type LlmConfig } from "@/stores/wiki-store"
 import {
-  createLlmRpgNarrationAdapter,
+  createLlmRpgActionResolverAdapter,
+  createLlmRpgNarrationGeneratorAdapter,
+  createLlmRpgOutlineBriefAdapter,
+  createLlmRpgRecallSelectorAdapter,
   createLlmRpgRuntimeUpdateInteractionAdapter,
-  type RpgNarrationAdapter,
+  createLlmRpgWorldTickAdapter,
+  type RpgActionResolverAdapter,
+  type RpgNarrationGeneratorAdapter,
+  type RpgOutlineBriefAdapter,
+  type RpgRecallSelectorAdapter,
   type RpgRuntimeUpdateInteractionAdapter,
+  type RpgWorldTickAdapter,
 } from "@/lib/rpg-interactions/runtime"
 import {
   runRpgRuntimeTurnFlow,
@@ -40,7 +48,11 @@ const CURRENT_SCENE_PATH = "wiki/current-scene/scene_state.md"
 
 export interface RpgRuntimePanelDependencies {
   readFile: (path: string) => Promise<string>
-  createNarrationAdapter: (input: { llmConfig: LlmConfig; signal?: AbortSignal }) => RpgNarrationAdapter
+  createActionResolverAdapter: (input: { llmConfig: LlmConfig; signal?: AbortSignal }) => RpgActionResolverAdapter
+  createWorldTickAdapter: (input: { llmConfig: LlmConfig; signal?: AbortSignal }) => RpgWorldTickAdapter
+  createRecallSelectorAdapter: (input: { llmConfig: LlmConfig; signal?: AbortSignal }) => RpgRecallSelectorAdapter
+  createOutlineBriefCompilerAdapter: (input: { llmConfig: LlmConfig; signal?: AbortSignal }) => RpgOutlineBriefAdapter
+  createNarrationAdapter: (input: { llmConfig: LlmConfig; signal?: AbortSignal }) => RpgNarrationGeneratorAdapter
   createUpdateInteractionAdapter: (input: {
     llmConfig: LlmConfig
     signal?: AbortSignal
@@ -49,7 +61,11 @@ export interface RpgRuntimePanelDependencies {
     projectPath: string
     wikiMode: "llmwikirpg"
     submittedAction: SubmittedAction
-    narrationAdapter: RpgNarrationAdapter
+    actionResolverAdapter: RpgActionResolverAdapter
+    worldTickAdapter: RpgWorldTickAdapter
+    recallSelectorAdapter: RpgRecallSelectorAdapter
+    outlineBriefCompilerAdapter: RpgOutlineBriefAdapter
+    narrationAdapter: RpgNarrationGeneratorAdapter
     updateInteractionAdapter: RpgRuntimeUpdateInteractionAdapter
     runtimePersistence?: RpgRuntimeTurnPersistence
   }) => Promise<RunRpgRuntimeTurnFlowResult>
@@ -95,7 +111,11 @@ export interface RpgRuntimePanelProps {
 
 const defaultDependencies: RpgRuntimePanelDependencies = {
   readFile,
-  createNarrationAdapter: createLlmRpgNarrationAdapter,
+  createActionResolverAdapter: createLlmRpgActionResolverAdapter,
+  createWorldTickAdapter: createLlmRpgWorldTickAdapter,
+  createRecallSelectorAdapter: createLlmRpgRecallSelectorAdapter,
+  createOutlineBriefCompilerAdapter: createLlmRpgOutlineBriefAdapter,
+  createNarrationAdapter: createLlmRpgNarrationGeneratorAdapter,
   createUpdateInteractionAdapter: createLlmRpgRuntimeUpdateInteractionAdapter,
   runTurnFlow: runRpgRuntimeTurnFlow,
   applyPendingUpdates: applyRpgPendingUpdates,
@@ -137,11 +157,35 @@ export async function submitRpgRuntimePanelAction(input: {
   dependencies?: Partial<
     Pick<
       RpgRuntimePanelDependencies,
-      "createNarrationAdapter" | "createUpdateInteractionAdapter" | "runTurnFlow" | "appendTurnJournalEntry" | "savePendingUpdates"
+      | "createActionResolverAdapter"
+      | "createWorldTickAdapter"
+      | "createRecallSelectorAdapter"
+      | "createOutlineBriefCompilerAdapter"
+      | "createNarrationAdapter"
+      | "createUpdateInteractionAdapter"
+      | "runTurnFlow"
+      | "appendTurnJournalEntry"
+      | "savePendingUpdates"
     >
   >
 }): Promise<RpgRuntimePanelSubmitResult> {
   const dependencies = { ...defaultDependencies, ...input.dependencies }
+  const actionResolverAdapter = dependencies.createActionResolverAdapter({
+    llmConfig: input.llmConfig,
+    signal: input.signal,
+  })
+  const worldTickAdapter = dependencies.createWorldTickAdapter({
+    llmConfig: input.llmConfig,
+    signal: input.signal,
+  })
+  const recallSelectorAdapter = dependencies.createRecallSelectorAdapter({
+    llmConfig: input.llmConfig,
+    signal: input.signal,
+  })
+  const outlineBriefCompilerAdapter = dependencies.createOutlineBriefCompilerAdapter({
+    llmConfig: input.llmConfig,
+    signal: input.signal,
+  })
   const narrationAdapter = dependencies.createNarrationAdapter({
     llmConfig: input.llmConfig,
     signal: input.signal,
@@ -154,6 +198,10 @@ export async function submitRpgRuntimePanelAction(input: {
     projectPath: input.projectPath,
     wikiMode: "llmwikirpg",
     submittedAction: input.submittedAction,
+    actionResolverAdapter,
+    worldTickAdapter,
+    recallSelectorAdapter,
+    outlineBriefCompilerAdapter,
     narrationAdapter,
     updateInteractionAdapter,
     runtimePersistence: {

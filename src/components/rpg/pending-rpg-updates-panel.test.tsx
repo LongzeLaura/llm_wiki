@@ -154,7 +154,7 @@ function sampleApplyResult(): ApplyRpgPendingUpdatesResult {
     skippedUpdates: [
       {
         id: "update-skipped",
-        targetPath: "wiki/world/stable.md",
+        targetPath: "wiki/world/basic_overview.md",
         reason: "targetPath is outside allowed runtime write paths.",
       },
     ],

@@ -62,6 +62,10 @@ const CONTROL_DOC_UI_SLOTS: readonly ControlDocImportTargetSlot[] = [
 
 const CAMPAIGN_SETUP_UI_SLOTS: readonly CampaignSetupImportTargetSlot[] = [
   "player_main",
+  "player_abilities",
+  "player_inventory",
+  "player_goals",
+  "player_known_information",
   "current_scene",
   "events_prologue",
   "main_quest",

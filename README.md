@@ -1,10 +1,19 @@
 # llmWikiRPG
 
-Current version: v0.4
+Current version: v0.5
 
 llmWikiRPG is a desktop RPG runtime knowledge base. It organizes source material, player state, current scene, relationship tension, style rules, and turn history into a readable and writable wiki that can support live conversation-driven play.
 
 This branch is RPG-only. Legacy `llm_wiki` / `default` projects are not supported, and the app will reject projects that are not marked as `llmwikirpg`.
+
+## v0.5 Highlights
+
+- Runtime turn architecture: the formal RPG turn now runs through module-specific handoffs instead of a centralized `CompactStoryBrief` / context compiler path.
+- Direct wiki input builders: action resolver, world tick, recall selector, outline brief, narration generator, and runtime update proposal consume scoped wiki reads and structured handoffs.
+- Stronger turn boundaries: player action adjudication, world reactions, recall selection, outline impact, narration, and wiki update proposals are separate runtime responsibilities.
+- Outline-aware play support: major outline drift can trigger a conditional story outline regeneration handoff without silently rewriting accepted wiki facts.
+- Runtime update validation: pending wiki updates are built from structured proposal output, with audit fields preserved for review instead of becoming ordinary wiki writes.
+- Schema and documentation alignment: runtime-facing schema, final architecture docs, current state, and archived planning documents now reflect the post-context-compiler flow.
 
 ## v0.4 Highlights
 

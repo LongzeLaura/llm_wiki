@@ -6,15 +6,14 @@ import {
   type RpgSchemaSlotId,
 } from "@/lib/rpg-wiki-schema"
 import type { FileNode } from "@/types/wiki"
-import type { CompileRpgContextInput, CompactStoryBrief } from "./types"
 
-interface RuntimePage {
+export interface RuntimePage {
   relativePath: string
   path: string
   content: string
 }
 
-interface RuntimePageGroup {
+export interface RuntimePageGroup {
   slug: string
   pages: RuntimePage[]
   score: number
@@ -28,12 +27,7 @@ interface MarkdownSection {
   endIndex: number
 }
 
-interface CompileRpgContextResult {
-  brief: CompactStoryBrief
-  warnings: string[]
-}
-
-const ALLOWED_RPG_RUNTIME_DIRS = [
+export const ALLOWED_RPG_RUNTIME_DIRS = [
   "sources",
   "world",
   "characters",
@@ -63,29 +57,6 @@ const LEGACY_WIKI_DIRS = new Set([
   "thesis",
 ])
 
-const MAX_SINGLE_TEXT_CHARS = 3000
-const MAX_JOINED_TEXT_CHARS = 5000
-const MAX_ENTRY_CHARS = 1400
-const MAX_HIGH_PRIORITY_NOTES = 8
-const MAX_REFERENCES = 40
-const MAX_RELEVANT_PAGES = 6
-const MIN_PARTIAL_SECTION_CHARS = 220
-const CURRENT_SCENE_SLOT_ID = "current_scene" satisfies RpgSchemaSlotId
-const OUTLINE_SLOT_IDS = ["main_outline", "outline_progress"] as const satisfies readonly RpgSchemaSlotId[]
-const PLAYER_SLOT_IDS = [
-  "player_main",
-  "player_abilities",
-  "player_inventory",
-  "player_goals",
-  "player_known_information",
-] as const satisfies readonly RpgSchemaSlotId[]
-const RULE_SLOT_IDS = ["rules_core", "rules_world", "rules_table"] as const satisfies readonly RpgSchemaSlotId[]
-const STYLE_SLOT_IDS = ["style_narration", "style_dialogue", "style_forbidden"] as const satisfies readonly RpgSchemaSlotId[]
-const MEMORY_SLOT_IDS = [
-  "memory_player_preferences",
-  "memory_long_term",
-  "memory_session_notes",
-] as const satisfies readonly RpgSchemaSlotId[]
 const ACTION_STOP_WORDS = new Set([
   "the",
   "and",
@@ -120,83 +91,16 @@ const ACTION_STOP_WORDS = new Set([
   "quietly",
 ])
 
-export async function compileRpgContext(input: CompileRpgContextInput): Promise<CompileRpgContextResult> {
-  const projectPath = normalizeProjectPath(input.projectPath)
-  const warnings: string[] = []
-  const references = new Set<string>()
-  const actionTokens = tokenize(input.submittedAction.text)
+const MAX_ENTRY_CHARS = 1400
+const MAX_HIGH_PRIORITY_NOTES = 8
+const MAX_RELEVANT_PAGES = 6
+const MIN_PARTIAL_SECTION_CHARS = 220
 
-  const currentScene = await readRequiredSchemaSlot(projectPath, CURRENT_SCENE_SLOT_ID, warnings, references)
-  const outlinePages = await readSchemaSlotPages(projectPath, OUTLINE_SLOT_IDS, warnings)
-  const playerPages = await readSchemaSlotPages(projectPath, PLAYER_SLOT_IDS, warnings)
-  const stylePages = mergeSlotPagesWithDirectoryPages(
-    await readSchemaSlotPages(projectPath, STYLE_SLOT_IDS, warnings),
-    await readMarkdownDir(projectPath, "style"),
-  )
-  const rulePages = mergeSlotPagesWithDirectoryPages(
-    await readSchemaSlotPages(projectPath, RULE_SLOT_IDS, warnings),
-    await readMarkdownDir(projectPath, "rules"),
-  )
-  const memoryPages = mergeSlotPagesWithDirectoryPages(
-    await readSchemaSlotPages(projectPath, MEMORY_SLOT_IDS, warnings),
-    await readMarkdownDir(projectPath, "memory"),
-  )
-  const worldPages = await readMarkdownDir(projectPath, "world")
-  const eventPages = await readMarkdownDir(projectPath, "events")
-  const questPages = await readMarkdownDir(projectPath, "quests")
-
-  const characterGroups = await readRelevantOverlayGroups(projectPath, "characters", actionTokens)
-  const locationGroups = await readRelevantOverlayGroups(projectPath, "locations", actionTokens)
-  const factionGroups = await readRelevantOverlayGroups(projectPath, "factions", actionTokens)
-  const itemGroups = await readRelevantOverlayGroups(projectPath, "items", actionTokens)
-  const relationshipGroups = await readRelevantOverlayGroups(projectPath, "relationships", actionTokens)
-  const plotArcGroups = await readRelevantOverlayGroups(projectPath, "plot-arcs", actionTokens)
-  const sourcePages = await readMarkdownDir(projectPath, "sources", { referenceOnly: true })
-
-  for (const sourcePage of sourcePages) {
-    references.add(sourcePage.relativePath)
-  }
-
-  const relevantWorldPages = rankedPages(worldPages, actionTokens, MAX_RELEVANT_PAGES)
-  const relevantEventPages = rankedPages(eventPages, actionTokens, MAX_RELEVANT_PAGES)
-  const relevantQuestPages = rankedPages(questPages, actionTokens, MAX_RELEVANT_PAGES)
-
-  markPages(references, outlinePages, playerPages, stylePages, rulePages, memoryPages, relevantWorldPages, relevantEventPages, relevantQuestPages)
-  markGroups(references, characterGroups, locationGroups, factionGroups, itemGroups, relationshipGroups, plotArcGroups)
-
-  const highPriorityTexts = [...stylePages, ...rulePages, ...memoryPages, currentScene].map((page) => page.content)
-  const brief: CompactStoryBrief = {
-    submittedAction: input.submittedAction,
-    currentScene: compactText(currentScene.content, MAX_SINGLE_TEXT_CHARS),
-    playerState: joinPageContents(playerPages, MAX_JOINED_TEXT_CHARS),
-    hardFacts: relevantWorldPages.map(formatPageEntry),
-    activeConstraints: collectConstraintNotes([...rulePages, ...stylePages]),
-    presentCharacters: characterGroups.map(formatGroupEntry),
-    relationshipTensions: relationshipGroups.map(formatGroupEntry),
-    activePlotPressure: plotArcGroups.map(formatGroupEntry),
-    outlineNotes: outlinePages.map(formatPageEntry),
-    activeQuests: relevantQuestPages.map(formatPageEntry),
-    relevantLocations: locationGroups.map(formatGroupEntry),
-    relevantFactions: factionGroups.map(formatGroupEntry),
-    relevantItems: itemGroups.map(formatGroupEntry),
-    styleRules: stylePages.slice(0, MAX_HIGH_PRIORITY_NOTES).map(formatPageEntry),
-    ruleNotes: rulePages.slice(0, MAX_HIGH_PRIORITY_NOTES).map(formatPageEntry),
-    memoryNotes: memoryPages.slice(0, MAX_HIGH_PRIORITY_NOTES).map(formatPageEntry),
-    forbiddenContradictions: collectForbiddenContradictions(highPriorityTexts),
-    references: [...references].filter(isAllowedReference).sort().slice(0, MAX_REFERENCES),
-  }
-
-  const recentEvents = relevantEventPages.map(formatPageEntry)
-  brief.hardFacts.push(...recentEvents)
-
-  return { brief, warnings }
-}
-
-function normalizeProjectPath(projectPath: string): string {
+export function normalizeProjectPath(projectPath: string): string {
   return normalizePath(projectPath).replace(/\/+$/, "")
 }
 
-async function readRequiredSchemaSlot(
+export async function readRequiredSchemaSlot(
   projectPath: string,
   slotId: RpgSchemaSlotId,
   warnings: string[],
@@ -211,7 +115,7 @@ async function readRequiredSchemaSlot(
   return { relativePath: slot.path, path: `${projectPath}/${slot.path}`, content: "" }
 }
 
-async function readSchemaSlotPages(
+export async function readSchemaSlotPages(
   projectPath: string,
   slotIds: readonly RpgSchemaSlotId[],
   warnings: string[],
@@ -224,7 +128,7 @@ async function readSchemaSlotPages(
   return pages
 }
 
-async function readSchemaSlotPage(
+export async function readSchemaSlotPage(
   projectPath: string,
   slot: RpgSchemaSlot,
   warnings: string[],
@@ -247,19 +151,19 @@ async function readSchemaSlotPage(
   }
 }
 
-function requireRpgSchemaSlot(slotId: RpgSchemaSlotId): RpgSchemaSlot {
+export function requireRpgSchemaSlot(slotId: RpgSchemaSlotId): RpgSchemaSlot {
   const slot = getRpgSchemaSlot(slotId)
   if (!slot) throw new Error(`Missing RPG schema slot definition: ${slotId}`)
   return slot
 }
 
-function mergeSlotPagesWithDirectoryPages(slotPages: RuntimePage[], dirPages: RuntimePage[]): RuntimePage[] {
+export function mergeSlotPagesWithDirectoryPages(slotPages: RuntimePage[], dirPages: RuntimePage[]): RuntimePage[] {
   const fixedPaths = new Set(slotPages.map((page) => normalizePath(page.relativePath).toLowerCase()))
   const extraPages = dirPages.filter((page) => !fixedPaths.has(normalizePath(page.relativePath).toLowerCase()))
   return [...slotPages, ...extraPages]
 }
 
-async function readMarkdownDir(
+export async function readMarkdownDir(
   projectPath: string,
   dir: (typeof ALLOWED_RPG_RUNTIME_DIRS)[number],
   options: { referenceOnly?: boolean } = {},
@@ -291,14 +195,14 @@ async function readMarkdownDir(
         content: sanitizeWikiContent(await readFile(node.path)),
       })
     } catch {
-      // Unreadable optional pages are ignored in v0 to keep compilation deterministic.
+      // Unreadable optional pages are ignored to keep deterministic readers stable.
     }
   }
 
   return pages.sort((a, b) => a.relativePath.localeCompare(b.relativePath))
 }
 
-async function readRelevantOverlayGroups(
+export async function readRelevantOverlayGroups(
   projectPath: string,
   dir: "characters" | "locations" | "factions" | "items" | "relationships" | "plot-arcs",
   actionTokens: string[],
@@ -342,7 +246,7 @@ function toWikiRelativePath(projectPath: string, absolutePath: string): string {
     : normalizedPath
 }
 
-function isAllowedWikiRelativePath(relativePath: string): boolean {
+export function isAllowedWikiRelativePath(relativePath: string): boolean {
   const normalized = normalizePath(relativePath).replace(/^\/+/, "")
   const parts = normalized.split("/")
   if (parts[0] !== "wiki") return false
@@ -351,11 +255,11 @@ function isAllowedWikiRelativePath(relativePath: string): boolean {
   return ALLOWED_RPG_RUNTIME_DIRS.includes(dir as (typeof ALLOWED_RPG_RUNTIME_DIRS)[number])
 }
 
-function isAllowedReference(relativePath: string): boolean {
+export function isAllowedReference(relativePath: string): boolean {
   return isAllowedWikiRelativePath(relativePath)
 }
 
-function sanitizeWikiContent(content: string): string {
+export function sanitizeWikiContent(content: string): string {
   return stripUnchosenActionOptions(content.replace(/\r\n?/g, "\n")).trim()
 }
 
@@ -402,7 +306,7 @@ function isActionOptionsLabel(text: string): boolean {
     text.includes("下一步行动")
 }
 
-function tokenize(text: string): string[] {
+export function tokenize(text: string): string[] {
   const normalized = text.toLowerCase().normalize("NFKC")
   const latinTokens = normalized.match(/[a-z0-9][a-z0-9_-]{1,}/g) ?? []
   const cjkTokens = normalized.match(/[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}]{2,}/gu) ?? []
@@ -421,7 +325,7 @@ function scorePage(page: RuntimePage, actionTokens: string[]): number {
   }, 0)
 }
 
-function rankedPages(pages: RuntimePage[], actionTokens: string[], limit: number): RuntimePage[] {
+export function rankedPages(pages: RuntimePage[], actionTokens: string[], limit: number): RuntimePage[] {
   return pages
     .map((page, index) => ({ page, score: scorePage(page, actionTokens), index }))
     .sort((a, b) => b.score - a.score || a.page.relativePath.localeCompare(b.page.relativePath) || a.index - b.index)
@@ -452,13 +356,13 @@ function extractTitle(content: string): string {
   return headingMatch?.[1]?.trim() ?? ""
 }
 
-function formatPageEntry(page: RuntimePage): string {
+export function formatPageEntry(page: RuntimePage): string {
   const prefix = `[${page.relativePath}]`
   const selectedContent = selectRuntimeContentForPage(page, MAX_ENTRY_CHARS - prefix.length - 1)
   return compactText(`${prefix}\n${selectedContent}`, MAX_ENTRY_CHARS)
 }
 
-function formatGroupEntry(group: RuntimePageGroup): string {
+export function formatGroupEntry(group: RuntimePageGroup): string {
   return compactText(group.pages.map(formatPageEntry).join("\n\n"), MAX_ENTRY_CHARS * 2)
 }
 
@@ -671,13 +575,13 @@ function runtimeCapsuleSectionPatterns(): RegExp[] {
   return [/\bruntime capsule\b/, /运行时摘要/, /運行時摘要/, /运行摘要/, /運行摘要/]
 }
 
-function markPages(references: Set<string>, ...pageLists: RuntimePage[][]): void {
+export function markPages(references: Set<string>, ...pageLists: RuntimePage[][]): void {
   for (const page of pageLists.flat()) {
     references.add(page.relativePath)
   }
 }
 
-function markGroups(references: Set<string>, ...groupLists: RuntimePageGroup[][]): void {
+export function markGroups(references: Set<string>, ...groupLists: RuntimePageGroup[][]): void {
   for (const group of groupLists.flat()) {
     for (const page of group.pages) {
       references.add(page.relativePath)
@@ -685,11 +589,11 @@ function markGroups(references: Set<string>, ...groupLists: RuntimePageGroup[][]
   }
 }
 
-function joinPageContents(pages: RuntimePage[], maxChars: number): string {
+export function joinPageContents(pages: RuntimePage[], maxChars: number): string {
   return compactText(pages.map(formatPageEntry).join("\n\n"), maxChars)
 }
 
-function compactText(text: string, maxChars: number): string {
+export function compactText(text: string, maxChars: number): string {
   const normalized = text.replace(/[ \t]+$/gm, "").replace(/\n{3,}/g, "\n\n").trim()
   if (maxChars <= 0) return ""
   if (normalized.length <= maxChars) return normalized
@@ -697,13 +601,13 @@ function compactText(text: string, maxChars: number): string {
   return `${normalized.slice(0, maxChars - 20).trimEnd()}\n[truncated]`
 }
 
-function collectConstraintNotes(pages: RuntimePage[]): string[] {
+export function collectConstraintNotes(pages: RuntimePage[]): string[] {
   return pages
     .flatMap((page) => extractMatchingLines(page, /must|should|forbid|forbidden|never|cannot|can't|禁止|不能|不得|必须|應|應該/i))
     .slice(0, MAX_HIGH_PRIORITY_NOTES)
 }
 
-function collectForbiddenContradictions(texts: string[]): string[] {
+export function collectForbiddenContradictions(texts: string[]): string[] {
   return texts
     .flatMap((text) => text.split("\n").map((line) => line.trim()))
     .filter((line) => /forbid|forbidden|never|cannot|can't|contradiction|禁止|不能|不得|矛盾|禁忌/i.test(line))

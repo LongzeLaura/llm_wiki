@@ -178,7 +178,7 @@ function buildInitialWarnings(context: CampaignSetupImportContext): string[] {
     )
   }
 
-  if (campaignSetupSourceHasAbilityLikeInput(context.source.text)) {
+  if (context.slot.slotId !== "player_abilities" && campaignSetupSourceHasAbilityLikeInput(context.source.text)) {
     warnings.push(
       "Input appears to contain player abilities, skills, limits, costs, or availability. Review for wiki/player/abilities.md; campaign_setup_import v0 does not split those details and must not route them to wiki/rules/.",
     )
@@ -279,6 +279,62 @@ function canonicalCampaignSetupBody(context: CampaignSetupImportContext): string
       "- Fixed player slot: `wiki/player/player.md`.",
       "- Do not create arbitrary `wiki/player/*.md` files during campaign setup.",
       "- Ability, skill, limit, cost, and availability details should be reviewed for `wiki/player/abilities.md`, not `wiki/rules/`.",
+    ].join("\n")
+  }
+
+  if (context.slot.slotId === "player_abilities") {
+    return [
+      "## Player Abilities",
+      "",
+      targetText || "_No player ability setup text remained after filtering non-happened guidance._",
+      "",
+      "## Bootstrap Notes",
+      "",
+      "- Fixed player slot: `wiki/player/abilities.md`.",
+      "- This page is for PC abilities, skills, limits, costs, cooldowns, and current availability.",
+      "- Do not route global rule systems here; use `wiki/rules/` for table/world rules.",
+    ].join("\n")
+  }
+
+  if (context.slot.slotId === "player_inventory") {
+    return [
+      "## Player Inventory",
+      "",
+      targetText || "_No player inventory setup text remained after filtering non-happened guidance._",
+      "",
+      "## Bootstrap Notes",
+      "",
+      "- Fixed player slot: `wiki/player/inventory.md`.",
+      "- This page is for currently held, equipped, stored, consumed, or lost PC items and resources.",
+      "- General item lore without current PC ownership belongs in `wiki/items/`.",
+    ].join("\n")
+  }
+
+  if (context.slot.slotId === "player_goals") {
+    return [
+      "## Player Goals",
+      "",
+      targetText || "_No player goal setup text remained after filtering non-happened guidance._",
+      "",
+      "## Bootstrap Notes",
+      "",
+      "- Fixed player slot: `wiki/player/goals.md`.",
+      "- This page is for PC subjective goals, promises, priorities, obligations, and motivations.",
+      "- Shared campaign objective tracking belongs in `wiki/quests/`.",
+    ].join("\n")
+  }
+
+  if (context.slot.slotId === "player_known_information") {
+    return [
+      "## Player Known Information",
+      "",
+      targetText || "_No player knowledge setup text remained after filtering non-happened guidance._",
+      "",
+      "## Bootstrap Notes",
+      "",
+      "- Fixed player slot: `wiki/player/known_information.md`.",
+      "- This page is for what the PC knows, suspects, misunderstands, or explicitly does not yet know.",
+      "- GM-only future reveals must not be written as PC knowledge.",
     ].join("\n")
   }
 

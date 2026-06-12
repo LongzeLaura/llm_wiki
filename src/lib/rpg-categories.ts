@@ -22,7 +22,7 @@ export const RPG_CATEGORIES = [
     id: "world",
     label: "World",
     path: "wiki/world",
-    description: "Stable and semi-stable setting, history, culture, public facts, and world background.",
+    description: "Fixed stable setting slots for overview, history, common sense, supernatural presence, and social structure.",
     dynamic: false,
     multipleFiles: true,
     requireSource: true,

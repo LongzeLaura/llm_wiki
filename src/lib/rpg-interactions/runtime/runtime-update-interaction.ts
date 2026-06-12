@@ -1,36 +1,36 @@
-import { extractRpgStateUpdates, type ProposedWikiUpdate } from "../../rpg-runtime/state-extractor"
-import type { RpgTurnRecord } from "../../rpg-runtime/turn-model"
+import type {
+  RuntimeUpdateProposalInput,
+  RuntimeUpdateProposalResult,
+} from "../../rpg-runtime/types"
 import { getRpgRuntimeCrossDirectorySyncGuidance } from "../../rpg-wiki-schema"
 import type { RpgInteractionSpec } from "../interaction-spec"
-import { RPG_WIKI_UPDATE_FENCE } from "./runtime-update-protocol"
-import { getRpgRuntimeUpdateTargetRules, type RpgRuntimeUpdateTargetRule } from "./wiki-update-policy"
+import { parseAndValidateRuntimeUpdateProposalResult } from "./runtime-update-proposal-validation"
 
-export interface BuildRuntimeUpdateInteractionInput {
-  turnRecord: RpgTurnRecord
-  allowedTargets?: readonly RpgRuntimeUpdateTargetRule[]
-}
+export type BuildRuntimeUpdateInteractionInput = RuntimeUpdateProposalInput
 
-export interface RuntimeUpdateInteractionResult {
-  proposedUpdates: ProposedWikiUpdate[]
-  warnings: string[]
-}
+export type RuntimeUpdateInteractionResult = RuntimeUpdateProposalResult
 
 export const runtimeUpdateInteractionSpec: RpgInteractionSpec<
   BuildRuntimeUpdateInteractionInput,
   RuntimeUpdateInteractionResult
 > = {
-  kind: "runtime_state_update",
+  kind: "runtime_update_proposal",
   buildPrompt(input) {
-    const allowedTargets = input.allowedTargets ?? getRpgRuntimeUpdateTargetRules()
-    const turnRecord = input.turnRecord
+    const proposalInput = input
 
     return {
       systemPrompt: [
-        "You are the llmWikiRPG runtime state update interaction.",
-        "Your task is to propose wiki updates from one completed RPG turn record.",
-        "Use only the completed turn record fields: submittedAction, generatedNarrative, and references.",
-        "The factual source is strictly submittedAction + generatedNarrative + references.",
-        "Do not use, infer from, or mention unchosen nextActionOptions as facts.",
+        "You are the llmWikiRPG Runtime Update Proposal interaction, LLM 6 in the 19-step runtime flow.",
+        "Your task is to convert already-settled current-turn structures into reviewable RuntimeUpdateProposalResult JSON.",
+        "Primary factual sources are the structured current-turn inputs: PostActionWorkingState, ActionResolution, WorldTickResult, WorldTickVisibleSelection, TurnNarration, consistencyValidation, recall handoff, and outline handoff.",
+        "generatedNarrative and playerFacingText are display/evidence material. They are not the only fact source and must not override settled structured deltas.",
+        "Use actionResolution, worldTickResult, visibleSelection, postActionWorkingState, outlineAwareNarrationBrief, outlineImpactReport, recalledMaterials, and turnNarration before relying on prose wording.",
+        "outlineImpactReport and provisionalOutlinePatch may explain current-turn outline impact and narration constraints, but they do not authorize direct main-outline writes.",
+        "outlineRevisionProposal can only become independent outlineRevisionReviewItems. It must never be mixed into ordinary proposedWikiUpdates and must never auto-write wiki/outlines/main.md.",
+        "parallelLineText and user_visible_pc_unknown material may be user-visible evidence, but they do not automatically grant PC knowledge and must not automatically update wiki/player/known_information.md.",
+        "nextActionOptions are candidate future actions, not facts. Do not use them as happened events, current state, player goals, quests, or plot progress.",
+        "attempted_not_confirmed cannot enter confirmed events. Only confirmed_happened event deltas may target wiki/events/*.md.",
+        "possible_future, intention_only, foreshadowing, future plans, and candidate actions cannot be written as confirmed facts.",
         "You may only propose updates. Do not claim that anything has already been written to the wiki.",
         "Output only allowed runtime target paths and their required strategies.",
         "Stable, manual, base, and legacy paths are forbidden.",
@@ -57,61 +57,89 @@ export const runtimeUpdateInteractionSpec: RpgInteractionSpec<
         "player/inventory.md is for current holdings, quantities, equipped/backpack status, and consumption/damage state; item definitions and object-level runtime state belong in items/runtime/.",
         "Forbidden runtime targets include base wiki/relationships/*.md, base wiki/plot-arcs/*.md, wiki/outlines/main.md, wiki/style/, wiki/rules/, wiki/sources/, wiki/world/, and base wiki/characters/*.md, wiki/locations/*.md, wiki/factions/*.md, wiki/items/*.md.",
         "runtime overlay updates must preserve accepted runtime state only; do not store candidate actions, stable setting pages, global style rules, or control rules there.",
-        "Narration is responsible for player-visible story and future action options; this interaction is only for ProposedWikiUpdate candidates.",
+        "Narration is responsible for player-visible story and future action options; this interaction is only for runtime update proposal review material.",
         "Pending, apply, and write policy remain deterministic safety boundaries after this proposal step.",
+        "All ordinary proposedWikiUpdates must include sourceDeltas, lineTarget, visibility, knowledgeScope, happenedStatus, confidence, and validationHints.",
+        "The only accepted output contract is structured JSON.",
         "",
         "Code-readable runtime cross-directory sync guidance:",
         formatRuntimeSyncGuidance(),
         "",
-        "Use this first-version fenced output protocol for each proposed update:",
-        "```" + RPG_WIKI_UPDATE_FENCE,
-        "targetPath: wiki/current-scene/scene_state.md",
-        "strategy: overwrite",
-        "reason: One concise reason grounded in the completed turn.",
-        "---",
-        "Markdown content for the proposed update.",
-        "```",
+        "Output exactly one JSON object with this top-level shape:",
+        "{",
+        '  "proposedWikiUpdates": [],',
+        '  "outlineRevisionReviewItems": [],',
+        '  "journalEntries": [],',
+        '  "skippedDeltas": [],',
+        '  "pacingUpdateProposal": null,',
+        '  "proposalGroups": [],',
+        '  "warnings": []',
+        "}",
         "",
-        `If there are no safe updates, output no ${RPG_WIKI_UPDATE_FENCE} blocks.`,
+        "Each ordinary proposedWikiUpdates[] item must include: id, targetPath, strategy, reason, content, sourceTurnId, references, sourceDeltas, lineTarget, visibility, knowledgeScope, happenedStatus, confidence, validationHints.",
+        "Each sourceDeltas[] item must include: deltaId, sourceStage, summary, lineTarget, visibility, knowledgeScope, happenedStatus, usePurpose, affectedPaths, runtimeDeltaRefs.",
+        "If no safe ordinary updates exist, return proposedWikiUpdates: [] and explain skipped structured deltas in skippedDeltas.",
       ].join("\n"),
       userPrompt: [
-        "# Completed RPG Turn Record",
+        "# Runtime Update Proposal Input",
         "",
-        "Only the data in this completed turn record may be used as factual input.",
-        "There is intentionally no nextActionOptions section here; unchosen options are future candidates, not events.",
+        "Use the structured current-turn sources below as the fact boundary. Prose fields are evidence and display material.",
         "",
         "## Submitted Action",
-        formatSubmittedAction(turnRecord),
+        formatSubmittedAction(proposalInput),
         "",
-        "## Generated Narrative",
-        formatText(turnRecord.generatedNarrative),
+        "## Structured Current-Turn Sources",
+        formatJson({
+          postActionWorkingState: proposalInput.postActionWorkingState,
+          actionResolution: proposalInput.actionResolution,
+          worldTickResult: proposalInput.worldTickResult,
+          visibleSelection: proposalInput.visibleSelection,
+          recallSelection: proposalInput.recallSelection,
+          recalledMaterials: proposalInput.recalledMaterials,
+          outlineAwareNarrationBrief: proposalInput.outlineAwareNarrationBrief,
+          outlineImpactReport: proposalInput.outlineImpactReport,
+          provisionalOutlinePatch: proposalInput.provisionalOutlinePatch,
+          outlineRevisionProposal: proposalInput.outlineRevisionProposal,
+          turnNarration: proposalInput.turnNarration,
+          consistencyValidation: proposalInput.consistencyValidation,
+        }),
+        "",
+        "## Display / Evidence Text",
+        "generatedNarrative:",
+        formatText(proposalInput.turnRecord.generatedNarrative),
+        "",
+        "playerFacingText:",
+        formatText(proposalInput.turnNarration?.playerFacingText ?? ""),
+        "",
+        "parallelLineText:",
+        formatText(proposalInput.turnNarration?.parallelLineText ?? ""),
         "",
         "## References",
-        formatList(turnRecord.references),
+        formatList(proposalInput.turnRecord.references),
         "",
         "## Allowed Runtime Update Target Rules",
-        formatAllowedTargets(allowedTargets),
+        formatAllowedTargets(proposalInput.allowedTargets),
+        "",
+        "## Write Policy",
+        formatJson(proposalInput.writePolicy),
+        "",
+        "## Review Policy",
+        formatJson(proposalInput.reviewPolicy),
         "",
         "## Local Validation Boundary",
-        "After this single update generation, deterministic path-aware lint will run before pending staging.",
-        "Rejected proposals will be skipped and reported for review instead of entering the pending queue.",
-        "Warning-only proposals may enter pending, but the warning remains visible in the controller result and runtime journal.",
+        "This stage only parses JSON and performs structure/boundary checks.",
+        "Do not stage pending updates, do not apply updates, do not write wiki files, and do not modify writer/apply/UI behavior.",
       ].join("\n"),
     }
   },
   parseOutput(output, input) {
-    return extractRpgStateUpdates({
-      turnRecord: {
-        submittedAction: input.turnRecord.submittedAction,
-        generatedNarrative: output,
-        references: input.turnRecord.references,
-      },
-    })
+    const proposalInput = input
+    return parseAndValidateRuntimeUpdateProposalResult(output, proposalInput)
   },
 }
 
-function formatSubmittedAction(turnRecord: RpgTurnRecord): string {
-  const action = turnRecord.submittedAction
+function formatSubmittedAction(input: RuntimeUpdateProposalInput): string {
+  const action = input.turnRecord.submittedAction
   const lines = [`id: ${formatInline(action.id)}`, `text: ${formatInline(action.text)}`, `source: ${action.source}`]
   if (action.selectedOptionId) {
     lines.push(`selectedOptionId: ${formatInline(action.selectedOptionId)}`)
@@ -119,7 +147,7 @@ function formatSubmittedAction(turnRecord: RpgTurnRecord): string {
   return lines.join("\n")
 }
 
-function formatAllowedTargets(allowedTargets: readonly RpgRuntimeUpdateTargetRule[]): string {
+function formatAllowedTargets(allowedTargets: readonly RuntimeUpdateProposalInput["allowedTargets"][number][]): string {
   if (allowedTargets.length === 0) return "- None. Do not output update blocks."
   return allowedTargets
     .map((rule) => `- ${rule.pathPattern} | strategy: ${rule.strategy} | ${rule.description}`)
@@ -148,4 +176,8 @@ function formatList(values: readonly string[]): string {
 
 function formatInline(value: string): string {
   return JSON.stringify(value)
+}
+
+function formatJson(value: unknown): string {
+  return JSON.stringify(value, null, 2)
 }

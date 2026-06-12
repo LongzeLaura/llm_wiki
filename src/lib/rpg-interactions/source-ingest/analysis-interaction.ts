@@ -201,8 +201,8 @@ function buildRpgExtractionAnalysisGuidance(): string {
     // 中文：- character_trait_or_trivia：值得并入相关角色页、而不是创建独立对象的角色相关细节。
     "- wiki_noise: tags, trope labels, list cruft, navigation text, meta commentary, formatting residue, or low-value trivia that should be ignored.",
     // 中文：- wiki_noise：应忽略的标签、套路标签、列表残片、导航文字、元评论、格式残留或低价值琐碎信息。
-    "Allowed suggested_route values: wiki/sources/, wiki/world/, wiki/characters/, wiki/player/, wiki/locations/, wiki/factions/, wiki/items/, wiki/plot-arcs/, wiki/events/, wiki/relationships/, merge-target, ignore.",
-    // 中文：允许的 suggested_route 值：wiki/sources/、wiki/world/、wiki/characters/、wiki/player/、wiki/locations/、wiki/factions/、wiki/items/、wiki/plot-arcs/、wiki/events/、wiki/relationships/、merge-target、ignore。
+    "Allowed suggested_route values: wiki/sources/, fixed wiki/world/ slots, wiki/characters/, wiki/player/, wiki/locations/, wiki/factions/, wiki/items/, wiki/plot-arcs/, wiki/events/, wiki/relationships/, merge-target, ignore.",
+    // 中文：允许的 suggested_route 值：wiki/sources/、固定 wiki/world/ slot、wiki/characters/、wiki/player/、wiki/locations/、wiki/factions/、wiki/items/、wiki/plot-arcs/、wiki/events/、wiki/relationships/、merge-target、ignore。
     "Allowed action values: create, update, merge-into, ignore.",
     // 中文：允许的 action 值：create、update、merge-into、ignore。
     "Use action=create for a source-supported object that needs a new page, update for a known page that should be changed, merge-into for material that belongs inside an existing or more important page, and ignore for noise or unsupported material.",

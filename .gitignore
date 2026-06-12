@@ -52,3 +52,5 @@ pnpm-debug.log*
 
 # Local agent-run artifacts
 .agent_runs/
+.codegraph/
+.codex/config.toml

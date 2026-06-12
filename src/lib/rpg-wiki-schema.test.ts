@@ -3,12 +3,56 @@ import { RPG_CATEGORIES } from "./rpg-categories"
 import {
   RPG_DIRECTORY_BOUNDARY_GUIDANCE,
   RPG_FIXED_PLAYER_SLOT_PATHS,
+  RPG_FIXED_WORLD_SLOT_PATHS,
   RPG_SCHEMA_SLOTS,
   RPG_WIKI_SCHEMA,
+  getRpgActionResolverSlotSemantics,
+  getRpgClockStateFields,
   getRpgDirectoryBoundaryGuidance,
+  getRpgOutlineImpactLevels,
+  getRpgOutlineBriefBoundaryFields,
+  getRpgOutlineBriefCompilerSchemaGuidance,
+  getRpgOutlineBriefImpactRubricFields,
+  getRpgOutlineBriefStableRefFields,
+  getRpgOutlineBriefTensionFuelFields,
+  getRpgRecallableSectionFields,
+  getRpgActionOptionRuntimeFields,
+  getRpgNarrationKnowledgeBoundaryPolicy,
+  getRpgNarrationMetaFields,
+  getRpgNarrationOutputSchema,
+  getRpgNarrationStyleHandoffPolicy,
+  getRpgOutlineRevisionReviewItemSchema,
+  getRpgOutlineRevisionProposalSchema,
+  getRpgOutlineRevisionReviewPolicy,
+  getRpgPacingUpdateProposalFields,
+  getRpgProposalGroupFields,
+  getRpgProposedWikiUpdateRuntimeFields,
+  getRpgProvisionalOutlinePatchSchema,
+  getRpgRegenerationSafetyFields,
+  getRpgRuntimeUpdateProposalGuidance,
+  getRpgRuntimeUpdateProposalInputSchema,
+  getRpgRuntimeUpdateProposalResultSchema,
+  getRpgRuntimeUpdateProposalSchemaGuidance,
+  getRpgRuntimeUpdateSourceDeltaFields,
+  getRpgSkippedRuntimeDeltaFields,
+  getRpgTensionBriefFields,
+  getRpgReviewItemKinds,
+  getRpgRuntimeDeltaRefFields,
+  getRpgRuntimePersistenceBoundaryGuidance,
+  getRpgRuntimeSharedSchemaGuidance,
+  getRpgRuntimeVisibilityFields,
   getRpgRuntimeCrossDirectorySyncGuidance,
+  getRpgWorldTickClockFields,
+  getRpgWorldTickGapSignalFields,
+  getRpgWorldTickInformationBroadcastFields,
+  getRpgWorldTickOngoingEventFields,
+  getRpgWorldTickPacingStateFields,
+  getRpgWorldTickReactionQueueFields,
+  getRpgWorldTickSchemaGuidance,
+  getRpgWorldTickVisibilityMetaFields,
   getRpgSourceIngestForbiddenTarget,
   getRpgSourceIngestTargetPolicy,
+  getRpgStoryOutlineRegeneratorSchemaGuidance,
   getRequiredRpgSchemaSlots,
   getRpgSchemaSlot,
   getRpgSchemaSlotByPath,
@@ -24,6 +68,8 @@ describe("RPG_WIKI_SCHEMA", () => {
     expect(RPG_WIKI_SCHEMA.map((entry) => entry.categoryId)).toEqual(RPG_CATEGORIES.map((category) => category.id))
     expect(RPG_WIKI_SCHEMA).toHaveLength(RPG_CATEGORIES.length)
     expect(RPG_WIKI_SCHEMA.some((entry) => entry.categoryId.includes("runtime"))).toBe(false)
+    expect(RPG_WIKI_SCHEMA.map((entry) => entry.categoryId)).not.toContain("runtime")
+    expect(RPG_WIKI_SCHEMA.map((entry) => entry.path)).not.toContain("runtime/")
     expect(rpgSchemaCategoryIdsMatchRegistry()).toBe(true)
   })
 
@@ -44,6 +90,506 @@ describe("RPG_WIKI_SCHEMA", () => {
       expect(entry.exclude.length).toBeGreaterThan(0)
       expect(entry.recommendedGranularity.length).toBeGreaterThan(0)
     }
+  })
+
+  it("defines the shared runtime schema spine enums and guidance", () => {
+    const guidance = getRpgRuntimeSharedSchemaGuidance()
+
+    expect(guidance.narrativeLines).toEqual(expect.arrayContaining([
+      "playerVisibleLine",
+      "parallelLine",
+      "tensionLine",
+    ]))
+    expect(guidance.usePurposes).toEqual(expect.arrayContaining([
+      "actionResolution",
+      "worldTick",
+      "recall",
+      "outlineControl",
+      "narration",
+      "writeback",
+    ]))
+    expect(guidance.visibilityScopes).toEqual(expect.arrayContaining([
+      "pc_visible",
+      "user_visible_pc_unknown",
+      "gm_only",
+    ]))
+    expect(guidance.knowledgeScopes).toEqual(expect.arrayContaining([
+      "pc_known",
+      "pc_misunderstanding",
+    ]))
+    expect(guidance.happenedStatuses).toEqual(expect.arrayContaining([
+      "confirmed_happened",
+      "attempted_not_confirmed",
+      "possible_future",
+    ]))
+    expect(getRpgOutlineImpactLevels()).toContain("major_rewrite_required")
+    expect(getRpgReviewItemKinds().map((field) => field.name)).toEqual(expect.arrayContaining([
+      "runtimeWikiUpdate",
+      "outlineRevision",
+    ]))
+  })
+
+  it("defines runtime visibility, delta ref, recallable section, and clock fields", () => {
+    expect(getRpgRuntimeVisibilityFields().map((field) => field.name)).toEqual(expect.arrayContaining([
+      "visibilityScope",
+      "knowledgeScope",
+      "knowledgeSourceKind",
+      "knownBy",
+    ]))
+
+    expect(getRpgRuntimeDeltaRefFields().map((field) => field.name)).toEqual(expect.arrayContaining([
+      "deltaId",
+      "sourceStage",
+      "sourcePath",
+      "narrativeLine",
+      "usePurpose",
+      "happenedStatus",
+    ]))
+
+    const recallableSectionFields = getRpgRecallableSectionFields()
+    expect(recallableSectionFields.map((field) => field.name)).toEqual(expect.arrayContaining([
+      "sectionId",
+      "sectionRole",
+      "heading",
+      "aliases",
+      "readModes",
+    ]))
+    expect(JSON.stringify(recallableSectionFields)).toContain("visibility metadata")
+
+    expect(getRpgClockStateFields().map((field) => field.name)).toEqual(expect.arrayContaining([
+      "clockId",
+      "clockKind",
+      "state",
+      "narrativeLine",
+      "visibilityScope",
+      "sourceDeltas",
+    ]))
+  })
+
+  it("defines World Tick schema guidance without adding a runtime wiki category", () => {
+    const guidance = getRpgWorldTickSchemaGuidance().join("\n")
+
+    expect(RPG_WIKI_SCHEMA.map((entry) => entry.categoryId)).not.toContain("runtime")
+    expect(guidance).toContain("ActionResolution.playerActionDelta")
+    expect(guidance).toContain("canonical player-action-only delta")
+    expect(guidance).toContain("must not re-adjudicate")
+    expect(guidance).toContain("directResults")
+    expect(guidance).toContain("write wiki files")
+    expect(guidance).toContain("player-facing narration")
+    expect(guidance).toContain("Parallel-line display is not PC knowledge")
+    expect(guidance).toContain("possible_future, intention_only, and attempted_not_confirmed")
+    expect(guidance).toContain("Gap signal output is World Tick's first-pass screening only")
+
+    expect(getRpgWorldTickVisibilityMetaFields().map((field) => field.name)).toEqual(expect.arrayContaining([
+      "visibilityScope",
+      "knowledgeScope",
+      "knowledgeSourceKind",
+      "knownBy",
+      "excludedKnowledgeFor",
+      "displayPolicy",
+    ]))
+    expect(getRpgWorldTickClockFields().map((field) => field.name)).toEqual(expect.arrayContaining([
+      "clockId",
+      "clockKind",
+      "updateKind",
+      "previousState",
+      "nextState",
+      "timeDeltaBasis",
+      "happenedStatus",
+      "affectedPaths",
+    ]))
+    expect(getRpgWorldTickOngoingEventFields().map((field) => field.name)).toEqual(expect.arrayContaining([
+      "eventId",
+      "settlementKind",
+      "visibility",
+      "happenedStatus",
+      "affectedPaths",
+      "runtimeDeltaRefs",
+    ]))
+    expect(getRpgWorldTickInformationBroadcastFields().map((field) => field.name)).toEqual(expect.arrayContaining([
+      "broadcastId",
+      "informationSummary",
+      "sourceActorRefs",
+      "recipientRefs",
+      "channel",
+      "visibility",
+    ]))
+    expect(getRpgWorldTickReactionQueueFields().map((field) => field.name)).toEqual(expect.arrayContaining([
+      "reactionId",
+      "actorRef",
+      "reactionTiming",
+      "triggerDeltaIds",
+      "knowledgeBasis",
+      "visibility",
+    ]))
+    expect(getRpgWorldTickPacingStateFields().map((field) => field.name)).toEqual(expect.arrayContaining([
+      "previousDebt",
+      "nextDebt",
+      "pressureChange",
+      "campaignDelta",
+      "compensationNeeded",
+    ]))
+    expect(getRpgWorldTickGapSignalFields().map((field) => field.name)).toEqual(expect.arrayContaining([
+      "gapSignalId",
+      "gapMode",
+      "gapImpactCandidate",
+      "causalChain",
+      "outlineImpactAuthority",
+      "happenedStatus",
+    ]))
+    expect(JSON.stringify(getRpgWorldTickGapSignalFields())).toContain("preliminary screening")
+  })
+
+  it("defines Outline-aware Brief Compiler schema guidance without changing slots", () => {
+    const guidance = getRpgOutlineBriefCompilerSchemaGuidance()
+    const combined = JSON.stringify(guidance)
+
+    expect(RPG_SCHEMA_SLOTS).toHaveLength(22)
+    expect(RPG_WIKI_SCHEMA.map((entry) => entry.categoryId)).not.toContain("runtime")
+    expect(guidance.impactRubric.map((field) => field.name)).toEqual([
+      "none",
+      "minor",
+      "branch",
+      "major_rewrite_required",
+    ])
+    expect(getRpgOutlineBriefImpactRubricFields().map((field) => field.name)).toContain("branch")
+    expect(getRpgOutlineBriefBoundaryFields().map((field) => field.name)).toEqual([
+      "playerFacingBrief",
+      "parallelLineBrief",
+      "tensionBriefInput",
+    ])
+    expect(getRpgOutlineBriefStableRefFields().map((field) => field.name)).toEqual(expect.arrayContaining([
+      "stableId",
+      "path",
+      "sectionId",
+      "dependency",
+      "invalidation",
+      "lineTarget",
+      "revealPolicy",
+    ]))
+    expect(getRpgOutlineBriefTensionFuelFields().map((field) => field.name)).toEqual(expect.arrayContaining([
+      "fuelId",
+      "plotArcId",
+      "tensionLineTarget",
+      "pressureSources",
+      "forbiddenResolutions",
+    ]))
+    expect(combined).toContain("outline beat, reveal, and branch condition refs")
+    expect(combined).toContain("dependency")
+    expect(combined).toContain("invalidation")
+    expect(combined).toContain("line target")
+    expect(combined).toContain("reveal policy")
+    expect(combined).toContain("playerFacingBrief")
+    expect(combined).toContain("parallelLineBrief")
+    expect(combined).toContain("tensionBriefInput")
+    expect(combined).toContain("tensionLine")
+    expect(combined).toContain("plot-arcs/runtime")
+  })
+
+  it("defines Story Outline Regenerator schema guidance without changing slots or ordinary categories", () => {
+    const slotIdsBefore = RPG_SCHEMA_SLOTS.map((slot) => slot.slotId)
+    const categoryIdsBefore = RPG_WIKI_SCHEMA.map((entry) => entry.categoryId)
+    const guidance = getRpgStoryOutlineRegeneratorSchemaGuidance()
+    const provisionalPatch = getRpgProvisionalOutlinePatchSchema()
+    const proposal = getRpgOutlineRevisionProposalSchema()
+    const reviewPolicy = getRpgOutlineRevisionReviewPolicy()
+    const safetyFields = getRpgRegenerationSafetyFields()
+    const combined = JSON.stringify(guidance)
+
+    expect(RPG_SCHEMA_SLOTS).toHaveLength(22)
+    expect(RPG_SCHEMA_SLOTS.map((slot) => slot.slotId)).toEqual(slotIdsBefore)
+    expect(RPG_WIKI_SCHEMA.map((entry) => entry.categoryId)).toEqual(categoryIdsBefore)
+    expect(RPG_WIKI_SCHEMA.map((entry) => entry.categoryId)).not.toContain("runtime")
+    expect(RPG_WIKI_SCHEMA.map((entry) => entry.path)).not.toContain("runtime/")
+
+    expect(provisionalPatch.map((field) => field.name)).toEqual(expect.arrayContaining([
+      "patchId",
+      "scope",
+      "narrationHandoff",
+      "runtimeDeltaRefs",
+      "narrativeLines",
+      "visibilityBoundary",
+      "outlineImpactLevel",
+      "nonPersistenceBoundary",
+    ]))
+    expect(proposal.map((field) => field.name)).toEqual(expect.arrayContaining([
+      "proposalId",
+      "reviewItemKind",
+      "targetOutlineRefs",
+      "mustPreserveFacts",
+      "proposedRevision",
+      "runtimeDeltaRefs",
+      "reviewBoundary",
+    ]))
+    expect(safetyFields.map((field) => field.name)).toEqual(expect.arrayContaining([
+      "reportKind",
+      "preservesConfirmedFacts",
+      "futureNotWrittenAsEvent",
+      "forbiddenRevealProtected",
+      "provisionalPatchNonPersistent",
+      "proposalReviewBoundary",
+      "mainOutlineWritePolicy",
+    ]))
+
+    expect(reviewPolicy.join("\n")).toContain("independent review/pending")
+    expect(reviewPolicy.join("\n")).toContain("not an ordinary runtime update")
+    expect(reviewPolicy.join("\n")).toContain("manual_or_review_only")
+    expect(combined).toContain("ProvisionalOutlinePatch")
+    expect(combined).toContain("same-turn")
+    expect(combined).toContain("does not mean wiki/outlines/main.md changed")
+    expect(combined).toContain("Step 15 Narration")
+    expect(combined).toContain("OutlineRevisionProposal")
+    expect(combined).toContain("OutlineRevisionReviewPolicy")
+    expect(combined).toContain("RegenerationSafetyReport")
+    expect(combined).toContain("reviewItemKind outlineRevision")
+    expect(combined).toContain("not runtimeWikiUpdate")
+    expect(combined).toContain("RuntimeDeltaRef")
+    expect(combined).toContain("NarrativeLine")
+    expect(combined).toContain("VisibilityScope")
+    expect(combined).toContain("KnowledgeScope")
+    expect(combined).toContain("OutlineImpactLevel")
+    expect(combined).toContain("wiki/outlines/main.md remains manual_or_review_only")
+    expect(combined).toContain("must not be written to events")
+    expect(combined).toContain("plot-arcs/runtime")
+  })
+
+  it("defines Narration Generator schema guidance without runtime contract or slot changes", () => {
+    const slotIdsBefore = RPG_SCHEMA_SLOTS.map((slot) => slot.slotId)
+    const categoryIdsBefore = RPG_WIKI_SCHEMA.map((entry) => entry.categoryId)
+    const outputSchema = getRpgNarrationOutputSchema()
+    const tensionBriefFields = getRpgTensionBriefFields()
+    const narrationMetaFields = getRpgNarrationMetaFields()
+    const actionOptionFields = getRpgActionOptionRuntimeFields()
+    const knowledgePolicy = getRpgNarrationKnowledgeBoundaryPolicy().join("\n")
+    const stylePolicy = getRpgNarrationStyleHandoffPolicy().join("\n")
+    const combined = [
+      JSON.stringify(outputSchema),
+      JSON.stringify(tensionBriefFields),
+      JSON.stringify(narrationMetaFields),
+      JSON.stringify(actionOptionFields),
+      knowledgePolicy,
+      stylePolicy,
+    ].join("\n")
+
+    expect(RPG_SCHEMA_SLOTS).toHaveLength(22)
+    expect(RPG_SCHEMA_SLOTS.map((slot) => slot.slotId)).toEqual(slotIdsBefore)
+    expect(RPG_WIKI_SCHEMA.map((entry) => entry.categoryId)).toEqual(categoryIdsBefore)
+    expect(RPG_WIKI_SCHEMA.map((entry) => entry.categoryId)).not.toContain("runtime")
+    expect(RPG_WIKI_SCHEMA.map((entry) => entry.path)).not.toContain("wiki/runtime")
+    expect(RPG_WIKI_SCHEMA.map((entry) => entry.path)).not.toContain("wiki/runtime/")
+
+    expect(outputSchema.map((field) => field.name)).toEqual(expect.arrayContaining([
+      "NarrationGeneratorInput",
+      "TurnNarration",
+      "playerFacingText",
+      "parallelLineText",
+      "tensionBrief",
+      "displayPolicy",
+      "narrationMeta",
+      "nextActionOptions",
+      "references",
+      "styleBundle",
+      "forbiddenForNarration",
+      "playerKnowledgeBoundary",
+      "pacingCompliance",
+      "provisionalOutlinePatch.narrationHandoff",
+      "outlineRevisionProposal",
+    ]))
+    expect(tensionBriefFields.map((field) => field.name)).toEqual(expect.arrayContaining([
+      "relationshipPressure",
+      "emotionalPressure",
+      "misunderstanding",
+      "trust",
+      "unresolvedTension",
+      "usedPlotArcFuel",
+      "carryover",
+    ]))
+    expect(narrationMetaFields.map((field) => field.name)).toEqual(expect.arrayContaining([
+      "timeCompression",
+      "sceneTransition",
+      "campaignDelta",
+      "pacingCompliance",
+      "provisionalPatchUsage",
+      "revealBoundary",
+      "playerKnowledgeBoundary",
+    ]))
+    expect(actionOptionFields.map((field) => field.name)).toEqual(expect.arrayContaining([
+      "expectedTimeCost",
+      "likelyClockImpact",
+      "visibilityScope",
+      "likelyAffectedPaths",
+      "isMetaOption",
+    ]))
+
+    expect(knowledgePolicy).toContain("parallel line display is not PC knowledge")
+    expect(knowledgePolicy).toContain("must not automatically write wiki/player/known_information.md")
+    expect(knowledgePolicy).toContain("has priority over ordinary OutlineAwareNarrationBrief")
+    expect(knowledgePolicy).toContain("cannot rewrite PostActionWorkingState, WorldTickResult, or ActionResolution")
+    expect(knowledgePolicy).toContain("outlineRevisionProposal is not Narration fact material")
+    expect(stylePolicy).toContain("styleBundle may affect voice")
+    expect(stylePolicy).toContain("must not be promoted into world facts, plot facts, character facts, or events")
+    expect(stylePolicy).toContain("forbiddenForNarration")
+    expect(combined).toContain("display to the real user does not grant player-character knowledge")
+    expect(combined).toContain("not ordinary event fact material")
+    expect(combined).toContain("not a wiki slot")
+  })
+
+  it("defines LLM 6 Runtime Update Proposal schema guidance without runtime behavior changes", () => {
+    const slotIdsBefore = RPG_SCHEMA_SLOTS.map((slot) => slot.slotId)
+    const categoryIdsBefore = RPG_WIKI_SCHEMA.map((entry) => entry.categoryId)
+    const inputSchema = getRpgRuntimeUpdateProposalInputSchema()
+    const resultSchema = getRpgRuntimeUpdateProposalResultSchema()
+    const proposedUpdateFields = getRpgProposedWikiUpdateRuntimeFields()
+    const sourceDeltaFields = getRpgRuntimeUpdateSourceDeltaFields()
+    const skippedDeltaFields = getRpgSkippedRuntimeDeltaFields()
+    const pacingFields = getRpgPacingUpdateProposalFields()
+    const groupFields = getRpgProposalGroupFields()
+    const outlineReviewItemFields = getRpgOutlineRevisionReviewItemSchema()
+    const guidance = getRpgRuntimeUpdateProposalGuidance().join("\n")
+    const aggregate = getRpgRuntimeUpdateProposalSchemaGuidance()
+    const combined = [
+      JSON.stringify(aggregate),
+      guidance,
+    ].join("\n")
+
+    expect(RPG_SCHEMA_SLOTS).toHaveLength(22)
+    expect(RPG_SCHEMA_SLOTS.map((slot) => slot.slotId)).toEqual(slotIdsBefore)
+    expect(RPG_WIKI_SCHEMA.map((entry) => entry.categoryId)).toEqual(categoryIdsBefore)
+    expect(RPG_WIKI_SCHEMA.map((entry) => entry.categoryId)).not.toContain("runtime")
+    expect(RPG_WIKI_SCHEMA.map((entry) => entry.path)).not.toContain("wiki/runtime")
+    expect(RPG_WIKI_SCHEMA.map((entry) => entry.path)).not.toContain("wiki/runtime/")
+
+    expect(inputSchema.map((field) => field.name)).toEqual(expect.arrayContaining([
+      "RuntimeUpdateProposalInput",
+      "postActionWorkingState",
+      "actionResolution",
+      "worldTickResult",
+      "recallAndOutlineHandoff",
+      "turnNarration",
+      "consistencyValidation",
+      "outlineRevisionProposal",
+      "allowedTargets",
+    ]))
+    expect(resultSchema.map((field) => field.name)).toEqual(expect.arrayContaining([
+      "RuntimeUpdateProposalResult",
+      "proposedWikiUpdates",
+      "outlineRevisionReviewItems",
+      "journalEntries",
+      "skippedDeltas",
+      "pacingUpdateProposal",
+      "proposalGroups",
+      "warnings",
+    ]))
+    expect(proposedUpdateFields.map((field) => field.name)).toEqual(expect.arrayContaining([
+      "sourceDeltas",
+      "lineTarget",
+      "visibility",
+      "knowledgeScope",
+      "happenedStatus",
+      "confidence",
+      "validationHints",
+    ]))
+    expect(sourceDeltaFields.map((field) => field.name)).toEqual(expect.arrayContaining([
+      "deltaId",
+      "sourceStage",
+      "sourcePath",
+      "sourceField",
+      "lineTarget",
+      "visibility",
+      "knowledgeScope",
+      "happenedStatus",
+      "confidence",
+    ]))
+    expect(skippedDeltaFields.map((field) => field.name)).toEqual(expect.arrayContaining([
+      "deltaId",
+      "sourceDeltas",
+      "reason",
+      "notWrittenBecause",
+      "suggestedReview",
+      "journalOnly",
+    ]))
+    expect(pacingFields.map((field) => field.name)).toEqual(expect.arrayContaining([
+      "timeDelta",
+      "campaignDelta",
+      "pacingDebtChange",
+      "stagnationRisk",
+      "activeClockChanges",
+      "nextTurnPacingHint",
+      "sourceDeltas",
+      "validationHints",
+    ]))
+    expect(groupFields.map((field) => field.name)).toEqual(expect.arrayContaining([
+      "groupId",
+      "sourceDeltaIds",
+      "targetPaths",
+      "reason",
+      "requiredTogether",
+      "missingCompanionWarnings",
+    ]))
+    expect(outlineReviewItemFields.map((field) => field.name)).toEqual(expect.arrayContaining([
+      "proposalId",
+      "reviewItemKind",
+      "proposal",
+      "sourceDeltas",
+      "targetPathPolicy",
+      "status",
+      "safetyNotes",
+    ]))
+
+    expect(combined).toContain("LLM 6 Schema Guidance only defines code-readable schema descriptions")
+    expect(combined).toContain("structured fact sources")
+    expect(combined).toContain("structured turn delta has priority over generatedNarrative")
+    expect(combined).toContain("playerFacingText is display evidence only")
+    expect(combined).toContain("parallelLineText and user_visible_pc_unknown")
+    expect(combined).toContain("must not automatically enter wiki/player/known_information.md")
+    expect(combined).toContain("nextActionOptions are candidate future actions")
+    expect(combined).toContain("events updates require confirmed_happened")
+    expect(combined).toContain("attempted_not_confirmed cannot enter confirmed event")
+    expect(combined).toContain("outlineRevisionProposal can only become an independent OutlineRevisionReviewItem")
+    expect(combined).toContain("must not be mixed into ordinary ProposedWikiUpdate")
+    expect(combined).toContain("must not auto-write wiki/outlines/main.md")
+    expect(combined).toContain("Fenced markdown update blocks may remain as compatibility/manual staging protocol")
+    expect(combined).toContain("should not rely on fenced blocks as its only protocol")
+    expect(combined).not.toContain("RPG_SCHEMA_SLOTS mutation")
+  })
+
+  it("defines Action Resolver fixed slot semantics without adding interaction logic", () => {
+    const slotSemantics = getRpgActionResolverSlotSemantics()
+    const paths = slotSemantics.map((slot) => slot.path)
+
+    expect(paths).toEqual(expect.arrayContaining([
+      "wiki/current-scene/scene_state.md",
+      "wiki/player/known_information.md",
+      "wiki/outlines/progress.md",
+      "wiki/rules/",
+    ]))
+
+    const combined = JSON.stringify(slotSemantics)
+    expect(combined).toContain("active clocks/countdowns")
+    expect(combined).toContain("pending reactions")
+    expect(combined).toContain("pacing state")
+    expect(combined).toContain("pc_known")
+    expect(combined).toContain("pc_misunderstanding")
+    expect(combined).toContain("branch conditions")
+    expect(combined).toContain("success/failure conditions")
+    expect(combined).toContain("resource costs")
+    expect(combined).toContain("distance")
+    expect(combined).toContain("time")
+    expect(combined).toContain("perception")
+    expect(combined).toContain("stealth")
+    expect(combined).toContain("combat")
+    expect(combined).toContain("investigation")
+  })
+
+  it("defines runtime persistence boundaries outside ordinary wiki categories", () => {
+    const boundary = getRpgRuntimePersistenceBoundaryGuidance().join("\n")
+
+    expect(boundary).toContain(".llm-wiki/runtime/")
+    expect(boundary).toContain("turn record")
+    expect(boundary).toContain("journal")
+    expect(boundary).toContain("pending runtime metadata")
+    expect(boundary).toContain("not an ordinary extractable RPG wiki category")
+    expect(boundary).toContain("not in `wiki/runtime/`")
   })
 
   it("represents dynamic update boundaries from the schema document", () => {
@@ -163,8 +709,13 @@ describe("RPG_WIKI_SCHEMA", () => {
   })
 
   it("defines the fixed schema slots from the schema slot contract", () => {
-    expect(RPG_SCHEMA_SLOTS).toHaveLength(17)
+    expect(RPG_SCHEMA_SLOTS).toHaveLength(22)
     expect(RPG_SCHEMA_SLOTS.map((slot) => [slot.slotId, slot.path])).toEqual([
+      ["world_basic_overview", "wiki/world/basic_overview.md"],
+      ["world_history", "wiki/world/history.md"],
+      ["world_common_sense", "wiki/world/common_sense.md"],
+      ["world_supernatural_presence", "wiki/world/supernatural_presence.md"],
+      ["world_social_structure", "wiki/world/social_structure.md"],
       ["main_outline", "wiki/outlines/main.md"],
       ["outline_progress", "wiki/outlines/progress.md"],
       ["rules_core", "wiki/rules/core.md"],
@@ -183,11 +734,12 @@ describe("RPG_WIKI_SCHEMA", () => {
       ["player_goals", "wiki/player/goals.md"],
       ["player_known_information", "wiki/player/known_information.md"],
     ])
-    expect(getRequiredRpgSchemaSlots()).toHaveLength(17)
+    expect(getRequiredRpgSchemaSlots()).toHaveLength(22)
   })
 
   it("looks up schema slots by id, path, required flag, and owner", () => {
     expect(getRpgSchemaSlot("current_scene")?.path).toBe("wiki/current-scene/scene_state.md")
+    expect(getRpgSchemaSlotByPath("WIKI/WORLD/BASIC_OVERVIEW.MD")?.slotId).toBe("world_basic_overview")
     expect(getRpgSchemaSlotByPath("\\wiki\\outlines\\main.md")?.slotId).toBe("main_outline")
     expect(getRpgSchemaSlotByPath("C:/campaign/wiki/outlines/progress.md")?.slotId).toBe("outline_progress")
     expect(getRpgSchemaSlotByPath("WIKI/PLAYER/ABILITIES.MD")?.slotId).toBe("player_abilities")
@@ -195,6 +747,13 @@ describe("RPG_WIKI_SCHEMA", () => {
     expect(getRpgSchemaSlotsByOwner("runtime").map((slot) => slot.slotId)).toEqual([
       "outline_progress",
       "current_scene",
+    ])
+    expect(getRpgSchemaSlotsByOwner("source_ingest").map((slot) => slot.slotId)).toEqual([
+      "world_basic_overview",
+      "world_history",
+      "world_common_sense",
+      "world_supernatural_presence",
+      "world_social_structure",
     ])
     expect(getRpgSchemaSlotsByOwner("campaign_setup").map((slot) => slot.slotId)).toEqual([
       "player_main",
@@ -243,6 +802,17 @@ describe("RPG_WIKI_SCHEMA", () => {
     expect(isFixedPlayerSlotPath("\\wiki\\player\\known_information.md")).toBe(true)
     expect(isFixedPlayerSlotPath("wiki/player/runtime-state.md")).toBe(false)
     expect(isFixedPlayerSlotPath("wiki/player/custom.md")).toBe(false)
+  })
+
+  it("exposes the fixed world slot path set", () => {
+    expect(RPG_FIXED_WORLD_SLOT_PATHS).toEqual([
+      "wiki/world/basic_overview.md",
+      "wiki/world/history.md",
+      "wiki/world/common_sense.md",
+      "wiki/world/supernatural_presence.md",
+      "wiki/world/social_structure.md",
+    ])
+    expect(getRpgSchemaSlotByPath("wiki/world/supernatural_presence.md")?.slotId).toBe("world_supernatural_presence")
   })
 
   it("defines the D1 quests/player goals/plot-arcs target boundary", () => {
@@ -346,14 +916,19 @@ describe("RPG_WIKI_SCHEMA", () => {
     const policy = getRpgSourceIngestTargetPolicy()
 
     expect(policy.ordinaryTargets).toContain("wiki/sources/")
-    expect(policy.ordinaryTargets).toContain("wiki/world/")
+    expect(policy.ordinaryTargets).toContain("wiki/world/basic_overview.md")
+    expect(policy.ordinaryTargets).toContain("wiki/world/history.md")
+    expect(policy.ordinaryTargets).toContain("wiki/world/common_sense.md")
+    expect(policy.ordinaryTargets).toContain("wiki/world/supernatural_presence.md")
+    expect(policy.ordinaryTargets).toContain("wiki/world/social_structure.md")
     expect(policy.ordinaryTargets).toContain("wiki/characters/")
     expect(policy.ordinaryTargets).toContain("wiki/player/player.md")
     expect(policy.ordinaryTargets).toContain("wiki/player/known_information.md")
     expect(policy.ordinaryTargets).toContain("wiki/relationships/")
     expect(policy.structuralTargets).toEqual(["wiki/index.md", "wiki/overview.md", "wiki/log.md"])
 
-    expect(isRpgSourceIngestAllowedTarget("wiki/world/tide-laws.md")).toBe(true)
+    expect(isRpgSourceIngestAllowedTarget("wiki/world/supernatural_presence.md")).toBe(true)
+    expect(isRpgSourceIngestAllowedTarget("wiki/world/tide-laws.md")).toBe(false)
     expect(isRpgSourceIngestAllowedTarget("wiki/player/player.md")).toBe(true)
     expect(isRpgSourceIngestAllowedTarget("wiki/player/custom-sheet.md")).toBe(false)
     expect(isRpgSourceIngestAllowedTarget("wiki/index.md")).toBe(true)

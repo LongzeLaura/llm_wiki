@@ -46,7 +46,7 @@ export function buildChunkAnalysisSystemPrompt(
     "Output a fenced JSON array of RpgIngestSignal objects. The parser will treat this JSON as authoritative over prose notes.",
     "JSON object fields: kind, optional targetPath, summary, rpUse, evidence, utilityScore, confidence, canonStatus.",
     "Allowed kind values: portrayal_rule, dialogue_style, behavior_boundary, scene_affordance, relationship_tension, plot_pressure, world_constraint, action_hook, state_change, style_rule, noise.",
-    "targetPath is optional, but when present it must be an ordinary Source Ingest target such as wiki/world/tide-laws.md, wiki/characters/mira-vale.md, wiki/plot-arcs/canal-gate-pressure.md, wiki/events/canal-gate-incident.md, or wiki/relationships/mira-iven.md.",
+    "targetPath is optional, but when present it must be an ordinary Source Ingest target such as wiki/world/supernatural_presence.md, wiki/characters/mira-vale.md, wiki/plot-arcs/canal-gate-pressure.md, wiki/events/canal-gate-incident.md, or wiki/relationships/mira-iven.md.",
     "utilityScore rules: 0 noise discard/ignored noise; 1 source/archive value only; 2 weak or uncertain signal for REVIEW or Evidence and Uncertainty; 3 usable source-ingest page content; 4 strong source-ingest signal for Runtime Capsule; 5 hard constraint, high-value portrayal rule, major tension, or key action hook only when it fits an allowed source-ingest page, otherwise REVIEW.",
     "confidence must be high, medium, or low. canonStatus must be canon, inferred_for_play, or uncertain.",
     "For invalid, low-value, metadata, trivia, release/platform, fan-label, navigation, or route-recap noise, emit kind noise with utilityScore 0 or 1 instead of creating runtime-facing targets.",

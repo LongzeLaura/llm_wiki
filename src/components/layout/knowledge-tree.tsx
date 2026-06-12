@@ -10,6 +10,7 @@ import type { FileNode } from "@/types/wiki"
 import { normalizePath } from "@/lib/path-utils"
 import { cascadeDeleteWikiPagesWithRefs } from "@/lib/wiki-page-delete"
 import { inferWikiTypeFromPath, wikiTypeLabel } from "@/lib/wiki-page-types"
+import { parseFrontmatter } from "@/lib/frontmatter"
 
 interface WikiPageInfo {
   path: string
@@ -48,6 +49,12 @@ const HIDDEN_LEGACY_DIRS = new Set([
   "thesis",
   "methodology",
 ])
+
+const PAGE_TYPE_ALIASES: Record<string, string> = {
+  event: "events",
+  quest: "quests",
+  relationship: "relationships",
+}
 
 function typeConfig(type: string): { icon: typeof FileText; label: string; color: string; order: number } {
   return TYPE_CONFIG[type] ?? { icon: FileText, label: wikiTypeLabel(type), color: "text-muted-foreground", order: 99 }
@@ -323,29 +330,29 @@ function RawSourcesSection() {
   )
 }
 
-function parsePageInfo(path: string, fileName: string, content: string): WikiPageInfo {
+export function parsePageInfo(path: string, fileName: string, content: string): WikiPageInfo {
   let type = "other"
   let title = fileName.replace(".md", "").replace(/-/g, " ")
   const tags: string[] = []
   let origin: string | undefined
 
-  // Parse YAML frontmatter
-  const fmMatch = content.match(/^---\n([\s\S]*?)\n---/)
-  if (fmMatch) {
-    const fm = fmMatch[1]
-    const typeMatch = fm.match(/^type:\s*(.+)$/m)
-    if (typeMatch) type = typeMatch[1].trim().toLowerCase()
+  const parsed = parseFrontmatter(content).frontmatter
+  if (parsed) {
+    const parsedType = typeof parsed.type === "string" ? parsed.type.trim().toLowerCase() : ""
+    if (parsedType) type = normalizePageType(parsedType)
 
-    const titleMatch = fm.match(/^title:\s*["']?(.+?)["']?\s*$/m)
-    if (titleMatch) title = titleMatch[1].trim()
+    const parsedTitle = typeof parsed.title === "string" ? parsed.title.trim() : ""
+    if (parsedTitle) title = parsedTitle
 
-    const tagsMatch = fm.match(/^tags:\s*\[(.+?)\]/m)
-    if (tagsMatch) {
-      tags.push(...tagsMatch[1].split(",").map((t) => t.trim().replace(/["']/g, "")))
+    if (Array.isArray(parsed.tags)) {
+      tags.push(...parsed.tags.map((tag) => tag.trim()).filter(Boolean))
+    } else if (typeof parsed.tags === "string" && parsed.tags.trim()) {
+      tags.push(parsed.tags.trim())
     }
 
-    const originMatch = fm.match(/^origin:\s*(.+)$/m)
-    if (originMatch) origin = originMatch[1].trim()
+    if (typeof parsed.origin === "string" && parsed.origin.trim()) {
+      origin = parsed.origin.trim()
+    }
   }
 
   // Fallback: try first heading if no frontmatter title
@@ -360,6 +367,10 @@ function parsePageInfo(path: string, fileName: string, content: string): WikiPag
   }
 
   return { path, title, type, tags, origin }
+}
+
+function normalizePageType(type: string): string {
+  return PAGE_TYPE_ALIASES[type] ?? type
 }
 
 /**

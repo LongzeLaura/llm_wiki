@@ -4,7 +4,7 @@ import { buildRpgMergeSystemPrompt, getRpgMergePolicy } from "./rpg-interactions
 describe("getRpgMergePolicy", () => {
   it.each([
     ["wiki/sources/fate-notes.md", "source-evidence", "sources", 0.7],
-    ["wiki/world/magecraft.md", "stable-operating-model", "world", 0.45],
+    ["wiki/world/supernatural_presence.md", "stable-operating-model", "world", 0.45],
     ["wiki/locations/church.md", "stable-operating-model", "locations", 0.45],
     ["wiki/factions/association.md", "stable-operating-model", "factions", 0.45],
     ["wiki/items/jeweled-sword.md", "stable-operating-model", "items", 0.45],

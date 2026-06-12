@@ -13,13 +13,22 @@ import {
 import * as writePolicy from "@/lib/rpg-runtime/write-policy"
 import type { LlmConfig } from "@/stores/wiki-store"
 import type {
-  RpgNarrationAdapter,
+  RpgActionResolverAdapter,
+  RpgNarrationGeneratorAdapter,
+  RpgOutlineBriefAdapter,
+  RpgRecallSelectorAdapter,
   RpgRuntimeUpdateInteractionAdapter,
+  RpgWorldTickAdapter,
 } from "@/lib/rpg-interactions/runtime"
 import type { RunRpgRuntimeTurnFlowResult } from "@/lib/rpg-runtime/runtime-controller"
 import type { SubmittedAction } from "@/lib/rpg-runtime/types"
 import type { PendingRpgUpdate } from "@/lib/rpg-runtime/update-staging"
 import * as updateStaging from "@/lib/rpg-runtime/update-staging"
+import {
+  sampleRecalledMaterials,
+  sampleTurnNarration,
+  sampleTurnRecordRuntimeParts,
+} from "@/lib/rpg-runtime-test-fixtures"
 
 vi.mock("@/commands/fs", () => ({
   readFile: vi.fn(),
@@ -92,12 +101,28 @@ describe("RpgRuntimePanel", () => {
       text: "Check the glowing sigil before opening the gate.",
       source: "freeform",
     }
-    const narrationAdapter: RpgNarrationAdapter = {
-      generateTurn: vi.fn(),
+    const narrationAdapter: RpgNarrationGeneratorAdapter = {
+      generateNarration: vi.fn(),
+    }
+    const actionResolverAdapter: RpgActionResolverAdapter = {
+      resolveAction: vi.fn(),
     }
     const updateInteractionAdapter: RpgRuntimeUpdateInteractionAdapter = {
       generateUpdateProposal: vi.fn(),
     }
+    const worldTickAdapter: RpgWorldTickAdapter = {
+      advanceWorldTick: vi.fn(),
+    }
+    const recallSelectorAdapter: RpgRecallSelectorAdapter = {
+      selectRecall: vi.fn(),
+    }
+    const outlineBriefCompilerAdapter: RpgOutlineBriefAdapter = {
+      compileOutlineBrief: vi.fn(),
+    }
+    const createActionResolverAdapter = vi.fn(() => actionResolverAdapter)
+    const createWorldTickAdapter = vi.fn(() => worldTickAdapter)
+    const createRecallSelectorAdapter = vi.fn(() => recallSelectorAdapter)
+    const createOutlineBriefCompilerAdapter = vi.fn(() => outlineBriefCompilerAdapter)
     const createNarrationAdapter = vi.fn(() => narrationAdapter)
     const createUpdateInteractionAdapter = vi.fn(() => updateInteractionAdapter)
     const runTurnFlow = vi.fn(async () => sampleRuntimeResult())
@@ -109,6 +134,10 @@ describe("RpgRuntimePanel", () => {
       llmConfig: sampleLlmConfig(),
       submittedAction,
       dependencies: {
+        createActionResolverAdapter,
+        createWorldTickAdapter,
+        createRecallSelectorAdapter,
+        createOutlineBriefCompilerAdapter,
         createNarrationAdapter,
         createUpdateInteractionAdapter,
         runTurnFlow,
@@ -117,6 +146,22 @@ describe("RpgRuntimePanel", () => {
       },
     })
 
+    expect(createActionResolverAdapter).toHaveBeenCalledWith({
+      llmConfig: sampleLlmConfig(),
+      signal: undefined,
+    })
+    expect(createWorldTickAdapter).toHaveBeenCalledWith({
+      llmConfig: sampleLlmConfig(),
+      signal: undefined,
+    })
+    expect(createRecallSelectorAdapter).toHaveBeenCalledWith({
+      llmConfig: sampleLlmConfig(),
+      signal: undefined,
+    })
+    expect(createOutlineBriefCompilerAdapter).toHaveBeenCalledWith({
+      llmConfig: sampleLlmConfig(),
+      signal: undefined,
+    })
     expect(createNarrationAdapter).toHaveBeenCalledWith({
       llmConfig: sampleLlmConfig(),
       signal: undefined,
@@ -129,6 +174,10 @@ describe("RpgRuntimePanel", () => {
       projectPath: "C:/tmp/rpg-project",
       wikiMode: "llmwikirpg",
       submittedAction,
+      actionResolverAdapter,
+      worldTickAdapter,
+      recallSelectorAdapter,
+      outlineBriefCompilerAdapter,
       narrationAdapter,
       updateInteractionAdapter,
       runtimePersistence: {
@@ -222,7 +271,11 @@ describe("RpgRuntimePanel", () => {
         source: "freeform",
       },
       dependencies: {
-        createNarrationAdapter: () => ({ generateTurn: vi.fn() }),
+        createActionResolverAdapter: () => ({ resolveAction: vi.fn() }),
+        createWorldTickAdapter: () => ({ advanceWorldTick: vi.fn() }),
+        createRecallSelectorAdapter: () => ({ selectRecall: vi.fn() }),
+        createOutlineBriefCompilerAdapter: () => ({ compileOutlineBrief: vi.fn() }),
+        createNarrationAdapter: () => ({ generateNarration: vi.fn() }),
         createUpdateInteractionAdapter,
         runTurnFlow: vi.fn(async () => sampleRuntimeResult()),
         appendTurnJournalEntry: vi.fn(async () => undefined),
@@ -245,7 +298,7 @@ describe("RpgRuntimePanel", () => {
     const acceptedSkipped = {
       ...sampleRuntimeResult().pendingUpdates[0],
       id: "update-skipped",
-      targetPath: "wiki/world/stable.md",
+      targetPath: "wiki/world/basic_overview.md",
       status: "accepted",
     } satisfies PendingRpgUpdate
     const pendingEvent = {
@@ -275,7 +328,7 @@ describe("RpgRuntimePanel", () => {
       skippedUpdates: [
         {
           id: "update-skipped",
-          targetPath: "wiki/world/stable.md",
+          targetPath: "wiki/world/basic_overview.md",
           reason: "targetPath is outside allowed runtime write paths.",
         },
       ],
@@ -353,7 +406,7 @@ describe("RpgRuntimePanel", () => {
       skippedUpdates: [
         {
           id: "update-skipped",
-          targetPath: "wiki/world/stable.md",
+          targetPath: "wiki/world/basic_overview.md",
           reason: "targetPath is outside allowed runtime write paths.",
         },
       ],
@@ -427,7 +480,11 @@ describe("RpgRuntimePanel", () => {
           source: "freeform",
         },
         dependencies: {
-          createNarrationAdapter: () => ({ generateTurn: vi.fn() }),
+          createNarrationAdapter: () => ({ generateNarration: vi.fn() }),
+          createActionResolverAdapter: () => ({ resolveAction: vi.fn() }),
+          createWorldTickAdapter: () => ({ advanceWorldTick: vi.fn() }),
+          createRecallSelectorAdapter: () => ({ selectRecall: vi.fn() }),
+          createOutlineBriefCompilerAdapter: () => ({ compileOutlineBrief: vi.fn() }),
           createUpdateInteractionAdapter: () => ({ generateUpdateProposal: vi.fn() }),
           appendTurnJournalEntry: vi.fn(async () => undefined),
           savePendingUpdates: vi.fn(async () => ({ warnings: [] })),
@@ -457,28 +514,22 @@ function sampleRuntimeResult(): RunRpgRuntimeTurnFlowResult {
     text: "Check the glowing sigil before opening the gate.",
     source: "freeform",
   }
+  const recalledMaterials = sampleRecalledMaterials()
+  const runtimeParts = sampleTurnRecordRuntimeParts(submittedAction, { recalledMaterials })
+  const turnNarration = sampleTurnNarration({
+    playerFacingText: "Mira reads the sigil and the lantern key answers with a warm click.",
+  })
 
   return {
-    brief: {
-      submittedAction,
-      currentScene: "Iven and Mira face the canal gate.",
-      playerState: "",
-      hardFacts: [],
-      activeConstraints: [],
-      presentCharacters: [],
-      relationshipTensions: [],
-      activePlotPressure: [],
-      outlineNotes: [],
-      activeQuests: [],
-      relevantLocations: [],
-      relevantFactions: [],
-      relevantItems: [],
-      styleRules: [],
-      ruleNotes: [],
-      memoryNotes: [],
-      forbiddenContradictions: [],
-      references: ["wiki/current-scene/scene_state.md"],
-    },
+    actionResolution: runtimeParts.actionResolution,
+    worldTickResult: runtimeParts.worldTickResult,
+    visibleSelection: runtimeParts.visibleSelection,
+    postActionWorkingState: runtimeParts.postActionWorkingState,
+    recallSelection: runtimeParts.recallSelection,
+    recalledMaterials,
+    outlineAwareNarrationBrief: runtimeParts.outlineAwareNarrationBrief,
+    outlineImpactReport: runtimeParts.outlineImpactReport,
+    turnNarration,
     turnResult: {
       narrative: "Mira reads the sigil and the lantern key answers with a warm click.",
       nextActionOptions: [
@@ -508,8 +559,17 @@ function sampleRuntimeResult(): RunRpgRuntimeTurnFlowResult {
     },
     turnRecord: {
       submittedAction,
+      actionResolution: runtimeParts.actionResolution,
+      worldTickResult: runtimeParts.worldTickResult,
+      visibleSelection: runtimeParts.visibleSelection,
+      postActionWorkingState: runtimeParts.postActionWorkingState,
+      recallSelection: runtimeParts.recallSelection,
+      recalledMaterials,
+      outlineAwareNarrationBrief: runtimeParts.outlineAwareNarrationBrief,
+      outlineImpactReport: runtimeParts.outlineImpactReport,
+      turnNarration,
       generatedNarrative: "Mira reads the sigil and the lantern key answers with a warm click.",
-      references: ["wiki/current-scene/scene_state.md"],
+      references: ["wiki/current-scene/scene_state.md", "wiki/factions/runtime/harbor-watch.md", "wiki/rules/core.md"],
     },
     proposedUpdates: [
       {
@@ -536,6 +596,27 @@ function sampleRuntimeResult(): RunRpgRuntimeTurnFlowResult {
     ],
     warnings: ["Runtime warning sample."],
     proposalSource: "interaction",
+    runtimeUpdateProposal: {
+      proposedWikiUpdates: [],
+      outlineRevisionReviewItems: [],
+      journalEntries: [],
+      skippedDeltas: [],
+      pacingUpdateProposal: null,
+      proposalGroups: [],
+      warnings: [],
+    },
+    runtimeUpdateProposalAudit: {
+      proposedWikiUpdateIds: [],
+      journalEntries: [],
+      skippedDeltas: [],
+      proposalGroups: [],
+      outlineRevisionReviewItems: [],
+      warnings: [],
+    },
+    outlineRevisionReviewItems: [],
+    skippedDeltas: [],
+    pacingUpdateProposal: null,
+    proposalGroups: [],
     runtimeUpdateValidation: {
       acceptedUpdates: [
         {

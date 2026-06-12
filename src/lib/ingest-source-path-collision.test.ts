@@ -126,10 +126,11 @@ describe("autoIngest source summary paths", () => {
     mockStreamChat.mockClear()
     tmp = await createTempProject("same-basename-sources")
 
+    await writeFileRaw(`${tmp.path}/.llm-wiki/project.json`, JSON.stringify({ mode: "llmwikirpg" }))
     await writeFileRaw(`${tmp.path}/purpose.md`, "# Purpose\n\nTrack project config files.\n")
     await writeFileRaw(
       `${tmp.path}/schema.md`,
-      "# Schema\n\nEach source needs its own source summary page.\n",
+      "# Schema\n\nwikiMode: llmwikirpg\n\nEach source needs its own source summary page.\n",
     )
     await writeFileRaw(`${tmp.path}/wiki/index.md`, "# Index\n")
     await writeFileRaw(`${tmp.path}/wiki/overview.md`, "# Overview\n")
@@ -323,7 +324,8 @@ describe("autoIngest source summary paths", () => {
     )
 
     const generationCall = mockStreamChat.mock.calls.find(([, messages]) =>
-      String(messages?.[0]?.content ?? "").includes("Based on the analysis provided, generate wiki files"),
+      String(messages?.[0]?.content ?? "").startsWith("You are an RPG wiki maintainer.") &&
+      String(messages?.[1]?.content ?? "").includes("Long Source Context"),
     )
     expect(generationCall).toBeTruthy()
     const generationPrompt = String(generationCall?.[1]?.[1]?.content ?? "")
@@ -394,9 +396,10 @@ describe("autoIngest source summary paths", () => {
     sourceMarkers = ["project-a config"]
     generationSuffix = [
       "",
-      "---FILE: wiki/concepts/nitrification-inhibition.md---",
+      "---FILE: wiki/world/basic_overview.md---",
       "---",
       'title: "Nitrification inhibition"',
+      'sources: ["project-a/config.yaml"]',
       "---",
       "",
       "# Nitrification inhibition",
@@ -421,12 +424,12 @@ describe("autoIngest source summary paths", () => {
     )
 
     const reviews = useReviewStore.getState().items
-    expect(reviews).toHaveLength(1)
-    expect(reviews[0]).toMatchObject({
+    const followUpReview = reviews.find((review) => review.title === "Research nitrification inhibition signals")
+    expect(followUpReview).toMatchObject({
       type: "suggestion",
       title: "Research nitrification inhibition signals",
     })
-    expect(reviews[0].searchQueries).toEqual([
+    expect(followUpReview?.searchQueries).toEqual([
       "nitrification inhibition early warning wastewater",
       "ammonia oxidation inhibition signals",
       "wastewater nitrification process upset indicators",

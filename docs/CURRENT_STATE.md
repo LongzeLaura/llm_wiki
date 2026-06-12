@@ -1,5 +1,678 @@
 # Current State
 
+## 2026-06-12 - Runtime Review Fixes
+
+- Fixed Recall Selector validation so selected item visibility / knowledge scopes must match the retrieval index entry, selected sections must match their section scope boundary, returned recall budgets cannot exceed the local input budget, selected item / section counts are capped by the input budget, and `fullPage` is rejected when `input.recallPolicy.allowFullPageRead` is false.
+- Fixed World Tick input building so `wiki/events/*.md` pages remain pre-action history constraints in `preActionRefs` but are no longer converted into `ongoingEvents`. First-version `ongoingEvents` now come from `preActionSnapshot.pendingReactions`.
+- Fixed `runtime_update_apply` stage-pending handling so structured RuntimeUpdateProposalResult audit fields (`skippedDeltas`, `outlineRevisionReviewItems`, `journalEntries`, `pacingUpdateProposal`, and `proposalGroups`) are preserved as review / warning audit output while ordinary pending updates still come only from `proposedWikiUpdates`.
+- Updated mock tests to use structured RuntimeUpdateProposalResult JSON instead of legacy `rpg-wiki-update` fenced blocks, and initialized `ingest-source-path-collision` fixtures with explicit `.llm-wiki/project.json` and `wikiMode: llmwikirpg`.
+- Added `.codegraph/` and `.codex/config.toml` to `.gitignore` as local agent artifacts; user files were not deleted.
+- Validation passed: `npx.cmd vitest run src/lib/rpg-recall-selector.test.ts src/lib/rpg-world-tick-contract.test.ts src/lib/rpg-import/runtime-update-apply.test.ts src/lib/ingest-source-path-collision.test.ts` (4 files, 40 tests); `npm.cmd run typecheck`; `npm.cmd run test:mocks` (127 files, 1654 tests).
+- No legacy/default fallback, git commit, or git push was added.
+
+## 2026-06-12 - Final Architecture Runtime Diagram Sync
+
+- Updated `docs/LLMWIKIRPG_FINAL_ARCHITECTURE.md` to reflect the current implemented runtime architecture after the context compiler removal.
+- Verified the current source before editing: `src/lib/rpg-runtime/context-compiler.ts` and `src/lib/rpg-runtime/runtime-agent.ts` are absent; `src/lib/rpg-runtime/index.ts` no longer exports `compileRpgContext()` or `runRpgRuntimePreview()`; `runRpgTurn()` now uses module-specific input builders and handoffs through action resolver, world tick, recall selector, outline brief, optional story outline regenerator, narration generator, and runtime update proposal.
+- Replaced the old architecture diagram's centralized Context Compiler / CompactStoryBrief path with the actual module-specific runtime chain and `.llm-wiki/runtime` metadata / pending-review path.
+- Cleaned stale final-architecture wording that described a remaining `legacy_compact_brief_builder`; the active architecture now records that the main runtime path does not keep a centralized total brief.
+- Validation was documentation-focused: `rg --encoding utf-8` checks were run for `legacy_context_compiler`, `legacy_compact`, `CompactStoryBrief`, `context_compiler`, `Context Compiler`, `上下文编译器`, `compileRpgContext`, and `runRpgRuntimePreview` across the final architecture doc and relevant runtime source. The final architecture doc no longer contains the removed compiler / compact-brief names; the only source-side `context_compiler` residue found is the inactive stage type union entry in `src/lib/rpg-interactions/registry.ts`.
+- Documentation-only update; no source code, runtime behavior, schema constants, tests, or git state was changed.
+- No `git commit` or `git push` was performed.
+
+## 2026-06-12 - Runtime Context Compiler Removal Plan Stage G
+
+- Completed `docs/RPG_RUNTIME_CONTEXT_COMPILER_REMOVAL_PLAN.md` stage G only.
+- Updated `src/lib/rpg-runtime/turn-orchestrator.ts` so formal `runRpgTurn()` no longer calls `runRpgRuntimePreview()` or `compileRpgContext()` at any point in the turn. The flow now remains `submittedAction -> buildActionResolverInputFromWiki() -> action_resolver -> buildWorldTickInputFromWiki() -> world_tick -> buildPostActionWorkingState() -> buildRecallSelectorInputFromTurnStateAndWiki() -> recall_selector -> createRecallSelectorHandoff() -> buildOutlineBriefInputFromTurnStateAndWiki() -> outline_brief -> optional story_outline_regenerator -> buildNarrationGeneratorInputFromHandoffs() -> narration_generator -> turnRecord`.
+- Removed `RunRpgTurnResult.brief` and the old `buildActionResolverInputFromBrief()`, `buildWorldTickInputFromBrief()`, and `buildNarrationGeneratorInputFromTurnState({ brief })` helpers from `turn-orchestrator.ts`.
+- Updated `src/lib/rpg-runtime/runtime-controller.ts` so `RunRpgRuntimeTurnFlowResult` no longer exposes `brief`; runtime update proposal still builds from `turn.turnRecord`.
+- Removed shared preview/compiler types from `src/lib/rpg-runtime/types.ts` and stopped exporting preview/compiler from `src/lib/rpg-runtime/index.ts`.
+- Deleted `src/lib/rpg-runtime/context-compiler.ts` and `src/lib/rpg-runtime/runtime-agent.ts`; the legacy preview/context compiler is not retained as a debug helper.
+- Updated `src/lib/rpg-runtime/recall-selector-handoff.ts` so the lightweight turn-state retrieval helper no longer accepts or indexes a compact brief.
+- Updated tests to remove `result.brief` assertions and to prove the formal turn/controller result surface no longer contains a brief. `src/lib/rpg-runtime.test.ts` now checks the removed preview/compiler entry points are absent from the public runtime API.
+- Validation passed: `npx.cmd vitest run src/lib/rpg-turn-orchestrator.test.ts src/lib/rpg-runtime-controller.test.ts src/lib/rpg-outline-brief.test.ts src/lib/rpg-narration-generator.test.ts src/lib/rpg-recall-selector-handoff.test.ts src/lib/rpg-story-outline-regenerator.test.ts src/lib/rpg-runtime-update-proposal.test.ts` (7 files, 102 tests); `npm.cmd run typecheck`; `npx.cmd vitest run src/components/rpg/rpg-runtime-panel.test.tsx` (1 file, 15 tests).
+- Validation grep passed with no matches: `rg --encoding utf-8 "runRpgRuntimePreview\\(|compileRpgContext\\(|CompactStoryBrief|buildActionResolverInputFromBrief\\(|buildWorldTickInputFromBrief\\(|buildNarrationGeneratorInputFromTurnState\\(" src/lib/rpg-runtime src/lib/rpg-turn-orchestrator.test.ts src/lib/rpg-runtime-controller.test.ts`.
+- Not done in this stage: no `runtime_update_proposal` split; no `wiki/runtime/`; no legacy/default compatibility or fallback; no pending/review/apply bypass; no runtime update proposal rewrite from single narration text; no git commit or push.
+
+## 2026-06-12 - Runtime Context Compiler Removal Plan Stages E-F
+
+- Completed `docs/RPG_RUNTIME_CONTEXT_COMPILER_REMOVAL_PLAN.md` stages E and F only.
+- Added `src/lib/rpg-runtime/outline-brief-input-builder.ts` with `buildOutlineBriefInputFromTurnStateAndWiki()`. It builds `OutlineBriefCompilerInput` from turn state, recall handoff, controlled `wiki/outlines/main.md` slices, controlled `wiki/outlines/progress.md` slices, `wiki/plot-arcs/*.md`, `wiki/plot-arcs/runtime/*.md`, `wiki/relationships/runtime/*.md`, and fixed `wiki/rules/*.md`.
+- Updated `src/lib/rpg-runtime/outline-brief-handoff.ts` so `relationships/runtime` can contribute relationship tension fuel to `plotArcTensionFuel`.
+- Added `src/lib/rpg-runtime/narration-input-builder.ts` with `buildNarrationGeneratorInputFromHandoffs()`. It builds `NarrationGeneratorInput` from handoffs plus dedicated reads of `wiki/style/narration.md`, `wiki/style/dialogue.md`, `wiki/style/forbidden.md`, `wiki/memory/player-preferences.md`, fixed `wiki/rules/*.md`, and `wiki/player/known_information.md`.
+- Updated `src/lib/rpg-runtime/turn-orchestrator.ts` so `runRpgTurn()` now reaches `action_resolver`, `world_tick`, `recall_selector`, `outline_brief`, and `narration_generator` without using `CompactStoryBrief`, `runRpgRuntimePreview()`, or `compileRpgContext()` as input.
+- `runRpgRuntimePreview()` / `legacy_context_compiler_v0` is now called only after narration generation, solely to preserve the temporary `RunRpgTurnResult.brief` / runtime controller result surface until stage G.
+- `buildOutlineBriefCompilerInputFromTurnState()` and `buildNarrationGeneratorInputFromTurnState({ brief })` remain as legacy helper / classification compatibility code for now, but are not production `runRpgTurn()` dependencies.
+- Added focused coverage in `src/lib/rpg-outline-brief.test.ts` for direct wiki-built Outline Brief input, including turn state, recall handoff, controlled outline/progress slices, plot-arc base/runtime fuel, relationship runtime fuel, hard constraints, known references, and runtime refs.
+- Added focused coverage in `src/lib/rpg-narration-generator.test.ts` for direct wiki-built Narration input, including handoffs, style bundle, forbidden constraints, player knowledge boundary, references, and runtime refs.
+- Added orchestrator coverage proving outline brief and narration run before the legacy preview by mutating fixture wiki files inside the narration adapter and confirming only the later legacy brief sees the mutation.
+- Validation passed: `npx.cmd vitest run src/lib/rpg-turn-orchestrator.test.ts src/lib/rpg-runtime-controller.test.ts src/lib/rpg-outline-brief.test.ts src/lib/rpg-narration-generator.test.ts src/lib/rpg-recall-selector-handoff.test.ts src/lib/rpg-story-outline-regenerator.test.ts` (6 files, 83 tests); `npm.cmd run typecheck`.
+- Not done in this stage: no `runtime_update_proposal`拆分；no stage G final deletion; no full `CompactStoryBrief` / `compileRpgContext()` / `runRpgRuntimePreview()` deletion; no `wiki/runtime/`; no legacy/default compatibility or fallback; no git commit or push.
+
+## 2026-06-12 - Runtime Context Compiler Removal Plan Stages C-D
+
+- Completed `docs/RPG_RUNTIME_CONTEXT_COMPILER_REMOVAL_PLAN.md` stages C and D only.
+- Added `src/lib/rpg-runtime/world-tick-input-builder.ts` with `buildWorldTickInputFromWiki()`. It builds `WorldTickInput` from `ActionResolution`, the action resolver `preActionSnapshot`, `wiki/current-scene/scene_state.md`, recent `wiki/events/*.md`, `relationships/runtime`, `plot-arcs/runtime`, `quests`, affected `characters/locations/factions/items` base + runtime overlays, `wiki/outlines/progress.md`, and fixed `wiki/rules/*.md`.
+- Added `src/lib/rpg-runtime/recall-selector-input-builder.ts` with `buildRecallSelectorInputFromTurnStateAndWiki()`. It builds `RecallSelectorInput` and retrieval index from `PostActionWorkingState`, `ActionResolution`, `WorldTickResult`, `WorldTickVisibleSelection`, current scene, affected paths, relevant events, source provenance refs, related base/runtime overlays, quests, and outline progress.
+- Updated `src/lib/rpg-runtime/turn-orchestrator.ts` so `runRpgTurn()` now reaches `action_resolver`, `world_tick`, and `recall_selector` without going through `CompactStoryBrief`, `runRpgRuntimePreview()`, or `compileRpgContext()`.
+- `runRpgRuntimePreview()` / `legacy_context_compiler_v0` is now called only after `recall_selector` and `createRecallSelectorHandoff()`. It remains temporarily for not-yet-migrated downstream legacy brief consumers, especially narration style/forbidden helpers and the temporary `RunRpgTurnResult.brief` surface.
+- `buildWorldTickInputFromBrief()` and `buildRecallSelectorInputFromTurnState({ brief })` remain as old helper definitions / legacy tests for now, but are not production `runRpgTurn()` dependencies.
+- Added focused coverage in `src/lib/rpg-world-tick-contract.test.ts` for direct wiki-built `WorldTickInput`, including action resolution, pre-action scene, current-scene clocks / pending reactions / pacing, event history constraints, relationships/runtime, plot-arcs/runtime, quests, affected runtime overlays, outline progress, rules constraints, and references.
+- Added focused coverage in `src/lib/rpg-recall-selector-handoff.test.ts` for wiki-built recall selector input and retrieval index, including current scene, affected paths, relevant events, source provenance refs, relevant base/runtime overlays, quests, and outline progress.
+- Added orchestrator coverage proving `world_tick` and `recall_selector` run before the legacy preview by mutating fixture wiki files inside the recall adapter and confirming only the later legacy brief sees the mutation.
+- Validation passed: `npx.cmd vitest run src/lib/rpg-turn-orchestrator.test.ts src/lib/rpg-runtime-controller.test.ts src/lib/rpg-world-tick-contract.test.ts src/lib/rpg-world-tick-interaction.test.ts src/lib/rpg-world-tick-working-state.test.ts src/lib/rpg-recall-selector.test.ts src/lib/rpg-recall-selector-handoff.test.ts` (7 files, 73 tests); `npm.cmd run typecheck`.
+- Not done in this stage: no `outline_brief`, `narration_generator`, `runtime_update_proposal`, or final `CompactStoryBrief` deletion; no `wiki/runtime/`; no legacy/default compatibility or fallback; no git commit or push.
+
+## 2026-06-12 - Runtime Context Compiler Removal Plan Stages A-B
+
+- Completed `docs/RPG_RUNTIME_CONTEXT_COMPILER_REMOVAL_PLAN.md` stages A and B only.
+- Updated `docs/RPG_WIKI_SCHEMA.md` so the directory matrix and phase/module information-flow matrix no longer list `context_compiler` as a target runtime module. The current old implementation is named `legacy_context_compiler_v0` / `legacy_compact_brief_builder` and documented as a removable transition layer, not a future `Context Compiler v1`.
+- Updated `docs/LLMWIKIRPG_FINAL_ARCHITECTURE.md` so the target runtime flow starts with an action resolver-specific input builder, and so future work is framed as module-specific input builders / runtime handoff readers rather than a centralized context compiler.
+- `docs/LLMWIKIRPG_NEXT_ARCHITECTURE_STEPS.md` was not updated because that current-path file is absent in this worktree; only `docs/archive/LLMWIKIRPG_NEXT_ARCHITECTURE_STEPS.md` exists.
+- Added `src/lib/rpg-runtime/wiki-readers.ts` to hold small reusable deterministic wiki reader helpers: safe slot reads, markdown directory reads, base/runtime overlay grouping, token scoring, section-aware excerpts, references, and compaction.
+- Added `src/lib/rpg-runtime/action-resolver-input-builder.ts` with `buildActionResolverInputFromWiki()`. It builds `ActionResolverInput` directly from `wiki/current-scene/scene_state.md`, fixed `wiki/player/*.md`, fixed `wiki/rules/*.md`, relevant `characters/locations/items/factions` base + runtime overlay pages, `wiki/quests/*.md`, and references.
+- Updated `src/lib/rpg-runtime/turn-orchestrator.ts` so `runRpgTurn()` calls `buildActionResolverInputFromWiki()` and `action_resolver` before any `runRpgRuntimePreview()` / `compileRpgContext()` path.
+- Downstream modules still temporarily receive `preview.brief` after action resolution. This is recorded in code warnings as a TODO for `legacy_context_compiler_v0`; `RunRpgTurnResult.brief` remains for the not-yet-migrated downstream flow.
+- `buildActionResolverInputFromBrief()` is no longer called from `src/lib`; it remains only as a legacy helper definition for now.
+- Added focused coverage in `src/lib/rpg-action-resolver.test.ts` for building `ActionResolverInput` from real wiki fixture files, including current scene, player state, abilities, inventory, goals, known information, rules, entity/runtime overlay excerpts, quests, and references.
+- Added focused coverage in `src/lib/rpg-turn-orchestrator.test.ts` proving action resolver input is built before the post-action legacy preview path.
+- Validation passed: `npx.cmd vitest run src/lib/rpg-action-resolver.test.ts src/lib/rpg-turn-orchestrator.test.ts src/lib/rpg-runtime-controller.test.ts` (3 files, 45 tests); `npm.cmd run typecheck`.
+- Not done in this stage: no `world_tick`, `recall_selector`, `outline_brief`, `narration_generator`, or `runtime_update_proposal` input-builder removal; no full `CompactStoryBrief` deletion; no `wiki/runtime/`; no legacy/default compatibility or fallback; no git commit or push.
+
+## 2026-06-12 - Runtime Context Compiler Removal Plan
+
+- Added `docs/RPG_RUNTIME_CONTEXT_COMPILER_REMOVAL_PLAN.md` to document the plan for removing the centralized `compileRpgContext() -> CompactStoryBrief` dependency from the formal runtime turn flow.
+- The plan records that the current implementation still truly uses `compileRpgContext()` via `runRpgRuntimePreview()` and `runRpgTurn()`, but that this v0 total-brief layer conflicts with the target runtime architecture.
+- The target architecture has `action_resolver`, `world_tick`, `recall_selector`, `outline_brief`, `story_outline_regenerator`, `narration_generator`, and `runtime_update_proposal` consume their own module-specific input builders / handoffs instead of a shared `CompactStoryBrief`.
+- Clarified that `story_outline_regenerator` does not directly consume `CompactStoryBrief`, but remains indirectly affected while `outline_brief` and its upstream handoff chain still derive from the old total-brief path.
+- The plan breaks the removal into staged work from documentation cleanup through action resolver, world tick, recall, outline brief, narration, and final `CompactStoryBrief` deletion.
+- This was documentation-only. No source code, runtime behavior, schema constants, UI behavior, writer/apply behavior, tests, or git state was changed.
+- No `git commit` or `git push` was performed.
+
+## 2026-06-11 - RPG Schema Phase Information Flow Matrix
+
+- Added a separate `阶段 / 模块信息流矩阵` table to `docs/RPG_WIKI_SCHEMA.md` after the directory read/write matrix.
+- The new table describes each phase/module's information inputs, outputs, and boundaries; section/file/field granularity is folded directly into the input and output columns instead of living in a standalone column.
+- Covered `source_ingest`, `control_doc_import`, `campaign_setup_import`, `manual_or_review`, `post_ingest_derivation`, `context_compiler`, `recall_selector`, `action_resolver`, `world_tick`, `outline_brief`, `story_outline_regenerator`, `narration_generator`, `runtime_update_proposal`, and `runtime_update_apply`.
+- Section-level examples now name concrete landing areas inside input/output flow descriptions, such as character `## 核心定位` / `## 当前状态`, outline `## Runtime Capsule` / `## Act Structure`, current-scene active clocks / pending reactions / pacing state, player fixed slots, event confirmed-happened fields, runtime overlay state, non-wiki handoff outputs, and proposal metadata.
+- This was documentation-only. No source code, runtime behavior, schema constants, UI behavior, writer/apply behavior, tests, or git state was changed.
+- No `git commit` or `git push` was performed.
+
+## 2026-06-11 - RPG Schema Directory Read/Write Matrix Cleanup
+
+- Updated `docs/RPG_WIKI_SCHEMA.md` to replace the old runtime type / LLM-step contract block with a directory-level phase read/write matrix.
+- The new matrix names which phases may modify each persistent `wiki/` directory and which runtime modules may read it, including `context_compiler`, `recall_selector`, `action_resolver`, `world_tick`, `outline_brief`, `story_outline_regenerator`, `narration_generator`, `runtime_update_proposal`, and `runtime_update_apply`.
+- Removed `Runtime Schema Spine / 运行时共享契约` from the schema document because runtime-only field enums, JSON contracts, and LLM-step type shapes belong in runtime / interaction docs or code types, not in the directory schema.
+- Reconfirmed that runtime intermediate artifacts, turn records, runtime journals, pending metadata, and `.llm-wiki/runtime/` are not ordinary `wiki/runtime/` pages and cannot be ordinary ingest targets.
+- This was documentation-only. No source code, runtime behavior, schema constants, UI behavior, writer/apply behavior, tests, or git state was changed.
+- No `git commit` or `git push` was performed.
+
+## 2026-06-11 - Fixed World Slot Directory Contract
+
+- Converted `wiki/world/` from an open ordinary-ingest directory into a fixed five-slot directory contract.
+- Fixed world slots are now `wiki/world/basic_overview.md`, `wiki/world/history.md`, `wiki/world/common_sense.md`, `wiki/world/supernatural_presence.md`, and `wiki/world/social_structure.md`.
+- `RPG_SCHEMA_SLOTS` now includes the five world slots with `owner: source_ingest`, `importPolicy: ordinary_ingest`, and merge write policy; fixed slot count is now 22.
+- Ordinary Source Ingest target policy now allows only the five fixed world slot paths under `wiki/world/`; arbitrary targets like `wiki/world/tide-laws.md` are rejected.
+- New llmWikiRPG project creation now writes starter files for the five fixed world slots, and project-mode schema text documents that `world/` is fixed-slot, not free-form.
+- Source-ingest prompt guidance, extraction validation messages, fixtures, and tests were updated to route world material into fixed slots.
+- Updated `docs/RPG_WIKI_SCHEMA.md` so the import/apply contract, fixed slot table, and `world/` directory section describe the fixed slot model.
+- Validation passed: `npx.cmd vitest run src/lib/rpg-wiki-schema.test.ts src/lib/ingest.prompt.test.ts src/lib/ingest.scenarios.test.ts src/lib/rpg-import/source-ingest.test.ts src/lib/rpg-smoke.test.ts src/lib/rpg-interactions.test.ts src/components/rpg/rpg-runtime-panel.test.tsx src/components/rpg/pending-rpg-updates-panel.test.tsx` (8 files, 149 tests); `npm.cmd run typecheck`; `cargo test create_project_writes` from `src-tauri` (2 tests, with existing warnings only).
+- No `git commit` or `git push` was performed.
+
+## 2026-06-11 - Campaign Setup Player Subslot Import Options
+
+- Added deterministic campaign setup import targets for the four fixed player subslots: `player_abilities`, `player_inventory`, `player_goals`, and `player_known_information`.
+- The campaign setup UI now exposes Player Abilities, Player Inventory, Player Goals, and Player Known Information alongside Player Profile, Current Scene, Prologue Event, Main Quest, Quest, and Player Relationship.
+- New subslot imports write directly to `wiki/player/abilities.md`, `wiki/player/inventory.md`, `wiki/player/goals.md`, and `wiki/player/known_information.md` with merge policy and campaign bootstrap metadata.
+- `Player Profile` remains scoped to `wiki/player/player.md`; it still does not automatically split one full profile into the four subslot files.
+- `campaign_setup_import` still does not use an LLM by default; this change only adds explicit, user-selectable deterministic import targets.
+- Validation passed: `npx.cmd vitest run src/lib/rpg-import/campaign-setup-import.test.ts src/lib/rpg-import/ui-import-options.test.ts src/lib/rpg-interactions.test.ts` (3 files, 64 tests); `npm.cmd run typecheck`.
+- No `git commit` or `git push` was performed.
+
+## 2026-06-11 - Campaign Setup Starter Schema Guidance
+
+- Expanded new-project starter templates for the campaign setup-facing fixed slots so blank pages explain what users should import instead of showing only sparse `Runtime Capsule` comments.
+- `wiki/player/player.md` now includes a visible `Campaign Setup Import Shape`, recommended player-profile headings, fixed player slot mapping, and boundaries for NPC profiles, rules, and GM-only future plans.
+- `wiki/player/abilities.md`, `wiki/player/inventory.md`, `wiki/player/goals.md`, and `wiki/player/known_information.md` now include recommended source headings and `Do Not Put Here` boundaries.
+- `wiki/current-scene/scene_state.md` now explains the opening-scene source shape, overwrite-only snapshot semantics, and what must stay in events, outlines/plot-arcs, characters, memory, or rules instead.
+- The import pipeline was not changed: `campaign_setup_import` remains deterministic and does not ask an LLM to split or rewrite imported files by default.
+- Added Rust coverage for new-project starter guidance content.
+- Validation passed: `cargo test create_project_writes` from `src-tauri`; `npm.cmd run typecheck`; `cargo fmt` completed with the existing path canonicalization warning.
+- No `git commit` or `git push` was performed.
+
+## 2026-06-11 - Knowledge Tree Campaign Setup Type Grouping Fix
+
+- Fixed a UI-only Knowledge Tree grouping bug where campaign setup pages with quoted YAML frontmatter such as `type: "player"` or `type: "current-scene"` were displayed under quoted pseudo-folders like `"player"` instead of the canonical RPG groups.
+- `KnowledgeTree` now reuses the existing YAML frontmatter parser instead of regex-reading raw `type:` values, so quoted YAML strings are unquoted before grouping.
+- Added Knowledge Tree type aliases for deterministic campaign setup content types: `event -> events`, `quest -> quests`, and `relationship -> relationships`.
+- This does not change campaign setup write paths or disk layout; `campaign_setup_import` still writes `wiki/player/player.md`, `wiki/current-scene/scene_state.md`, `wiki/events/prologue.md`, `wiki/quests/*.md`, and `wiki/relationships/*.md`.
+- Validation passed: `npx.cmd vitest run src/components/layout/knowledge-tree.test.ts src/lib/wiki-page-types.test.ts src/lib/rpg-import/campaign-setup-import.test.ts` (3 files, 21 tests); `npm.cmd run typecheck`.
+- No `git commit` or `git push` was performed.
+
+## 2026-06-11 - Final Architecture Diagram Status Labels
+
+- Updated the architecture diagram in `docs/LLMWIKIRPG_FINAL_ARCHITECTURE.md` to explicitly mark implemented / connected / not connected / missing areas.
+- Added a status legend and node-level labels for Campaign Setup, Control Doc import, Source Ingest, Merge, Runtime turn flow, Story Outline Regenerator, Relationship/Tension Deriver, Context Compiler v1 boundary work, and Project Audit / Evaluation.
+- The diagram now marks Story Outline Regenerator as code-present but not wired into the default UI path, Relationship/Tension Deriver as implemented but not connected to the product loop, Context Compiler v1 boundaries as needing refinement, and Project Audit / real-model long-turn evaluation as not implemented.
+- This was documentation-only. No source code, runtime behavior, tests, schema constants, UI behavior, writer/apply behavior, or git state was changed.
+- No `git commit` or `git push` was performed.
+
+## 2026-06-11 - Final Architecture Diagram Expanded
+
+- Updated `docs/LLMWIKIRPG_FINAL_ARCHITECTURE.md` architecture diagram so it no longer shows only setup + runtime.
+- The diagram now includes Campaign Setup, Control Doc import, Source Ingest, Merge / wiki write layer, Runtime turn flow, shared Review / pending queue, Markdown RPG Wiki, runtime persistence/audit state, and search/graph/vector retrieval.
+- Clarified in the diagram that `SubmittedAction` is inside the runtime turn loop, while accepted review/apply writes feed back into Markdown Wiki and then into later context compilation.
+- This was documentation-only. No source code, runtime behavior, tests, schema constants, UI behavior, writer/apply behavior, or git state was changed.
+- No `git commit` or `git push` was performed.
+
+## 2026-06-11 - Runtime Update Proposal Structured JSON Cleanup
+
+- Completed a small runtime update proposal cleanup that removes the old fenced `rpg-wiki-update` compatibility fallback from `runtimeUpdateInteractionSpec.parseOutput()`.
+- Runtime Update Proposal now accepts only structured `RuntimeUpdateProposalResult` JSON (bare JSON or fenced JSON handled by the structured JSON parser). Empty output is no longer a no-op; it fails JSON parsing / validation.
+- `RuntimeUpdateInteractionResult` no longer exposes a parser-level `proposedUpdates` alias. The canonical proposal field is `proposedWikiUpdates`, and JSON containing the old `proposedUpdates` alias is rejected.
+- `runtimeUpdateInteractionSpec.buildPrompt()` and `parseOutput()` now require a complete `RuntimeUpdateProposalInput`; the turn-record handoff builder remains centralized in `src/lib/rpg-runtime/runtime-update-proposal-handoff.ts`.
+- `runRpgRuntimeTurnFlow()` derives validation, pending updates, journal persistence, and the outer `RunRpgRuntimeTurnFlowResult.proposedUpdates` field from `runtimeUpdateProposal.proposedWikiUpdates`. The outer `proposedUpdates` field remains only as controller result surface, not as a parser alias.
+- `runtime_update_apply` was minimally adjusted to call the proposal parser with `buildRuntimeUpdateProposalInputFromTurnRecord()` when staging from structured proposal text; pending/apply/write policy core behavior was not removed or refactored.
+- Validation passed: `npx.cmd vitest run src/lib/rpg-runtime-update-proposal.test.ts src/lib/rpg-runtime-controller.test.ts src/lib/rpg-interactions.test.ts` (3 files, 81 tests); `npm.cmd run typecheck`.
+- No `git commit` or `git push` was performed.
+
+## 2026-06-11 - LLM 6 Runtime Update Proposal Validator + Orchestrator Stage
+
+- Completed **RPG Runtime LLM 6 / Runtime Update Proposal 阶段 4：Validator + Pending Staging** and **阶段 5：Orchestrator 接入**.
+- Strengthened `validateRuntimeUpdateProposalResult()` so structured `RuntimeUpdateProposalResult` validation now checks source-delta support for `lineTarget`, `visibility`, `knowledgeScope`, `happenedStatus`, affected target paths, `pacingUpdateProposal.sourceDeltaIds`, and `proposalGroups` update / skipped / source references.
+- `wiki/events/*.md` proposals now require `confirmed_happened` source deltas, not only a confirmed top-level update flag.
+- `wiki/player/known_information.md` proposals now require PC-known or PC-misunderstanding source deltas and reject `parallelLineText` / `user_visible_pc_unknown` / user-only material as automatic PC knowledge.
+- Runtime overlay proposals now require at least one source delta whose `affectedPaths` names the target overlay path.
+- Added deterministic `buildRuntimeUpdateProposalInputFromTurnRecord()` in `src/lib/rpg-runtime/runtime-update-proposal-handoff.ts`; `runRpgRuntimeTurnFlow()` now builds `RuntimeUpdateProposalInput` before calling `runtime_update_proposal`.
+- The main runtime flow now carries structured proposal audit data in controller result and runtime journal summary: `skippedDeltas`, `proposalGroups`, `pacingUpdateProposal`, `outlineRevisionReviewItems`, proposal journal entries, and warnings.
+- Ordinary pending updates still come only from validated `proposedWikiUpdates`; `SkippedRuntimeDelta` and `outlineRevisionReviewItems` do not enter ordinary pending updates or ordinary apply.
+- Superseded by the structured JSON cleanup above: runtime update proposal parsing no longer accepts old fenced `rpg-wiki-update` output or empty-output no-ops.
+- Validation passed: `npx.cmd vitest run src/lib/rpg-runtime-update-proposal.test.ts src/lib/rpg-runtime-controller.test.ts src/lib/rpg-runtime-persistence.test.ts src/lib/rpg-import/runtime-update-apply.test.ts src/lib/rpg-interactions.test.ts src/lib/rpg-wiki-schema.test.ts` (6 files, 124 tests); `npm.cmd run typecheck`; UTF-8 `rg` boundary check for `buildRuntimeUpdateProposalInputFromTurnRecord|RuntimeUpdateProposalInput|RuntimeUpdateProposalResult|runtime_update_proposal|sourceDeltas|proposalGroups|SkippedRuntimeDelta|outlineRevisionReviewItems|wiki/outlines/main.md|user_visible_pc_unknown|attempted_not_confirmed`.
+- Still not changed: writer/apply behavior, UI, `RPG_SCHEMA_SLOTS`, ordinary `wiki/runtime` category, automatic `wiki/outlines/main.md` write, automatic apply, git commit, or git push.
+
+## 2026-06-11 - LLM 6 Runtime Update Proposal Types + Interaction Contract Stage
+
+- Completed **RPG Runtime LLM 6 / Runtime Update Proposal 阶段 2：Runtime Types + JSON Contract** and **阶段 3：Interaction Spec 改造** only.
+- Added runtime-only LLM 6 types in `src/lib/rpg-runtime/types.ts`: `RuntimeUpdateProposalInput`, `RuntimeUpdateProposalResult`, `RuntimeProposedWikiUpdate`, `RuntimeUpdateSourceDelta`, `SkippedRuntimeDelta`, `PacingUpdateProposal`, `ProposalGroup`, `OutlineRevisionReviewItem`, minimal `RuntimeUpdateConsistencyValidation`, and allowed target / write policy / review policy helper shapes.
+- Added `src/lib/rpg-interactions/runtime/runtime-update-proposal-validation.ts` for bare JSON and fenced JSON parsing plus structure/boundary validation. The validator checks required result fields, ordinary update metadata, source deltas, target policy, confirmed-event boundaries, PC knowledge boundaries, and outline-revision separation; it does not create pending updates or apply writes.
+- Upgraded `runtimeUpdateInteractionSpec` to `runtime_update_proposal`. The prompt now prioritizes structured fact sources: `PostActionWorkingState`, `ActionResolution`, `WorldTickResult`, `WorldTickVisibleSelection`, `TurnNarration`, consistency validation, recall handoff, and outline handoff. `generatedNarrative` / `playerFacingText` are evidence/display material, not the only fact source.
+- Prompt boundaries now state that `parallelLineText` / `user_visible_pc_unknown` cannot automatically update `wiki/player/known_information.md`, `nextActionOptions` are candidate future actions, `attempted_not_confirmed` cannot enter confirmed `events`, and `outlineRevisionProposal` can only become independent `outlineRevisionReviewItems`.
+- Added structured fixture and LLM proposal adapters that run through `runtimeUpdateInteractionSpec.buildPrompt()` and `parseOutput()`. Existing raw-string runtime update adapter remains available for the current controller path.
+- Registered/exported `runtime_update_proposal` and added focused tests in `src/lib/rpg-runtime-update-proposal.test.ts`; updated `src/lib/rpg-interactions.test.ts` for the new kind and prompt contract.
+- Updated `docs/RPG_RUNTIME_TURN_19_STEP_SIX_INTERACTION_FLOW.md` to mark LLM 6 stages 2 and 3 `[已完成]`; stages 4 and 5 remain `[待实现]`.
+- Validation passed: `npm.cmd run typecheck`; `npx.cmd vitest run src/lib/rpg-runtime-update-proposal.test.ts src/lib/rpg-interactions.test.ts src/lib/rpg-wiki-schema.test.ts`.
+- Still not implemented or changed: runtime update validator / pending staging / apply strengthening, `runRpgTurn` / `runRpgRuntimeTurnFlow` orchestrator integration, writer/apply behavior, UI, `RPG_SCHEMA_SLOTS`, ordinary `wiki/runtime` category, ordinary wiki/runtime category registry, automatic `wiki/outlines/main.md` write, or legacy/default compatibility.
+- No `git commit` or `git push` was performed.
+
+## 2026-06-11 - LLM 6 Runtime Update Proposal Schema Guidance Stage
+
+- Completed **RPG Runtime LLM 6 / Runtime Update Proposal 阶段 1：Schema Guidance** only.
+- Updated `docs/RPG_WIKI_SCHEMA.md` with Runtime Update Proposal guidance for `RuntimeUpdateProposalInput`, `RuntimeUpdateProposalResult`, enhanced `ProposedWikiUpdate`, `sourceDeltas`, `lineTarget`, `visibility`, `knowledgeScope`, `happenedStatus`, `confidence`, `validationHints`, `SkippedRuntimeDelta`, `PacingUpdateProposal`, `ProposalGroup`, and `OutlineRevisionReviewItem`.
+- Clarified that structured turn deltas and source deltas should be the primary fact boundary; `generatedNarrative` and `playerFacingText` are evidence/display material, not the only fact source.
+- Clarified that `parallelLineText` / `user_visible_pc_unknown` cannot automatically enter PC knowledge, `nextActionOptions` are not facts, and `attempted_not_confirmed` cannot enter confirmed `events`.
+- Clarified that `outlineRevisionProposal` can only become an independent review item, cannot mix into ordinary `ProposedWikiUpdate`, and cannot auto-write `wiki/outlines/main.md`.
+- Clarified that fenced markdown update blocks may remain as compatibility/manual staging protocol but should not be the new main runtime flow's only protocol.
+- Added code-readable guidance constants and getters in `src/lib/rpg-wiki-schema.ts`, including `RPG_RUNTIME_UPDATE_PROPOSAL_INPUT_SCHEMA`, `RPG_RUNTIME_UPDATE_PROPOSAL_RESULT_SCHEMA`, `RPG_PROPOSED_WIKI_UPDATE_RUNTIME_FIELDS`, `RPG_RUNTIME_UPDATE_SOURCE_DELTA_FIELDS`, `RPG_SKIPPED_RUNTIME_DELTA_FIELDS`, `RPG_PACING_UPDATE_PROPOSAL_FIELDS`, `RPG_PROPOSAL_GROUP_FIELDS`, `RPG_OUTLINE_REVISION_REVIEW_ITEM_SCHEMA`, and `RPG_RUNTIME_UPDATE_PROPOSAL_GUIDANCE`.
+- Updated `src/lib/rpg-wiki-schema.test.ts` with focused LLM 6 schema tests for machine readability, structured fact sources, PC knowledge boundaries, confirmed-events boundaries, skipped delta / pacing / group / outline review item guidance, fenced block compatibility, unchanged `RPG_SCHEMA_SLOTS`, and no ordinary `wiki/runtime` category.
+- Updated `docs/RPG_RUNTIME_TURN_19_STEP_SIX_INTERACTION_FLOW.md` to mark only LLM 6 stage 1 `[已完成]`; stages 2-5 remain `[待实现]`.
+- Validation passed: `npx.cmd vitest run src/lib/rpg-wiki-schema.test.ts` (1 file, 29 tests); `npm.cmd run typecheck`; `rg --encoding utf-8 "RuntimeUpdateProposalInput|RuntimeUpdateProposalResult|RPG_RUNTIME_UPDATE_PROPOSAL|SkippedRuntimeDelta|PacingUpdateProposal|ProposalGroup|OutlineRevisionReviewItem" docs/RPG_WIKI_SCHEMA.md src/lib/rpg-wiki-schema.ts src/lib/rpg-wiki-schema.test.ts docs/RPG_RUNTIME_TURN_19_STEP_SIX_INTERACTION_FLOW.md docs/CURRENT_STATE.md docs/IMPLEMENTATION_LOG.md`.
+- Still not implemented or changed: runtime types, JSON parser / validator, interaction spec behavior, `runtime-update-interaction.ts` prompt/parser behavior, `state-extractor.ts` `ProposedWikiUpdate` implementation, runtime update validator / pending staging / apply behavior, orchestrator接入, writer/apply, UI, ordinary `wiki/runtime` category or registry entry, `RPG_SCHEMA_SLOTS`, and legacy/default compatibility.
+- No `git commit` or `git push` was performed.
+
+## 2026-06-11 - LLM 6 Runtime Update Proposal Implementation Plan Note
+
+- Updated `docs/RPG_RUNTIME_TURN_19_STEP_SIX_INTERACTION_FLOW.md` to add a dedicated **LLM 6：Runtime Update Proposal** phased implementation tracking plan.
+- Confirmed the next runtime step can start after LLM 5 cleanup, but should proceed in small stages rather than changing writer/apply/UI in one pass.
+- Recorded that the existing LLM 6 path already has `runtimeUpdateInteractionSpec`, `ProposedWikiUpdate`, fenced markdown block parsing, deterministic validator, pending staging, and journal recording; the next work should upgrade that path instead of replacing the whole review/apply pipeline.
+- Split the planned work into five `[待实现]` stages: Schema Guidance, Runtime Types + JSON Contract, Interaction Spec 改造, Validator + Pending Staging, and Orchestrator 接入.
+- Reconfirmed key boundaries: structured turn deltas should replace `submittedAction + generatedNarrative + references` as the primary fact source; `outlineRevisionProposal` remains an independent review item; old fenced block parsing may remain as compatibility/manual staging; no ordinary `wiki/runtime` category should be added.
+- This was documentation-only. No source code, runtime behavior, schema implementation, writer/apply behavior, UI, tests, git commit, or git push was changed.
+
+## 2026-06-11 - Narration Generator Cleanup Pass
+
+- Completed a small cleanup pass after **LLM 5 Narration Generator 第 3 阶段**.
+- Audited `RpgNarrationAdapter`, `createLlmRpgNarrationAdapter`, `createFixtureNarrationAdapter`, `buildRpgNarrationPrompt`, `narrationInteractionSpec`, `RpgNarrationPrompt`, and `generateTurn`: current source production paths (`runRpgTurn`, runtime controller, and RPG panel plumbing) use `RpgNarrationGeneratorAdapter` / `createLlmRpgNarrationGeneratorAdapter` and the `narration_generator` contract.
+- Removed the old `narration` interaction contract files from `src/lib/rpg-interactions/runtime/`: old prompt builder, old fixture adapter, and old LLM adapter. Removed the old prompt/adapter-focused tests.
+- Removed the old `narration` registry entry and runtime barrel exports; `narration_generator` is now the only registered runtime narration LLM contract.
+- Kept `RpgTurnResult` as a transitional UI / Runtime Update Proposal shape, but centralized `TurnNarration -> RpgTurnResult` in `createTurnResultFromTurnNarration()` in `src/lib/rpg-runtime/turn-model.ts`.
+- `generatedNarrative` still derives from `turnNarration.playerFacingText`; `parallelLineText` remains non-PC knowledge, `tensionBrief` remains runtime/review handoff, and unchosen `nextActionOptions` remain candidate future actions only.
+- Reduced narration test fixture duplication by reusing shared `sampleTurnNarration()` from `src/lib/rpg-runtime-test-fixtures.ts` in narration generator tests.
+- Did not modify wiki writer/apply behavior.
+- Did not change UI display or controls.
+- Did not modify `RPG_SCHEMA_SLOTS`.
+- Did not add an ordinary `wiki/runtime` category or `wiki/runtime/` path.
+- Did not enter Runtime Update Proposal / LLM 6 redesign.
+- Did not auto-write wiki or auto-apply pending updates.
+- Validation passed: `npm.cmd run typecheck`; `npx.cmd vitest run src/lib/rpg-turn-orchestrator.test.ts src/lib/rpg-runtime-controller.test.ts src/lib/rpg-runtime-persistence.test.ts src/lib/rpg-turn-model.test.ts src/lib/rpg-narration-generator.test.ts src/lib/rpg-interactions.test.ts src/lib/rpg-wiki-schema.test.ts` (7 files, 123 tests); `rg --encoding utf-8 "RpgNarrationAdapter|createLlmRpgNarrationAdapter|createFixtureNarrationAdapter|buildRpgNarrationPrompt|narrationInteractionSpec|RpgNarrationPrompt|generateTurn|RpgNarrationGeneratorAdapter|createLlmRpgNarrationGeneratorAdapter|narration_generator|turnNarration|generatedNarrative" src/lib src/components docs/CURRENT_STATE.md docs/IMPLEMENTATION_LOG.md`.
+- No `git commit` or `git push` was performed.
+
+## 2026-06-11 - LLM 5 Narration Generator Orchestrator Handoff Stage
+
+- Completed **RPG Runtime LLM 5 / Narration Generator 三阶段拆分第 3 阶段：Orchestrator 接入 + Turn Record Handoff**，仅覆盖 LLM 5 checklist 第 3 点。
+- `runRpgTurn` now uses the new `narration_generator` contract / `RpgNarrationGeneratorAdapter` and produces validated `TurnNarration`.
+- Added deterministic `NarrationGeneratorInput` handoff construction from current-turn structures only: `PostActionWorkingState`, `ActionResolution`, `WorldTickResult`, `WorldTickVisibleSelection`, `RecallSelection`, deterministic `recalledMaterials`, `OutlineAwareNarrationBrief`, optional `provisionalOutlinePatch.narrationHandoff`, style / forbidden / player-knowledge boundaries, refs, and runtime refs.
+- Non-Step 14.5 turns do not pass provisional handoff and require `narrationMeta.usedProvisionalPatch === false`; Step 14.5 turns pass only `provisionalOutlinePatch.narrationHandoff` as hard constraint and require `usedProvisionalPatch === true` plus `respectedMustNotReveal === true`.
+- `RpgTurnRecord`, `RunRpgTurnResult`, `RunRpgRuntimeTurnFlowResult`, and runtime turn journal entries now save `turnNarration`, including `playerFacingText`, `parallelLineText`, `displayPolicy`, `tensionBrief`, `narrationMeta`, enhanced `nextActionOptions`, and `references`.
+- `generatedNarrative` remains only as a conservative transition/display field derived from `turnNarration.playerFacingText`; `parallelLineText` is not PC knowledge, `tensionBrief` is runtime/review handoff, and unchosen enhanced options are not stored as happened facts.
+- `outlineRevisionProposal` remains independent review/audit data only and is not passed to Narration as fact material, not turned into ordinary runtime update, and not auto-written to `wiki/outlines/main.md`.
+- Did not modify wiki writer/apply behavior.
+- Did not change UI display or controls.
+- Did not modify `RPG_SCHEMA_SLOTS`.
+- Did not add an ordinary `wiki/runtime` category or `wiki/runtime/` path.
+- Did not enter Runtime Update Proposal / LLM 6 redesign.
+- Validation passed: `npx.cmd vitest run src/lib/rpg-turn-orchestrator.test.ts src/lib/rpg-runtime-controller.test.ts src/lib/rpg-runtime-persistence.test.ts src/lib/rpg-turn-model.test.ts src/lib/rpg-narration-generator.test.ts src/lib/rpg-interactions.test.ts src/lib/rpg-wiki-schema.test.ts` (7 files, 126 tests); `npm.cmd run typecheck`; `rg --encoding utf-8 "TurnNarration|NarrationGeneratorInput|narration_generator|turnNarration|playerFacingText|parallelLineText|tensionBrief|displayPolicy|narrationMeta|provisionalOutlinePatch.narrationHandoff|outlineRevisionProposal" src/lib docs/RPG_RUNTIME_TURN_19_STEP_SIX_INTERACTION_FLOW.md docs/CURRENT_STATE.md docs/IMPLEMENTATION_LOG.md`.
+- No `git commit` or `git push` was performed.
+
+## 2026-06-11 - LLM 5 Narration Generator Runtime Types + Interaction Contract Stage
+
+- Completed **RPG Runtime LLM 5 / Narration Generator 三阶段拆分第 2 阶段：Runtime Types + Interaction Contract**，仅覆盖 LLM 5 checklist 第 2 点。
+- Added runtime-only LLM 5 types in `src/lib/rpg-runtime/types.ts`, including `NarrationGeneratorInput`, `TurnNarration`, `NarrationDisplayPolicy`, `TensionBrief`, `NarrationMeta`, runtime narration action options, source refs, reveal/style/forbidden/player-knowledge boundaries, pacing compliance, and provisional patch usage meta.
+- Added independent `narration_generator` contract under `src/lib/rpg-interactions/runtime/`: interaction spec, prompt builder, bare/fenced JSON parser, deterministic validator, fixture adapter, and LLM streaming adapter.
+- Registered and exported the new contract as a contract-layer interaction only. Existing `narration` / `RpgTurnResult` flow remains unchanged.
+- Added focused tests in `src/lib/rpg-narration-generator.test.ts` and updated registry expectations in `src/lib/rpg-interactions.test.ts`. Tests cover runtime type construction, prompt boundaries, parser behavior, validator accept/reject cases, adapters through parser + validator, registry/export exposure, and unchanged forbidden areas.
+- Explicitly not connected to `runRpgTurn`; LLM 5 第 3 阶段 Orchestrator 接入 + Turn Record Handoff remains `[待实现]`.
+- Did not modify wiki writer/apply behavior or UI.
+- Did not modify `RPG_SCHEMA_SLOTS`.
+- Did not add an ordinary `wiki/runtime` category or `wiki/runtime/` path.
+- Did not enter Runtime Update Proposal / LLM 6 redesign and did not auto-write wiki or apply pending updates.
+- Validation passed: `npx.cmd vitest run src/lib/rpg-narration-generator.test.ts src/lib/rpg-interactions.test.ts src/lib/rpg-wiki-schema.test.ts` (3 files, 86 tests); `npm.cmd run typecheck`; `rg --encoding utf-8 "NarrationGeneratorInput|TurnNarration|NarrationDisplayPolicy|TensionBrief|NarrationMeta|provisionalOutlinePatch.narrationHandoff|outlineRevisionProposal|parallelLineText|playerFacingText" src/lib docs/RPG_RUNTIME_TURN_19_STEP_SIX_INTERACTION_FLOW.md docs/CURRENT_STATE.md docs/IMPLEMENTATION_LOG.md`.
+- No `git commit` or `git push` was performed.
+
+## 2026-06-11 - LLM 5 Narration Generator Schema Guidance Stage
+
+- Completed **RPG Runtime LLM 5 / Narration Generator 三阶段拆分第 1 阶段：Schema Guidance**，仅覆盖 LLM 5 checklist 第 1 点。
+- Updated `docs/RPG_WIKI_SCHEMA.md` with LLM 5 schema guidance for `TurnNarration`, `playerFacingText`, `parallelLineText`, `tensionBrief`, `NarrationDisplayPolicy`, `NarrationMeta`, enhanced `RpgActionOption`, `NarrationGeneratorInput`, `styleBundle`, `forbiddenForNarration`, `playerKnowledgeBoundary`, pacing compliance, and `provisionalOutlinePatch.narrationHandoff` priority.
+- Added code-readable guidance in `src/lib/rpg-wiki-schema.ts`: `RPG_NARRATION_OUTPUT_SCHEMA`, `RPG_TENSION_BRIEF_FIELDS`, `RPG_NARRATION_META_FIELDS`, `RPG_ACTION_OPTION_RUNTIME_FIELDS`, `RPG_NARRATION_KNOWLEDGE_BOUNDARY_POLICY`, `RPG_NARRATION_STYLE_HANDOFF_POLICY`, aggregate guidance, and getter functions.
+- Updated `src/lib/rpg-wiki-schema.test.ts` to confirm Narration guidance is readable, includes core TurnNarration / tension / meta / action-option fields, preserves player knowledge and style handoff boundaries, keeps `provisionalOutlinePatch.narrationHandoff` above ordinary brief without rewriting working state, and keeps `outlineRevisionProposal` out of Narration fact material.
+- Updated `docs/RPG_RUNTIME_TURN_19_STEP_SIX_INTERACTION_FLOW.md` to mark only LLM 5 checklist item 1 `[已完成]`; checklist items 2 and 3 remain `[待实现]`.
+- Validation passed: `npx.cmd vitest run src/lib/rpg-wiki-schema.test.ts` (1 file, 28 tests); `npm.cmd run typecheck`; `rg --encoding utf-8 "RPG_NARRATION_OUTPUT_SCHEMA|RPG_TENSION_BRIEF_FIELDS|RPG_NARRATION_META_FIELDS|RPG_ACTION_OPTION_RUNTIME_FIELDS|RPG_NARRATION_KNOWLEDGE_BOUNDARY_POLICY|RPG_NARRATION_STYLE_HANDOFF_POLICY|TurnNarration|NarrationMeta|TensionBrief" docs/RPG_WIKI_SCHEMA.md src/lib/rpg-wiki-schema.ts src/lib/rpg-wiki-schema.test.ts docs/RPG_RUNTIME_TURN_19_STEP_SIX_INTERACTION_FLOW.md docs/CURRENT_STATE.md docs/IMPLEMENTATION_LOG.md`.
+- Still not implemented or changed: runtime types, Narration interaction contract, parser / validator / adapters, `RpgTurnResult`, `runRpgTurn`, wiki writer/apply, UI, Runtime Update Proposal / LLM 6, `RPG_SCHEMA_SLOTS`, ordinary `wiki/runtime` category, or legacy/default compatibility.
+- No `git commit` or `git push` was performed.
+
+## 2026-06-11 - LLM 5 Narration Generator Three-stage Plan Note
+
+- Updated `docs/RPG_RUNTIME_TURN_19_STEP_SIX_INTERACTION_FLOW.md` to add a three-stage execution plan for **RPG Runtime LLM 5 / Narration Generator**.
+- The plan splits LLM 5 into:
+  1. Schema Guidance stage for `docs/RPG_WIKI_SCHEMA.md`, code-readable schema guidance, and focused schema tests.
+  2. Runtime Types + Interaction Contract stage for `NarrationGeneratorInput`, `TurnNarration`, parser / validator / adapters, registry / exports, and focused contract tests.
+  3. Orchestrator 接入 + Turn Record Handoff stage for wiring `TurnNarration` into `runRpgTurn` and saving runtime/review handoff fields.
+- Reconfirmed the boundary that `provisionalOutlinePatch.narrationHandoff` must be a hard Narration constraint when Step 14.5 ran, while `outlineRevisionProposal` must not become Narration fact material, ordinary runtime update, or an automatic `wiki/outlines/main.md` write.
+- Reconfirmed that the LLM 5 plan should not enter Runtime Update Proposal / LLM 6 redesign, wiki writer/apply changes, UI changes, ordinary `wiki/runtime` category work, or `RPG_SCHEMA_SLOTS` changes unless a later stage explicitly requests them.
+- This was documentation-only. No source code, runtime behavior, tests, schema implementation, writer/apply behavior, UI, git commit, or git push was changed.
+
+## 2026-06-11 - Story Outline Regenerator Orchestrator Conditional Call Stage
+
+- Completed **RPG Runtime Step 14.5 / Story Outline Regenerator 三阶段拆分第 3 阶段：Orchestrator 条件调用阶段**，仅覆盖 `docs/RPG_RUNTIME_TURN_19_STEP_SIX_INTERACTION_FLOW.md` checklist 第 5 点。
+- Added deterministic `buildStoryOutlineRegeneratorInputFromTurnState()` in `src/lib/rpg-runtime/story-outline-regenerator-handoff.ts`; it builds the Step 14.5 input only from the current turn's `outlineBriefInput`, impact report/request, working state, recalled materials, outline slices, plot-arc tension fuel, visibility/hard constraints, runtime refs, and known refs. It does not read extra files or guess wiki facts.
+- `runRpgTurn` now accepts optional `storyOutlineRegeneratorAdapter` and calls Story Outline Regenerator only when `outlineImpactReport.impactLevel === "major_rewrite_required"`, `requiresRegeneration === true`, a `regenerationRequest` exists, and the adapter exists.
+- Successful regenerator output is routed through `storyOutlineRegeneratorInteractionSpec.buildPrompt(...)`, adapter call, and `storyOutlineRegeneratorInteractionSpec.parseOutput(...)` validation before Narration. Invalid output aborts the turn before Narration can produce polluted results.
+- Narration receives only `provisionalOutlinePatch.narrationHandoff` as `provisionalNarrationHandoff` hard constraints. `outlineRevisionProposal` is not passed to Narration as fact material.
+- `RunRpgTurnResult`, `RpgTurnRecord`, `RunRpgRuntimeTurnFlowResult`, and runtime turn journal entries now save optional `provisionalOutlinePatch`, `outlineRevisionProposal`, and `regenerationSafetyReport` under runtime/review audit boundaries.
+- `outlineRevisionProposal` remains independent review/pending audit data only: it is not inserted into ordinary `ProposedWikiUpdate`, `runtimeWikiUpdate`, `proposedUpdates`, or `pendingUpdates`, and no code writes or applies `wiki/outlines/main.md`.
+- Major impact without adapter or without `regenerationRequest` keeps an audit warning; successful invocation replaces the previous "not triggered in this stage" warning with run/audit warnings.
+- Updated focused tests for non-major no-call, major call with adapter, major missing adapter/request warnings, call order through `storyOutlineRegenerator -> narration`, Narration handoff delivery, turn record / runtime journal audit persistence, parser+validator enforcement, invalid output abort behavior, no wiki writes, no ordinary runtime update pollution, unchanged `RPG_SCHEMA_SLOTS`, and no ordinary `wiki/runtime` category.
+- Validation passed: `npx.cmd vitest run src/lib/rpg-turn-orchestrator.test.ts src/lib/rpg-story-outline-regenerator.test.ts src/lib/rpg-interactions.test.ts src/lib/rpg-wiki-schema.test.ts src/lib/rpg-runtime-persistence.test.ts src/lib/rpg-runtime-controller.test.ts src/lib/rpg-turn-model.test.ts` (7 files, 130 tests); `npm.cmd run typecheck`.
+- Still not implemented or changed: Narration Generator three-line schema redesign, Runtime Update Proposal redesign, wiki writer/apply behavior, UI display/control changes, ordinary `wiki/runtime` category, `RPG_SCHEMA_SLOTS`, or automatic `wiki/outlines/main.md` writes.
+- No `git commit` or `git push` was performed.
+
+## 2026-06-11 - Story Outline Regenerator Runtime Contract Stage
+
+- Completed **RPG Runtime Step 14.5 / Story Outline Regenerator 三阶段拆分第 2 阶段：Runtime 类型 + Interaction Contract 阶段**，仅覆盖 `docs/RPG_RUNTIME_TURN_19_STEP_SIX_INTERACTION_FLOW.md` checklist 第 3、4 点。
+- Added runtime/review handoff types in `src/lib/rpg-runtime/types.ts`: `StoryOutlineRegeneratorInput`, `ProvisionalOutlinePatch`, `ProvisionalNarrationHandoff`, `OutlineRevisionProposal`, `RegenerationSafetyReport`, plus the output wrapper and narrow boundary helper types.
+- Added `outline_regeneration` interaction implementation under `src/lib/rpg-interactions/runtime/`: prompt builder, bare/fenced JSON parser, deterministic validator, fixture adapter, and LLM streaming adapter.
+- Registered and exported the new interaction as `outline_regeneration` / `runtime_story_outline_regenerator`; it is implemented as a contract layer only and remains disconnected from `runRpgTurn`.
+- Validator rejects wiki writes, player-facing prose / `nextActionOptions`, ordinary runtime update / `ProposedWikiUpdate` pollution, direct `wiki/outlines/main.md` modification, future plans written into `events`, confirmed fact rewrites, forbidden reveal leakage, hidden / GM-only / parallel-line / `user_visible_pc_unknown` PC-knowledge leaks, unsafe safety reports, out-of-bound refs, invalid top-level shape, persistent provisional patches, and non-`outlineRevision` proposal review kind.
+- Added `src/lib/rpg-story-outline-regenerator.test.ts` and updated `src/lib/rpg-interactions.test.ts` for registry expectations. Tests confirm runtime types are constructable, prompt boundaries are explicit, parser supports bare/fenced JSON, adapters run parser + validator, `RPG_SCHEMA_SLOTS` remains unchanged, no ordinary `wiki/runtime` category was added, and `runRpgTurn` is not wired to Story Outline Regenerator.
+- Updated `docs/RPG_RUNTIME_TURN_19_STEP_SIX_INTERACTION_FLOW.md` to mark only checklist items 3 and 4 complete; checklist item 5 orchestrator conditional call remains `[待实现]`.
+- Validation passed: `npx.cmd vitest run src/lib/rpg-story-outline-regenerator.test.ts src/lib/rpg-interactions.test.ts src/lib/rpg-wiki-schema.test.ts` (3 files, 90 tests); `npm.cmd run typecheck`; `rg --encoding utf-8 "StoryOutlineRegeneratorInput|ProvisionalOutlinePatch|ProvisionalNarrationHandoff|OutlineRevisionProposal|RegenerationSafetyReport" src/lib docs/RPG_RUNTIME_TURN_19_STEP_SIX_INTERACTION_FLOW.md docs/CURRENT_STATE.md docs/IMPLEMENTATION_LOG.md`.
+- Still not implemented or triggered: orchestrator conditional call, `runRpgTurn` main-flow changes, real generation in a runtime turn, Narration Generator changes, Runtime Update Proposal changes, wiki writer/apply behavior, UI changes, ordinary `wiki/runtime` category, or `RPG_SCHEMA_SLOTS` changes.
+- No `git commit` or `git push` was performed.
+
+## 2026-06-11 - Story Outline Regenerator Schema Stage
+
+- Completed **RPG Runtime Step 14.5 / Story Outline Regenerator 三阶段拆分第 1 阶段：Schema 阶段**，仅覆盖 line1250 的第 1、2 点。
+- Updated `docs/RPG_WIKI_SCHEMA.md` with the Step 14.5 schema boundary for `ProvisionalOutlinePatch`, `OutlineRevisionProposal`, `OutlineRevisionReviewPolicy`, and `RegenerationSafetyReport`.
+- Documented that `provisionalOutlinePatch` is same-turn only, is not persisted to `wiki/`, does not modify `wiki/outlines/main.md`, and that `provisionalOutlinePatch.narrationHandoff` is a hard constraint for Step 15 Narration.
+- Documented that `outlineRevisionProposal` is an independent review/pending item, not ordinary `ProposedWikiUpdate`, cannot be mixed into ordinary runtime update, and cannot automatically write `wiki/outlines/main.md`.
+- Reconfirmed `wiki/outlines/main.md` remains `manual_or_review_only`; `wiki/outlines/progress.md` may record major divergence, invalidated beats, provisional patch adoption, and pending proposal refs without turning future revisions into facts.
+- Reconfirmed `wiki/plot-arcs/runtime` can record post-divergence pressure, conflict, and branch state, but cannot replace `outlineRevisionProposal`.
+- Added code-readable schema guidance in `src/lib/rpg-wiki-schema.ts`: `RPG_PROVISIONAL_OUTLINE_PATCH_SCHEMA`, `RPG_OUTLINE_REVISION_PROPOSAL_SCHEMA`, `RPG_OUTLINE_REVISION_REVIEW_POLICY`, `RPG_REGENERATION_SAFETY_FIELDS`, aggregate guidance, and getters.
+- Added focused assertions in `src/lib/rpg-wiki-schema.test.ts` confirming the new guidance is machine-readable, contains the core fields/boundaries, keeps provisional patches non-persistent, keeps outline revision proposals independent review/pending, and does not add ordinary wiki/runtime categories or change `RPG_SCHEMA_SLOTS`.
+- Validation passed: `npx.cmd vitest run src/lib/rpg-wiki-schema.test.ts` (1 file, 27 tests); `npm.cmd run typecheck`; `rg --encoding utf-8 "ProvisionalOutlinePatch|OutlineRevisionProposal|OutlineRevisionReviewPolicy|RegenerationSafetyReport" docs/RPG_WIKI_SCHEMA.md src/lib/rpg-wiki-schema.ts src/lib/rpg-wiki-schema.test.ts`.
+- Still not implemented: runtime types, interaction spec / parser / validator / adapters, orchestrator conditional call, real generation of `provisionalOutlinePatch` / `outlineRevisionProposal`, Narration Generator changes, Runtime Update Proposal changes, wiki writer/apply behavior, UI changes, ordinary `wiki/runtime` category, or `RPG_SCHEMA_SLOTS` changes.
+- No `git commit` or `git push` was performed.
+
+## 2026-06-11 - Story Outline Regenerator Implementation Order Note
+
+- Updated `docs/RPG_RUNTIME_TURN_19_STEP_SIX_INTERACTION_FLOW.md` to make the Step 14.5 / Story Outline Regenerator implementation order explicit as a task-progress checklist.
+- The checklist records the intended small-step order: first update `docs/RPG_WIKI_SCHEMA.md`, then add code-readable guidance in `src/lib/rpg-wiki-schema.ts`, then add runtime types, then add interaction spec / parser / validator / adapters / focused tests, and only then connect the orchestrator conditional call.
+- Reconfirmed the boundary: Step 14.5 should only run when LLM 4 reports `impactLevel: "major_rewrite_required"` and `requiresRegeneration: true`; `provisionalOutlinePatch` is same-turn narration hard constraint only, while `outlineRevisionProposal` is an independent review/pending item and must not auto-write `outlines/main.md`.
+- This was documentation-only. No source code, schema implementation, tests, runtime behavior, LLM calls, UI, `RPG_SCHEMA_SLOTS`, git commit, or git push were changed.
+
+## 2026-06-11 - LLM 4 Outline-aware Brief Handoff Cleanup
+
+- Completed a small cleanup pass around the previous **LLM 4 / Step 14 second substage: Outline-aware Brief Compiler Orchestrator 接入 + Narration Brief Handoff**.
+- Reviewed `src/lib/rpg-runtime/outline-brief-handoff.ts` path classification helpers. Recall handoff helpers focus on safe deterministic reads / section boundaries, and schema guidance is descriptive rather than a runtime classifier, so the outline / plot-arc / hard-constraint / reveal-forbidden checks remain local to the LLM 4 handoff. Added a short implementation comment documenting that boundary instead of introducing a shared util.
+- Added `sampleTurnRecordRuntimeParts()` to `src/lib/rpg-runtime-test-fixtures.ts` and reused it in focused turn-record / runtime-journal fixtures to reduce repeated `outlineAwareNarrationBrief`, `outlineImpactReport`, and `regenerationRequest` setup while keeping test-specific turn results and update samples explicit.
+- Added a small runtime prompt boundary constants module for LLM 4 handoff text and reused it from Narration, Runtime Update Proposal, and Outline Brief prompts.
+- Clarified in the `RegenerationRequest` runtime type comment and prompt boundary text that `regenerationRequest` is audit/control handoff only, not `outlineRevisionProposal`, not `provisionalOutlinePatch`, not a wiki write, and not permission to revise `wiki/outlines/main.md`.
+- Still not implemented or triggered: Story Outline Regenerator / Step 14.5, any outline regeneration adapter, `provisionalOutlinePatch`, `outlineRevisionProposal`, Narration Generator three-line redesign, Runtime Update Proposal parser / target rules / apply / pending refactor, wiki writer / apply behavior changes, UI display/control changes, ordinary `wiki/runtime` category, or `RPG_SCHEMA_SLOTS` changes.
+- Validation passed: `npx.cmd vitest run src/lib/rpg-outline-brief.test.ts src/lib/rpg-turn-orchestrator.test.ts src/lib/rpg-turn-model.test.ts src/lib/rpg-runtime-persistence.test.ts src/lib/rpg-runtime-controller.test.ts src/lib/rpg-interactions.test.ts` (6 files, 101 tests); `npx.cmd vitest run src/components/rpg/rpg-runtime-panel.test.tsx` (1 file, 15 tests); `npx.cmd vitest run src/lib/rpg-import/runtime-update-apply.test.ts src/lib/rpg-state-extractor.test.ts src/lib/rpg-write-policy.test.ts` (3 files, 27 tests); `npm.cmd run typecheck`.
+- No `git commit` or `git push` was performed.
+
+## 2026-06-11 - RPG Runtime Outline-aware Brief Compiler Orchestrator + Narration Brief Handoff
+
+- Completed **LLM 4 / Step 14 second substage: Outline-aware Brief Compiler Orchestrator 接入 + Narration Brief Handoff**.
+- `runRpgTurn` now runs `preview -> actionResolver -> worldTick -> visibleSelection -> postActionWorkingState -> recallSelector -> deterministic recalledMaterials handoff -> outlineBriefCompiler -> narration -> turnRecord`.
+- Added the local `buildOutlineBriefCompilerInputFromTurnState()` handoff layer in `src/lib/rpg-runtime/outline-brief-handoff.ts`.
+- The first-version handoff derives `outlineSlices`, `plotArcTensionFuel`, `hardConstraints`, `visibilityBoundaries`, `runtimeRefs`, and `knownReferences` only from `PostActionWorkingState`, `RecallSelection`, deterministic `recalledMaterials`, World Tick state, and runtime refs; it does not read extra files.
+- `runRpgTurn` now accepts injectable `outlineBriefCompilerAdapter`, calls existing `outline_brief` after deterministic recall handoff and before Narration, validates the output, and records major-regeneration impact as warning/audit only.
+- `RpgTurnRecord` and runtime journal entries now persist `outlineAwareNarrationBrief`, `outlineImpactReport`, and optional `regenerationRequest` under the existing `.llm-wiki/runtime/` boundary.
+- Narration prompt now receives `OutlineAwareNarrationBrief`, `outlineImpactReport`, and optional `regenerationRequest`; it states that Narration must obey the filtered brief, must not directly read complete `outlines/main.md`, must not leak GM-only / hidden / parallelLine-only / `user_visible_pc_unknown` material into PC knowledge, must keep `parallelLineBrief.grantsPcKnowledge: false`, and must treat `tensionBriefInput` as tension input rather than player prose or happened events.
+- Runtime Update Proposal prompt now states that LLM 4 handoff is journal/audit/control handoff only: `outlineAwareNarrationBrief`, `outlineImpactReport`, and `regenerationRequest` are not accepted wiki facts, cannot be directly converted into ordinary wiki updates, and `regenerationRequest` is not `outlineRevisionProposal`.
+- RPG runtime panel now creates and passes the LLM Outline Brief adapter into the existing flow without adding UI controls or display changes.
+- `runtime_update_apply` turn-record handling now preserves the LLM 4 handoff fields.
+- Still not implemented or triggered: Story Outline Regenerator / Step 14.5, `provisionalOutlinePatch`, `outlineRevisionProposal`, Narration Generator three-line redesign, Runtime Update Proposal redesign, wiki writer / apply changes, UI display changes, ordinary `wiki/runtime` category, or `RPG_SCHEMA_SLOTS` changes.
+- Validation passed: `npx.cmd vitest run src/lib/rpg-outline-brief.test.ts src/lib/rpg-turn-orchestrator.test.ts src/lib/rpg-turn-model.test.ts src/lib/rpg-runtime-persistence.test.ts src/lib/rpg-runtime-controller.test.ts src/lib/rpg-interactions.test.ts src/lib/rpg-wiki-schema.test.ts` (7 files, 127 tests); `npx.cmd vitest run src/components/rpg/rpg-runtime-panel.test.tsx` (1 file, 15 tests); `npx.cmd vitest run src/lib/rpg-import/runtime-update-apply.test.ts src/lib/rpg-state-extractor.test.ts src/lib/rpg-write-policy.test.ts` (3 files, 27 tests); `npm.cmd run typecheck`.
+- No `git commit` or `git push` was performed.
+
+## 2026-06-11 - RPG Runtime Outline-aware Brief Compiler Contract + Interaction
+
+- Completed **LLM 4 / Step 14 first substage: Outline-aware Brief Compiler Contract + Interaction + Validator + Tests**.
+- Added minimal schema guidance for Outline-aware Brief Compiler: stable outline beat / reveal / branch condition ids, dependency / invalidation / line target / reveal policy semantics, outline impact rubric (`none`, `minor`, `branch`, `major_rewrite_required`), line-specific brief boundaries, and `tensionLine` / plot-arc fuel semantics.
+- Added code-readable schema guidance and getters in `src/lib/rpg-wiki-schema.ts` without changing `RPG_SCHEMA_SLOTS` and without adding an ordinary `wiki/runtime` category.
+- Added LLM 4 runtime-only contracts in `src/lib/rpg-runtime/types.ts`: `OutlineBriefCompilerInput`, `OutlineSlice`, `OutlineAwareNarrationBrief`, `OutlineImpactReport`, `RegenerationRequest`, and supporting ref / reveal policy / pacing / tension / forbidden-boundary types.
+- Added `outline_brief` runtime interaction files: prompt/spec/parser, deterministic validator, fixture adapter, and LLM adapter.
+- The prompt states LLM 4 is the Outline-aware Brief Compiler + Outline Impact Detector, treats `recalledMaterials` as filtered handoff rather than full outline authority, outputs only strict JSON, and forbids player prose, `nextActionOptions`, wiki writes, runtime update proposals, outline revision/provisional patch output, Story Outline Regenerator execution, direct file reads, and mutation of upstream runtime objects.
+- The validator accepts bare and fenced JSON, checks required top-level output, validates `impactLevel`, enforces regeneration consistency, rejects forbidden pollution fields, rejects player-facing PC knowledge leakage, requires `parallelLineBrief.grantsPcKnowledge: false`, and rejects unknown recalled-material / runtime ref paths or sectionIds.
+- Registered `outline_brief` as an implemented interaction with stage `runtime_outline_brief_compiler`; runtime exports now expose the new spec, parser/validator, and adapters.
+- Added focused tests in `src/lib/rpg-outline-brief.test.ts` and updated registry/schema tests.
+- Still not connected to `runRpgTurn`; the current turn flow remains `preview -> actionResolver -> worldTick -> visibleSelection -> postActionWorkingState -> recallSelector -> deterministic recalledMaterials handoff -> narration -> turnRecord`.
+- Still not implemented: Story Outline Regenerator / Step 14.5, Narration Generator three-line redesign, Runtime Update Proposal redesign, wiki writer / apply / UI changes, ordinary `wiki/runtime` category, or `RPG_SCHEMA_SLOTS` changes.
+- Validation passed: `npx.cmd vitest run src/lib/rpg-outline-brief.test.ts src/lib/rpg-interactions.test.ts src/lib/rpg-wiki-schema.test.ts` (3 files, 92 tests); `npm.cmd run typecheck`.
+- No `git commit` or `git push` was performed.
+
+## 2026-06-11 - RPG Runtime Recall Selector Orchestrator + Deterministic Handoff
+
+- Continued the interrupted **Recall Selector Orchestrator 接入 + Deterministic File-read Allowlist** stage and completed the missing cleanup.
+- `runRpgTurn` now runs `preview -> actionResolver -> worldTick -> visibleSelection -> postActionWorkingState -> recallSelector -> deterministic recalledMaterials handoff -> narration -> turnRecord`.
+- Added the runtime Recall Selector handoff layer in `src/lib/rpg-runtime/recall-selector-handoff.ts`: it builds a lightweight `RetrievalIndexEntry[]` from schema slots, compact brief references, post-action working state references, Action Resolution references, World Tick references, visible selection / working-state affected paths, and runtime overlay paths without embedding full file bodies.
+- The first-version retrieval index uses stable synthetic section IDs where source metadata lacks section anchors and records warnings for that limitation.
+- Deterministic local recall reading now only reads paths selected by `RecallSelection.selectedItems`, verifies the path exists in the retrieval index, verifies selected `sectionId` membership, honors path and section exclusions, enforces project-root / safe `wiki/` path boundaries, rejects traversal / absolute / hidden / ordinary `wiki/runtime` paths, and caps `wiki/outlines/main.md` so the full outline is not handed to Narration.
+- Added `RecalledMaterial`, `RecalledMaterialSection`, and `RecallSelectorHandoff` runtime handoff types. `RecallSelection` remains the allowlist plan; `recalledMaterials` is the deterministic local read result.
+- `RpgTurnRecord` and runtime journal entries now persist `recallSelection` and `recalledMaterials` under the existing `.llm-wiki/runtime/` boundary.
+- Narration prompt now includes only minimal recall-handoff boundary language: recalled materials are filtered handoff, not full outline authority; GM-only / parallelLine / user-visible-PC-unknown material must not become PC knowledge; recall handoff is not wiki writes and does not perform Outline-aware Brief work.
+- Runtime Update Proposal prompt and turn-record parsing preserve the boundary that unreviewed `RecallSelection` / `recalledMaterials` are journal/audit/filter handoff, not accepted wiki fact sources.
+- Fixed the interrupted stage finish work: `runtime_update_apply` now preserves the new turn record recall fields; related test fixtures now construct complete turn records; the handoff reader now treats section-level exclusions separately from whole-path exclusions; synthetic section warnings are de-duplicated per path.
+- Still not implemented: Outline-aware Brief Compiler / LLM 4, Story Outline Regenerator, Narration Generator three-line redesign, Runtime Update Proposal redesign, wiki writer / apply / UI changes, ordinary `wiki/runtime` category, or `RPG_SCHEMA_SLOTS` changes.
+- Validation passed: `npx.cmd vitest run src/lib/rpg-recall-selector.test.ts src/lib/rpg-recall-selector-handoff.test.ts src/lib/rpg-turn-orchestrator.test.ts src/lib/rpg-turn-model.test.ts src/lib/rpg-runtime-persistence.test.ts src/lib/rpg-runtime-controller.test.ts src/lib/rpg-interactions.test.ts src/lib/rpg-wiki-schema.test.ts` (8 files, 132 tests); `npm.cmd run typecheck`.
+- No `git commit` or `git push` was performed.
+
+## 2026-06-10 - RPG Runtime Recall Selector Contract + Interaction
+
+- Completed the requested **Recall Selector Contract + Interaction + Validator + Tests** stage for LLM 3 / Step 13.
+- Added Recall Selector runtime contracts in `src/lib/rpg-runtime/types.ts`: `RecallSelectorInput`, `RetrievalIndexEntry`, `RecallableSection`, `RecallSelection`, `RecallSelectedItem`, `RecallExclusion`, `RecallBudget`, and `RecallPolicy`. `RecallSelectorInput` consumes `PostActionWorkingState` and can carry the already-produced action resolution, World Tick result, visible selection, pacing state, gap state, retrieval index, budget, and policy.
+- Added `recall_selector` interaction files under `src/lib/rpg-interactions/runtime/`: prompt/spec/parser, deterministic validator, fixture adapter, and LLM adapter.
+- The Recall Selector prompt now states that recall is based on post-action `PostActionWorkingState`, not old `current-scene` coarse recall; it may output only a recall plan / allowlist and must not read files, generate narration, write wiki, generate update proposals, or produce LLM 4 / outline impact / outline regeneration outputs.
+- `validateRecallSelection()` checks required fields, retrieval-index path membership, stable `sectionId` membership under `RetrievalIndexEntry.availableSections`, legal `lineTarget`, `readMode`, priority, visibility and knowledge scopes, valid exclusions, and the `parallelLine` / `user_visible_pc_unknown` versus PC knowledge boundary.
+- The validator recursively rejects pollution fields including narration, player-facing text, parallel-line text, next action options, wiki writes, update proposals, pending updates, recalled full text, outline brief, outline impact report, outline revision/proposal, provisional outline patch, and regeneration request.
+- Registered `recall_selector` in `RpgInteractionKind` and the RPG interaction registry with stage `runtime_recall_selector`; runtime exports now expose the Recall Selector interaction, validator, and adapters.
+- Added `src/lib/rpg-recall-selector.test.ts` and updated `src/lib/rpg-interactions.test.ts` for the new registry entry.
+- This stage still did not connect Recall Selector to `runRpgTurn`, did not implement deterministic file-read allowlist, did not implement recalledMaterials reading, did not implement Outline-aware Brief Compiler / LLM 4, did not implement Story Outline Regenerator, did not implement Narration Generator three-line redesign, did not implement Runtime Update Proposal redesign, did not modify wiki writer / apply / UI, did not add an ordinary `wiki/runtime` category, and did not modify `RPG_SCHEMA_SLOTS`.
+- Validation passed: `npx.cmd vitest run src/lib/rpg-recall-selector.test.ts src/lib/rpg-interactions.test.ts src/lib/rpg-wiki-schema.test.ts` (3 files, 90 tests); `npm.cmd run typecheck`.
+- No `git commit` or `git push` was performed.
+
+## 2026-06-10 - RPG Runtime World Tick Orchestrator + Working State Handoff
+
+- Completed the requested local handoff stage after World Tick integration, without entering Recall Selector.
+- `runRpgTurn` now runs `preview -> actionResolver -> worldTick -> visibleSelection -> postActionWorkingState -> narration -> turnRecord`.
+- Added local Step 11-12 support in `src/lib/rpg-runtime/world-tick-working-state.ts`: visible selection chooses PC-visible / PC-inferred action and world deltas, user-visible PC-unknown parallel lens candidates, and tension / pacing / gap candidates; working state merges action resolution, World Tick result, visible selection, time state, campaign delta, pacing state, gap state, runtime delta refs, references, and warnings.
+- `RpgTurnRecord` and runtime turn journal entries now save `worldTickResult`, `visibleSelection`, and `postActionWorkingState` under the existing `.llm-wiki/runtime/` journal boundary.
+- Narration prompt now consumes the structured working state / visible selection as hard constraints, including: follow `PostActionWorkingState`, do not alter `WorldTickResult`, do not turn `parallelLine` / `user_visible_pc_unknown` into PC knowledge, do not invent new World Tick events, and do not write wiki.
+- Runtime Update Proposal remains first-version scoped to `submittedAction + generatedNarrative + references`; prompt text now records that `worldTickResult`, `visibleSelection`, and `postActionWorkingState` are journal/audit data and must not be directly converted into wiki writes.
+- RPG runtime panel now creates and passes the LLM World Tick adapter into the existing turn flow without UI display changes.
+- Added `src/lib/rpg-world-tick-working-state.test.ts` and updated orchestrator, turn model, persistence, controller, interactions, panel, state extractor, write policy, runtime-update-apply, and fixture tests around the new record contract.
+- This stage still did not implement Recall Selector / LLM 3, Outline-aware Brief Compiler / LLM 4, Story Outline Regenerator, Narration Generator three-line redesign, Runtime Update Proposal redesign, wiki writer/apply changes, UI display changes, an ordinary `wiki/runtime` category, or `RPG_SCHEMA_SLOTS` changes.
+- Validation passed: `npx.cmd vitest run src/lib/rpg-world-tick-contract.test.ts src/lib/rpg-world-tick-interaction.test.ts src/lib/rpg-world-tick-working-state.test.ts src/lib/rpg-turn-orchestrator.test.ts src/lib/rpg-turn-model.test.ts src/lib/rpg-runtime-persistence.test.ts src/lib/rpg-runtime-controller.test.ts src/lib/rpg-interactions.test.ts src/lib/rpg-wiki-schema.test.ts` (9 files, 124 tests); `npx.cmd vitest run src/components/rpg/rpg-runtime-panel.test.tsx` (1 file, 15 tests); `npm.cmd run typecheck`.
+- No `git commit` or `git push` was performed.
+
+## 2026-06-10 - RPG Runtime World Tick Interaction + Validator Contract
+
+- Completed the requested **World Tick Schema + Contract** follow-up items 3 and 4 from `docs/RPG_RUNTIME_TURN_19_STEP_SIX_INTERACTION_FLOW.md`.
+- Added the `world_tick` runtime interaction spec, prompt builder, bare/fenced JSON parser, fixture adapter, LLM adapter, and deterministic validator under `src/lib/rpg-interactions/runtime/`.
+- The World Tick prompt now states that `ActionResolution.playerActionDelta` is the canonical player-action-only delta; World Tick consumes it as-is, must not reinterpret or re-adjudicate the player action, must not derive canonical player facts from `directResults`, and only advances the resolved `timeDelta` interval.
+- The prompt forbids wiki writes, player-facing narration, `nextActionOptions`, Recall Selector output, outline revision/regeneration output, and requires strict `WorldTickResult` JSON only.
+- `validateWorldTickResult()` now checks required top-level fields, the three `worldDeltas` lines, clock updates, settled ongoing events, information broadcast, reaction queue, pacing update, gap state, runtime delta refs, references, and warnings.
+- The validator checks every delta-like object for `narrativeLine`, `visibility.visibilityScope`, `visibility.knowledgeScope`, `happenedStatus`, `affectedPaths`, and `runtimeDeltaRefs`, and recursively rejects wiki write, narration, next-action, outline revision, and Recall Selector pollution fields.
+- Registered `world_tick` in `RpgInteractionKind` and the RPG interaction registry with stage `runtime_world_tick`; runtime exports now expose the World Tick interaction, validator, and adapters.
+- Added `src/lib/rpg-world-tick-interaction.test.ts` covering prompt boundaries, bare/fenced JSON parsing, missing required fields, missing delta metadata, forbidden pollution, fixture adapter, LLM adapter streaming/parse behavior, registry exposure, canonical `playerActionDelta`, and the parallel-line display versus PC knowledge boundary.
+- This stage still did not connect World Tick to `runRpgTurn`, did not write turn records or runtime journal entries, did not implement working-state merge, Recall Selector, Outline Brief, Narration three-line redesign, Runtime Update Proposal redesign, wiki writer/apply changes, UI changes, ordinary `wiki/runtime` category, or `RPG_SCHEMA_SLOTS` changes.
+- Validation passed: `npx.cmd vitest run src/lib/rpg-world-tick-contract.test.ts src/lib/rpg-world-tick-interaction.test.ts src/lib/rpg-interactions.test.ts src/lib/rpg-wiki-schema.test.ts` (4 files, 87 tests); `npm.cmd run typecheck`.
+- No `git commit` or `git push` was performed.
+
+## 2026-06-10 - RPG Runtime World Tick Schema + Types Contract 前半阶段
+
+- Completed the **World Tick Schema + Types Contract 前半阶段** requested after the Action Resolver orchestrator integration.
+- `docs/RPG_WIKI_SCHEMA.md` now has a dedicated World Tick semantic boundary section covering clock/countdown, ongoing event, information broadcast, reaction queue, visibility meta, pacing state, and gap signal.
+- The schema text now states that World Tick directly consumes `ActionResolution.playerActionDelta` as the canonical player-action-only delta, does not re-adjudicate player success, does not derive player facts from `directResults`, does not write wiki, does not generate player-facing narration, and does not generate `nextActionOptions`.
+- `src/lib/rpg-wiki-schema.ts` now exposes code-readable World Tick guidance and field getter functions for visibility meta, clock updates, ongoing event settlements, information broadcast, reaction queue, pacing state, and gap signals.
+- `src/lib/rpg-runtime/types.ts` now defines `WorldTickInput`, `WorldTickResult`, `WorldTickVisibilityMeta`, clock update, settled ongoing event, information broadcast, reaction queue, pacing update, and gap state contracts. `WorldTickInput` directly carries `actionResolution`, `playerActionDelta: ActionResolution["playerActionDelta"]`, and `timeDelta: ActionResolution["timeDelta"]`.
+- Added `src/lib/rpg-world-tick-contract.test.ts` to validate representative `WorldTickInput` / `WorldTickResult` fixtures with TypeScript `satisfies`, including visibility / knowledge / happenedStatus / affectedPaths / runtimeDeltaRefs metadata.
+- Updated `src/lib/rpg-wiki-schema.test.ts` to cover the new World Tick guidance and confirm that no ordinary `runtime` category was added to `RPG_WIKI_SCHEMA`.
+- This stage did not implement World Tick interaction, parser, validator, adapter, prompt, orchestrator wiring, working-state merge, Recall Selector, Outline Brief, Narration changes, Runtime Update Proposal changes, wiki write/apply behavior, UI, or `RPG_SCHEMA_SLOTS` changes.
+- Validation passed: `npx.cmd vitest run src/lib/rpg-wiki-schema.test.ts src/lib/rpg-action-resolver.test.ts` (2 files, 41 tests); `npx.cmd vitest run src/lib/rpg-world-tick-contract.test.ts` (1 file, 2 tests); `npm.cmd run typecheck`.
+- No `git commit` or `git push` was performed.
+
+## 2026-06-10 - RPG Runtime Action Resolver Orchestrator Integration + Tests
+
+- Completed the **Orchestrator 接入小阶段** and **测试小阶段** from `docs/RPG_RUNTIME_TURN_19_STEP_SIX_INTERACTION_FLOW.md`.
+- `runRpgTurn` now runs `preview -> actionResolver -> narration -> turnRecord`; it builds a minimal `ActionResolverInput` from the existing `CompactStoryBrief` / preview data and does not add a new file-read or recall flow.
+- `ActionResolution` is now passed to the Narration Generator prompt as a hard adjudication constraint. The prompt says not to rewrite `ActionResolution.eventDraft.status`, not to turn `attempted_not_confirmed` into confirmed happened narration, and to stay within resolver-approved feasibility, costs, obstacles, direct results, uncertainty, `timeDelta`, and `progressPotential`.
+- `RpgTurnRecord` now stores `actionResolution`; record references merge narration references with `actionResolution.references[].path` and still clean legacy paths.
+- Runtime turn journal entries now store `actionResolution` at the journal boundary and still write only under `.llm-wiki/runtime/`, not `wiki/`.
+- Runtime Update Proposal remains first-version scoped to `submittedAction + generatedNarrative + references`; prompt text now explicitly warns that journal/audit `actionResolution` must not be used as a confirmed factual source and that `attempted_not_confirmed` event drafts must not become confirmed events.
+- The RPG runtime panel now creates and passes the LLM Action Resolver adapter into the existing turn flow without changing UI.
+- Added a small test fixture helper for valid `ActionResolution` samples and updated orchestrator, turn model, controller, persistence, interaction, panel, state extractor, write policy, and runtime-update-apply tests around the new record contract.
+- This stage did not implement World Tick + Reaction, Recall Selector, Outline-aware Brief Compiler, a large Narration Generator redesign, a large Runtime Update Proposal redesign, wiki writer/apply changes, project skeleton changes, UI changes, or `RPG_SCHEMA_SLOTS` changes.
+- Validation passed: `npx.cmd vitest run src/lib/rpg-action-resolver.test.ts src/lib/rpg-turn-orchestrator.test.ts src/lib/rpg-turn-model.test.ts src/lib/rpg-runtime-controller.test.ts src/lib/rpg-runtime-persistence.test.ts` (5 files, 49 tests); `npx.cmd vitest run src/lib/rpg-interactions.test.ts src/lib/rpg-wiki-schema.test.ts` (2 files, 73 tests); extra related validation `npx.cmd vitest run src/components/rpg/rpg-runtime-panel.test.tsx src/lib/rpg-state-extractor.test.ts src/lib/rpg-write-policy.test.ts src/lib/rpg-import/runtime-update-apply.test.ts` (4 files, 42 tests); `npm.cmd run typecheck`.
+- No `git commit` or `git push` was performed.
+
+## 2026-06-10 - RPG Runtime Action Resolver Contract + Interaction
+
+- Completed the **Action Resolver Contract** small stage and **Action Resolver Interaction** small stage from `docs/RPG_RUNTIME_TURN_19_STEP_SIX_INTERACTION_FLOW.md`.
+- Added code-level Action Resolver runtime contracts in `src/lib/rpg-runtime/types.ts`, including `ActionResolverInput`, `PreActionSnapshot`, `ActionResolution`, `PlayerActionDelta`, event draft status handling, `timeDelta`, `progressPotential`, player-action-only deltas, references, warnings, and `RuntimeDeltaRef` linkage.
+- Added `ACTION_RESOLVER_DEFAULT_EVENT_STATUS = "attempted_not_confirmed"` so ordinary player actions remain attempts unless explicitly confirmed by action text or the frozen pre-action snapshot.
+- Added Action Resolver interaction files under `src/lib/rpg-interactions/runtime/`: prompt/spec/parser, validator, fixture adapter, and LLM adapter.
+- Registered the new `action_resolver` interaction kind in the RPG interaction registry and runtime exports without connecting it to `runRpgTurn`.
+- Added focused Action Resolver tests in `src/lib/rpg-action-resolver.test.ts` and updated the shared interaction registry test for the new implemented kind.
+- Parser / validator coverage now rejects missing `timeDelta`, missing `progressPotential`, illegal `eventDraft.status`, unsafe `confirmed_happened` action attempts, mixed feasibility/cost/obstacle/direct-result fields, wiki write proposal pollution, player-facing narration pollution, and World Tick / Reaction pollution.
+- Prompt/spec coverage confirms the prompt states that the player action is an attempt, uses `attempted_not_confirmed`, separates feasibility / cost / obstacle / direct result, and forbids world tick, wiki write, and player-facing narration.
+- This stage did not modify `runRpgTurn`, the runtime orchestrator, Narration Generator prompt, Runtime Update Proposal prompt, World Tick + Reaction, Recall Selector, Outline-aware Brief Compiler, runtime prompt wiring, wiki writer/apply logic, UI, project skeleton, or `RPG_SCHEMA_SLOTS`.
+- Validation passed: `npx.cmd vitest run src/lib/rpg-action-resolver.test.ts src/lib/rpg-interactions.test.ts` (2 files, 65 tests); `npx.cmd vitest run src/lib/rpg-wiki-schema.test.ts` (1 file, 24 tests); `npm.cmd run typecheck`.
+- No `git commit` or `git push` was performed.
+
+## 2026-06-10 - RPG Runtime Schema Spine
+
+- Completed the Schema Spine small stage from `docs/RPG_RUNTIME_TURN_19_STEP_SIX_INTERACTION_FLOW.md`.
+- Updated `docs/RPG_WIKI_SCHEMA.md` to define the Runtime Schema Spine / 运行时共享契约 and to clarify that ordinary `wiki/` is separate from turn record / runtime journal / `.llm-wiki/runtime/` intermediate metadata.
+- Rewrote the old ordinary `runtime/` wiki directory description so runtime context, turn records, unresolved runtime metadata, pending updates, and journals are no longer recommended as `wiki/runtime/` pages.
+- Added code-readable shared runtime schema guidance in `src/lib/rpg-wiki-schema.ts`, including `NarrativeLine`, `UsePurpose`, visibility / knowledge scopes, `HappenedStatus`, `RuntimeDeltaRef`, `RecallableSection`, outline impact levels, review item kinds, persistence boundaries, and Action Resolver fixed slot semantics.
+- Updated `src/lib/rpg-wiki-schema.test.ts` to verify that `RPG_WIKI_SCHEMA` still has no runtime category and that the new runtime spine values, fields, fixed slot semantics, and `.llm-wiki/runtime/` boundary are exposed.
+- Clarified Action Resolver prerequisites for `wiki/current-scene/scene_state.md`, `wiki/player/known_information.md`, `wiki/outlines/progress.md`, and `wiki/rules/`.
+- This stage did not implement Action Resolver interaction, orchestrator integration, World Tick, runtime prompts, new LLM calls, or UI changes.
+- Validation passed: `npx.cmd vitest run src/lib/rpg-wiki-schema.test.ts`; `npm.cmd run typecheck`; requested UTF-8 `rg` checks for new constants and old runtime path residue.
+- No `git commit` or `git push` was performed.
+
+## 2026-06-10 - RPG Runtime Recallable Section Semantics
+
+- Updated `docs/RPG_RUNTIME_TURN_19_STEP_SIX_INTERACTION_FLOW.md` to make stable section identity a hard requirement for future schema changes.
+- Recorded that any new runtime-facing wiki block intended for retrieval must define stable `sectionId` and controlled `sectionRole`; natural-language markdown headings are only display headings or aliases.
+- Added a suggested `RecallableSection` shape with `sectionId`, `sectionRole`, `heading`, `aliases`, `lineTargets`, visibility / temporal / authority metadata, `readModes`, and `summaryPolicy`.
+- Clarified that `RetrievalIndexEntry.availableSections` should be `RecallableSection[]`, and that `RecallSelection.selectedItems.sections` and `RecallExclusion.sections` should reference `sectionId` rather than current markdown headings.
+- Clarified that `OutlineSlice.section` should also prefer the selected `RecallableSection.sectionId`, keeping markdown headings only as human-facing labels when needed.
+- This was documentation-only. No source code, tests, runtime behavior, import behavior, LLM calls, git commit, or git push were performed.
+
+## 2026-06-10 - RPG Runtime Schema Implementation Strategy
+
+- Updated `docs/RPG_RUNTIME_TURN_19_STEP_SIX_INTERACTION_FLOW.md` with an explicit implementation strategy for schema work: build a minimal shared runtime schema spine first, then advance module by module.
+- Recorded that the next implementation should not attempt a full 6 / 7 LLM schema rewrite up front, and should not let each module invent overlapping base fields independently.
+- Defined the shared spine scope: narrative/use-purpose lines, visibility and knowledge scopes, happened status, runtime delta refs, time/pacing/clock basics, gap/outline impact boundaries, and the `wiki/` versus `.llm-wiki/runtime/` persistence boundary.
+- Recorded Action Resolver as the first module to implement after the shared spine because it is the fact entrance for later World Tick, Narration, and Runtime Update Proposal stages.
+- Added a five-step follow-up plan: Schema Spine, Action Resolver Contract, Action Resolver Interaction, Orchestrator integration, and focused tests.
+- Clarified that the first Action Resolver integration should move the runtime flow from `preview -> narration -> turnRecord -> update proposal` to `preview -> actionResolution -> narration -> turnRecord -> update proposal`, without introducing World Tick yet.
+- This was documentation-only. No source code, tests, runtime behavior, import behavior, LLM calls, git commit, or git push were performed.
+
+## 2026-06-10 - RPG Runtime TensionLine Authority Plan
+
+- Updated `docs/RPG_RUNTIME_TURN_19_STEP_SIX_INTERACTION_FLOW.md` to elevate `tensionLine` from a per-turn tension observation into a long-running emotional / dramatic tension outline parallel to `playerVisibleLine` and `parallelLine`.
+- Reframed `plot-arcs/` and `plot-arcs/runtime/` as a tension fuel / plot material layer rather than the long-term story-structure authority: they now provide foreshadowing, unresolved conflicts, pressure sources, clock candidates, branch/reveal material, and possible tension moves that `tensionLine` can consume.
+- Proposed `wiki/outlines/tension-line.md` as the preferred persistent control slot for the emotional / dramatic tension outline, with `wiki/outlines/progress.md#Tension Line Progress` as a first-version transitional location if a new fixed slot is deferred.
+- Updated the shared schema guidance, LLM 2 World Tick plan, LLM 3 Recall Selector plan, LLM 4 Outline-aware Brief Compiler plan, LLM 5 Narration Generator plan, LLM 6 Runtime Update Proposal plan, and the 19-step flow language to carry `tensionLineOutline`, `plotArcTensionFuel`, and `tensionLineUpdateCandidate`.
+- Clarified writeback boundaries: relationship facts go to `relationships/runtime`, plot pressure material goes to `plot-arcs/runtime`, and long-term tension direction goes to the tensionLine slot through proposal / pending / review / apply.
+- This was documentation-only. No source code, tests, runtime behavior, import behavior, LLM calls, git commit, or git push were performed.
+
+## 2026-06-10 - RPG Runtime Shared Schema Conflict Unification
+
+- Updated `docs/RPG_RUNTIME_TURN_19_STEP_SIX_INTERACTION_FLOW.md` with a shared runtime schema unification section before the per-LLM schema plans.
+- Unified the soft-conflict concepts across the 7 schema-planning rounds: persistence priority, `NarrativeLine` versus `UsePurpose`, visibility and knowledge fields, `HappenedStatus`, `RuntimeDeltaRef`, clock/pacing persistence, gap versus outline impact levels, outline progress versus plot-arc runtime boundaries, outline revision review item separation, tension writeback boundaries, and next-action option non-fact status.
+- Clarified that current-scene only stores the next-turn clock/pacing snapshot, long-lived clock authority belongs in the relevant runtime overlay, and per-turn clock/pacing deltas remain in `WorldTickResult` / `workingState` / turn journal until proposal/apply.
+- Clarified that `outlineRevisionProposal` is not a normal `ProposedWikiUpdate`; LLM 6 may package it as an independent `outlineRevision` review item, but ordinary runtime update must not write `outlines/main.md`.
+- Recorded the preferred code-readable follow-up direction: add shared guidance/types such as `RPG_RUNTIME_SHARED_SCHEMA_GUIDANCE`, visibility fields, runtime delta refs, clock fields, outline impact levels, and review item kinds before implementing individual interaction specs.
+- This was documentation-only. No source code, tests, runtime behavior, import behavior, LLM calls, git commit, or git push were performed.
+
+## 2026-06-10 - RPG Runtime Update Proposal Schema Plan
+
+- Updated `docs/RPG_RUNTIME_TURN_19_STEP_SIX_INTERACTION_FLOW.md` under `Schema 改造计划记录` with the LLM 6 / Runtime Update Proposal schema plan.
+- Documented that LLM 6 should consume the validated `workingState`, `ActionResolution`, `WorldTickResult`, `RecallSelection`, outline/narration briefs, optional provisional outline patch and outline revision proposal, `TurnNarration`, consistency validation, display policy, write policy, and review policy.
+- Recorded that Runtime Update Proposal should evolve from extracting updates out of `submittedAction + generatedNarrative + references` into generating reviewable proposal packages from structured runtime deltas.
+- Identified schema gaps around source delta references, line/visibility/knowledge metadata, pacing and clock update proposals, outline revision review items, skipped delta/no-op reporting, proposal grouping, and JSON-first proposal output.
+- Proposed `RuntimeUpdateProposalInput`, `RuntimeUpdateProposalResult`, enhanced `ProposedWikiUpdate`, `OutlineRevisionReviewItem`, `SkippedRuntimeDelta`, `PacingUpdateProposal`, and `ProposalGroup` shapes, plus an implementation order from schema docs to code-readable guidance, structured parser updates, and stronger local validation.
+- This was documentation-only. No source code, tests, runtime behavior, import behavior, LLM calls, git commit, or git push were performed.
+
+## 2026-06-10 - RPG Runtime Narration Generator Schema Plan
+
+- Updated `docs/RPG_RUNTIME_TURN_19_STEP_SIX_INTERACTION_FLOW.md` under `Schema 改造计划记录` with the LLM 5 / Narration Generator schema plan.
+- Documented that LLM 5 should consume `workingState`, `OutlineAwareNarrationBrief`, optional `ProvisionalOutlinePatch.narrationHandoff`, `ActionResolution`, `WorldTickResult`, selected visible content, selected parallel lens, reaction queue, pacing directive, campaign delta requirement, reveal policy, style bundle, forbidden narration constraints, and output contract.
+- Recorded that the current single `narrative`-oriented `RpgTurnResult` is too narrow and should become a three-line, verifiable `TurnNarration` structure with `playerFacingText`, `parallelLineText`, `tensionBrief`, `nextActionOptions`, `displayPolicy`, `narrationMeta`, and references.
+- Identified schema gaps around narration handoff priority, player knowledge boundary, structured tension brief, pacing compliance, enhanced next action option metadata, and style/runtime handoff boundaries.
+- Proposed `NarrationGeneratorInput`, `TurnNarration`, `NarrationDisplayPolicy`, `TensionBrief`, `NarrationMeta`, and enhanced `RpgActionOption` shapes, plus an implementation order from schema docs to code-readable guidance, narration output type changes, and later update proposal consumption.
+- This was documentation-only. No source code, tests, runtime behavior, import behavior, LLM calls, git commit, or git push were performed.
+
+## 2026-06-10 - RPG Runtime Story Outline Regenerator Schema Plan
+
+- Updated `docs/RPG_RUNTIME_TURN_19_STEP_SIX_INTERACTION_FLOW.md` under `Schema 改造计划记录` with the conditional LLM +1 / Story Outline Regenerator schema plan.
+- Documented that the conditional regenerator should only run after `major_rewrite_required`, consume `workingState`, outline slices, outline progress, `OutlineImpactReport`, `RegenerationRequest`, confirmed/immutable facts, preservation constraints, visibility boundaries, reveal policy, and review policy.
+- Recorded the required dual-track output: `ProvisionalOutlinePatch` for same-turn non-persistent hard narration constraints, and `OutlineRevisionProposal` as an independent review/pending item that cannot silently update `outlines/main.md`.
+- Identified schema gaps around provisional patch structure, outline revision proposal structure, immutable facts, outline revision review boundary, progress/proposal separation, reveal/theme preservation, and narration handoff constraints.
+- Proposed `StoryOutlineRegeneratorInput`, `ProvisionalOutlinePatch`, `ProvisionalNarrationHandoff`, `OutlineRevisionProposal`, and `RegenerationSafetyReport` shapes, plus an implementation order from schema docs to code-readable guidance, interaction spec, and separate review handling.
+- This was documentation-only. No source code, tests, runtime behavior, import behavior, LLM calls, git commit, or git push were performed.
+
+## 2026-06-10 - RPG Runtime Outline Brief Schema Plan
+
+- Updated `docs/RPG_RUNTIME_TURN_19_STEP_SIX_INTERACTION_FLOW.md` under `Schema 改造计划记录` with the LLM 4 / Outline-aware Brief Compiler + Outline Impact Detector schema plan.
+- Documented that LLM 4 should consume `workingState`, `ActionResolution`, `WorldTickResult`, `RecallSelection`, recalled materials, pacing state, gap state, reaction queue, visibility boundaries, outline slices, plot arc runtime state, rules, style constraints, and forbidden contradictions.
+- Recorded that LLM 4 should output a filtered narration brief plus `OutlineImpactReport`, and when required a `RegenerationRequest`, rather than player-facing prose or direct outline writes.
+- Identified schema gaps around machine-readable outline beat/reveal/branch ids, outline impact rubric, line-specific brief structure, reveal policy, plot-arc/runtime-to-outline linkage, dependency/contradiction fields, and narration handoff boundaries.
+- Proposed `OutlineBriefCompilerInput`, `OutlineSlice`, `OutlineAwareNarrationBrief`, `OutlineImpactReport`, and `RegenerationRequest` shapes, plus an implementation order from outline schema docs to code-readable guidance, interaction spec, and filtered handoff to narration.
+- This was documentation-only. No source code, tests, runtime behavior, import behavior, LLM calls, git commit, or git push were performed.
+
+## 2026-06-10 - RPG Runtime Recall Selector Schema Plan
+
+- Updated `docs/RPG_RUNTIME_TURN_19_STEP_SIX_INTERACTION_FLOW.md` under `Schema 改造计划记录` with the LLM 3 / Recall Selector schema plan.
+- Documented that LLM 3 should consume the action-after `workingState`, `ActionResolution`, `WorldTickResult`, selected visible content, selected parallel lens, pacing state, gap state, outline position, a lightweight retrieval index, recall budget, and recall policy.
+- Recorded that LLM 3 should output a recall plan / allowlist, not player-facing prose or direct file contents; actual path and section reads remain local and constrained by safety policy.
+- Identified schema gaps around mandatory `Runtime Capsule`, page-level recall metadata, section-level recall, three-line recall boundaries, negative recall / exclusions, and working-state anchor fields.
+- Proposed `RecallSelectorInput`, `RetrievalIndexEntry`, `RecallSelection`, `RecallLineTarget`, and `RecallExclusion` shapes, plus an implementation order from schema docs to code-readable guidance, interaction spec, and local allowlisted reads.
+- This was documentation-only. No source code, tests, runtime behavior, import behavior, LLM calls, git commit, or git push were performed.
+
+## 2026-06-10 - RPG Runtime World Tick Schema Plan
+
+- Updated `docs/RPG_RUNTIME_TURN_19_STEP_SIX_INTERACTION_FLOW.md` under `Schema 改造计划记录` with the LLM 2 / World Tick + Reaction schema plan.
+- Documented that LLM 2 should consume `ActionResolution`, `playerActionDelta`, pacing state, active clocks, ongoing events, relationship pressure, plot arc runtime state, outline position, gap signals, and visibility boundaries, then output structured world deltas instead of player-facing prose or direct wiki updates.
+- Recorded the current schema gaps for active clocks/countdowns, ongoing events, information broadcast, reaction queue, three-line delta visibility metadata, and pacing debt persistence.
+- Proposed stronger required semantics for `wiki/current-scene/scene_state.md`, `plot-arcs/runtime`, `relationships/runtime`, `characters/runtime`, `factions/runtime`, `locations/runtime`, `items/runtime`, and `player/known_information.md`.
+- Added suggested `WorldTickInput`, `WorldTickResult`, and `WorldTickVisibilityMeta` shapes, plus an implementation order: update schema docs, add code-readable schema guidance, add World Tick interaction/types, then persist `WorldTickResult` in runtime records for working-state merge.
+- This was documentation-only. No source code, tests, runtime behavior, import behavior, LLM calls, git commit, or git push were performed.
+
+## 2026-06-10 - RPG Runtime Action Resolver Schema Plan
+
+- Updated `docs/RPG_RUNTIME_TURN_19_STEP_SIX_INTERACTION_FLOW.md` with a new `Schema 改造计划记录` section for recording per-LLM schema requirements during turn-flow discussion.
+- Added the LLM 1 / Action Resolver schema plan: current schema can support only rough action parsing and needs stronger pre-action snapshot, active clock/countdown, pacing, visibility, adjacent beat, and structured action-resolution contracts.
+- Documented that `runtime/` should not become a normal wiki category for this purpose; short-lived Action Resolver outputs should live in turn records / runtime journal, while persistent facts remain behind pending/review/apply.
+- Proposed stronger required semantics for `wiki/current-scene/scene_state.md`, `wiki/player/known_information.md`, `wiki/outlines/progress.md`, `rules/`, and runtime overlays before implementing Action Resolver itself.
+- Recorded suggested `ActionResolverInput` and `ActionResolution` shapes plus an implementation order: update schema docs, add code-readable schema guidance, add Action Resolver interaction spec, then persist `ActionResolution` in runtime records.
+- This was documentation-only. No source code, tests, runtime behavior, import behavior, LLM calls, git commit, or git push were performed.
+
+## 2026-06-10 - RPG Runtime Outline Gap Event Update
+
+- Updated `docs/RPG_RUNTIME_TURN_19_STEP_SIX_INTERACTION_FLOW.md` so gaps between key outline beats are treated as elastic runtime periods rather than empty or automatically low-impact filler.
+- Added `gapState` with `betweenBeats`, `gapMode`, `gapEvent`, `gapImpactLevel`, and `affectedFutureBeats`.
+- Clarified that gap events may change the future outline if they are causally grounded in player action, character motivation, location conditions, active clocks, parallel-line movement, relationship pressure, or pacing pressure.
+- Documented that outline revision is not permission before a gap event happens; the event is first settled as runtime fact, then Outline Impact Detector and optional step 14.5 adapt the future outline.
+- Updated steps 1, 5, 7, 8, 12-18 so adjacent key beats, branch conditions, gap detection, gap event settlement, validation, writeback, outline progress, and accepted fact priority are explicit.
+- This was documentation-only. No source code, tests, runtime behavior, import behavior, LLM calls, git commit, or git push were performed.
+
+## 2026-06-10 - RPG Runtime Pacing Anti-Stagnation Update
+
+- Updated `docs/RPG_RUNTIME_TURN_19_STEP_SIX_INTERACTION_FLOW.md` to explicitly prevent RPG runtime stagnation where many dialogue turns advance only tiny amounts of in-world time.
+- Added a `timeDelta` / `campaignDelta` / `pacingIntent` / `stagnationRisk` / `pacingDebt` / `activeClocks` pacing model.
+- Clarified that one turn is not one minute: elapsed in-world time must be derived from the submitted action, scene needs, active clocks, and pacing policy.
+- Added the default rule that formal turns should produce at least one campaign delta unless the player or GM explicitly requests pause, waiting, recap, casual talk, or deliberately slow interaction.
+- Updated the 19-step flow so action resolution, world tick, recall, brief compilation, narration, validation, runtime update proposal, and apply all preserve pacing and clock boundaries.
+- This was documentation-only. No source code, tests, runtime behavior, import behavior, LLM calls, git commit, or git push were performed.
+
+## 2026-06-10 - RPG Runtime Three-Line Narration Update
+
+- Updated `docs/RPG_RUNTIME_TURN_19_STEP_SIX_INTERACTION_FLOW.md` to formalize a three-line narration model: `playerVisibleLine`, `parallelLine`, and `tensionLine`.
+- Defined `parallelLine` as player-invisible/offscreen narration that is generated by default and controlled by `displayPolicy.showParallelLine` for UI display.
+- Clarified that showing the parallel line to the real user/GM does not make it player-character knowledge and must not automatically update `player/known_information.md`.
+- Updated the runtime flow language for World Tick, Recall Selector, Outline-aware Brief Compiler, Narration Generator, consistency validation, and Runtime Update Proposal so lane ownership, visibility, knowledge source, and writeback boundaries remain explicit.
+- This was documentation-only. No source code, tests, runtime behavior, import behavior, LLM calls, git commit, or git push were performed.
+
+## 2026-06-10 - RPG Runtime Outline Impact Branch Update
+
+- Updated `docs/RPG_RUNTIME_TURN_19_STEP_SIX_INTERACTION_FLOW.md` so the 19-step runtime flow now includes Outline Impact Detector inside step 14 as part of the outline-aware brief compiler.
+- Added conditional step 14.5 for Story Outline Regenerator. Regular turns remain minimum 6 LLM interactions; major outline-divergence turns add one conditional LLM interaction before narration.
+- Documented the split between `provisionalOutlinePatch` and `outlineRevisionProposal`: the patch is a same-turn hard constraint for narration, while the revision proposal is a separate review/pending item and cannot silently overwrite `wiki/outlines/main.md`.
+- Updated steps 15-17 so narration must follow the provisional patch, consistency validation gates patch compliance before player-visible output and writeback proposal, and any outline revision remains separate from ordinary runtime updates.
+- This was documentation-only. No source code, tests, runtime behavior, import behavior, LLM calls, git commit, or git push were performed.
+
+## 2026-06-10 - RPG Runtime 19-Step Flow Draft
+
+- Added `docs/RPG_RUNTIME_TURN_19_STEP_SIX_INTERACTION_FLOW.md` as a detailed discussion draft for a 19-step RPG Runtime turn flow using the minimum 6 LLM interactions.
+- The draft separates local snapshot/context/merge/review/apply work from the six model-facing stages: Action Resolver, World Tick + Reaction, Recall Selector, Brief Compiler, Narration Generator, and Runtime Update Proposal.
+- It records the key sequencing principle under discussion: action parsing uses only minimal pre-action context, total recall happens after an action-after working state exists, and persistent wiki writes remain behind proposal / pending / review / apply.
+- This was documentation-only. No source code, tests, runtime behavior, import behavior, LLM calls, git commit, or git push were performed.
+
+## 2026-06-09 - Context Compiler Setting Availability Reframing
+
+- Updated `docs/CONTEXT_COMPILER_REDESIGN_PLAN.md` to document how Context Compiler replaces traditional AI roleplay's full-setting injection.
+- Added the `setting availability system` concept: narration should receive the current turn's world slice through fixed hard context, capsule indexes, relevant recall, director / advancement brief, source path references, and post-turn runtime writeback, rather than receiving all setting material.
+- Clarified the always-on context set: submitted action, current-scene, fixed player slots, active quests, core/relevant rules, forbidden style / hard gates / explicit control blocks, player preferences, and recent reliable turn records or capsules.
+- Added capsule-first reading guidance for runtime-facing wiki pages, including the recommended `Runtime Capsule` shape and the rule that full sections should be read only when the player action directly touches their details.
+- Added narration knowledge-boundary rules: narration can freely write prose and pacing, but should treat the brief, source paths, fixed hard context, forbidden assumptions, and plot advancement fields as its knowledge boundary; it must not invent unstated world facts, NPC knowledge, location state, item powers, or happened events.
+- Added `knowledgeBoundary` fields to the proposed second-pass brief shape: `alwaysOnContext`, `recalledSettingSlice`, `capsuleOnlyPaths`, `expandedSectionPaths`, `sourcePathPolicy`, and `doNotInvent`.
+- This was documentation-only. No source code, tests, runtime behavior, import behavior, LLM calls, git commit, or git push were performed.
+
+## 2026-06-09 - Context Compiler Plot Advancement Reframing
+
+- Updated `docs/CONTEXT_COMPILER_REDESIGN_PLAN.md` and the Stage 6.17 summary in `docs/LLMWIKIRPG_NEXT_ARCHITECTURE_STEPS.md` to incorporate the latest design reflection: Context Compiler is not just a context summarizer, but the runtime layer that converts recalled memory, current state, and future outline into per-turn plot advancement pressure.
+- Reframed the two LLM interactions: the first pass remains Recall Selector / Memory Routing, while the second pass is now `Outline-aware Plot Advancement Brief Compiler`, responsible for director judgment and a concrete campaign delta rather than ordinary synthesis.
+- Added the principle that every formal narration turn should produce at least one campaign delta, with `micro`, `medium`, and `strong` advancement strengths. The default v1 pacing policy requires at least micro advancement, prefers medium pressure after several low-progress turns, and reserves strong advancement for justified player action / state / outline conditions.
+- Added `plotAdvancement` output guidance with `pacingIntent`, `advancementStrength`, `thisTurnMustChange`, `beatToApproach`, `pressureMove`, `revealPolicy`, `doNotResolveYet`, and `playerAgencyRule`.
+- Clarified that the second pass must not prewrite player-facing narrative, full NPC dialogue, next action options, or secondhand style summaries; it must instead tell narration what should change, what pressure should surface, what should remain hidden, and how to avoid railroading while still advancing the world.
+- This was documentation-only. No source code, tests, runtime behavior, import behavior, LLM calls, git commit, or git push were performed.
+
+## 2026-06-09 - Context Compiler v1 Plan Alignment
+
+- Updated `docs/CONTEXT_COMPILER_REDESIGN_PLAN.md` before implementation so it reflects the completed RPG LLM interaction consolidation and RPG import modularization work.
+- Context Compiler v1 is now documented as a fixed two-LLM-interaction flow for every formal narration turn: Recall Selector / Memory Routing followed by Outline-aware Context Brief Compiler. It no longer describes normal 1-call downgrade or 3-call upgrade modes; deterministic v0 fallback remains only for LLM failure.
+- Replaced the obsolete `wiki/plot-arcs/main-outline.md` reference with the current fixed outline slots: `wiki/outlines/main.md` and `wiki/outlines/progress.md`, plus active `plot-arcs/*.md` and `plot-arcs/runtime/*.md`.
+- Clarified outline guidance extraction through schema sections: main outline supplies premise, act structure, intended/delayed reveals, branch conditions, and must-not-contradict constraints; outline progress supplies current stage, completed/diverged beats, and next useful beats; plot arcs supply dramatic question, current pressure, conflicts, and runtime beat changes.
+- Reworked the control-material boundary: rules slots may inform Context Compiler reasoning; `style_narration` / `style_dialogue` should pass through to Narration instead of being rewritten as secondhand style summaries; `style_forbidden`, `memory_player_preferences`, `{{setvar::...}}`, forbidden words, and hard gates remain high-priority control material; other memory slots are auxiliary and not more authoritative than concrete fact/state directories.
+- Updated `docs/LLMWIKIRPG_NEXT_ARCHITECTURE_STEPS.md` Stage 6.17 summary to match the revised detailed plan and current `src/lib/rpg-interactions/` directory layout for future context-compiler interaction specs.
+- This was documentation-only. No source code, tests, runtime behavior, import behavior, LLM calls, git commit, or git push were performed.
+
 ## 2026-06-09 - RPG LLM Interaction Consolidation Phase 4-5
 
 - Completed Phase 4-5 of `docs/RPG_LLM_INTERACTION_CONSOLIDATION_PLAN.md`: import mode model/contract boundaries are now queryable from `src/lib/rpg-interactions/`, and old RPG prompt islands were rechecked.

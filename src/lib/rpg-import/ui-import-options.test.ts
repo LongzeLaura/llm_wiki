@@ -43,6 +43,10 @@ describe("RPG import UI options", () => {
   it("maps exposed campaign setup semantics to the supported mode and slots", () => {
     expect(listCampaignSetupUiSlots()).toEqual([
       "player_main",
+      "player_abilities",
+      "player_inventory",
+      "player_goals",
+      "player_known_information",
       "current_scene",
       "events_prologue",
       "main_quest",

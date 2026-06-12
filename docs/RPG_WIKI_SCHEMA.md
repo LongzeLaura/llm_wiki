@@ -84,23 +84,28 @@
 
 ## Import Mode 与固定 Schema Slot 契约
 
-本节冻结 RPG import / apply 的文档契约。后续实现可以把这些契约转成 code-readable schema helper，但本阶段只定义名称、语义边界、路径边界和写入策略，不改变运行时代码、ordinary ingest、UI 或测试。
+本节冻结当前 RPG import / apply 的文档契约，并应与 code-readable schema helper、ordinary ingest target policy、项目骨架和测试保持同步。后续实现变更这些边界时，应同时更新本节。
 
 ### Import / Apply Mode
 
 | mode | 语义 | 典型输入 | 允许目标路径 | 禁止路径 / 禁止行为 | 写入策略边界 |
 |---|---|---|---|---|---|
-| `source_ingest` | 普通来源资料导入；有损编译器，把来源材料压缩成 runtime-useful wiki 页面。 | 原作设定、角色分析、人物百科、剧情梗概、对白语料、世界书、网络资料。 | `wiki/sources/`、`wiki/world/`、`wiki/characters/`、`wiki/locations/`、`wiki/factions/`、`wiki/items/`、`wiki/plot-arcs/`、`wiki/events/`、`wiki/relationships/`；只有来源明确声明当前 PC 时，才可写固定 `wiki/player/*.md` slot。 | 不写 `wiki/current-scene/`；不写 `wiki/rules/`、`wiki/style/`、`wiki/memory/`、`wiki/outlines/main.md` 或 `wiki/outlines/progress.md`；不把未来大纲、可能发展或候选行动写入 `events`；不把原作主角默认写入 `player`；不写 legacy `entities`、`concepts`、`queries` 等旧目录。 | 走 ordinary ingest 的安全写入边界；对固定 player slot 只能在明确 PC 语义下合并，不新增、不删除任意 `wiki/player/*.md` 文件。 |
+| `source_ingest` | 普通来源资料导入；有损编译器，把来源材料压缩成 runtime-useful wiki 页面。 | 原作设定、角色分析、人物百科、剧情梗概、对白语料、世界书、网络资料。 | `wiki/sources/`、固定 `wiki/world/*.md` slot、`wiki/characters/`、`wiki/locations/`、`wiki/factions/`、`wiki/items/`、`wiki/plot-arcs/`、`wiki/events/`、`wiki/relationships/`；只有来源明确声明当前 PC 时，才可写固定 `wiki/player/*.md` slot。 | 不写任意新增 `wiki/world/<custom>.md`；不写 `wiki/current-scene/`；不写 `wiki/rules/`、`wiki/style/`、`wiki/memory/`、`wiki/outlines/main.md` 或 `wiki/outlines/progress.md`；不把未来大纲、可能发展或候选行动写入 `events`；不把原作主角默认写入 `player`；不写 legacy `entities`、`concepts`、`queries` 等旧目录。 | 走 ordinary ingest 的安全写入边界；对固定 world/player slot 只能合并到既有 slot，不新增、不删除任意 `wiki/world/*.md` 或 `wiki/player/*.md` 文件。 |
 | `control_doc_import` | 控制文档导入；保真规范化器，保护用户显式控制语义。 | 主线大纲、章节安排、揭示顺序、跑团规则、世界规则、桌规、文风要求、禁用词、hard gate、玩家偏好、长期提示、会话笔记。 | 固定控制 slot：`wiki/outlines/main.md`、`wiki/outlines/progress.md`、`wiki/rules/core.md`、`wiki/rules/world.md`、`wiki/rules/table.md`、`wiki/style/narration.md`、`wiki/style/dialogue.md`、`wiki/style/forbidden.md`、`wiki/memory/long-term.md`、`wiki/memory/session-notes.md`、`wiki/memory/player-preferences.md`；可另存 `wiki/sources/imports/<source>.md` 作为 raw source anchor。 | 不写 `wiki/current-scene/`；不写 `events`；不把 `Possible Futures` 或未来 reveal 当作已发生事实；不丢弃 `{{setvar::...}}`、禁用词、hard gate 或用户显式控制块；不把规则、文风、偏好当作剧情状态。 | 默认 `manual_or_review_only`；只做结构化、frontmatter、section 规范化、wikilink enrichment 和必要 runtime-facing section 补齐。 |
 | `campaign_setup_import` | 战役初始化导入；开局状态 bootstrap，把 PC、序章事实、初始目标、初始关系和当前场景分层落位。 | 玩家角色设定、初始能力、背包、已知信息、开局目标、初始关系、已发生序章、游戏开始时当前场景、开局地点和在场人物。 | 固定 player slot、`wiki/current-scene/scene_state.md`、`wiki/events/prologue.md`、`wiki/quests/*.md`、`wiki/relationships/*.md`、`wiki/outlines/main.md`、`wiki/outlines/progress.md`、`wiki/plot-arcs/*.md`、`wiki/locations/runtime/*.md`、`wiki/items/runtime/*.md`。 | 不把开场场景混入 `source_ingest`；不把未来剧情写入 `events`；不把玩家能力拆入 `rules/`；不把 NPC 当前状态写入 base `characters/*.md`；不新增或删除任意 player 文件。 | `current-scene` 显式 bootstrap/overwrite；固定 player slot merge；序章事件 append/create；大纲和规则类内容仍按 review/manual 边界处理。 |
 | `runtime_update_apply` | 游玩中状态写回；runtime apply，不是文件导入，只应用已确认发生的回合结果。 | 已完成 RPG 回合记录、玩家已提交行动、已生成正文、已确认 references、accepted pending updates。 | `wiki/current-scene/scene_state.md`、`wiki/events/*.md`、固定 `wiki/player/*.md`、`wiki/quests/*.md`、`wiki/outlines/progress.md`、`wiki/relationships/runtime/*.md`、`wiki/plot-arcs/runtime/*.md`、`wiki/characters/runtime/*.md`、`wiki/locations/runtime/*.md`、`wiki/factions/runtime/*.md`、`wiki/items/runtime/*.md`。 | 不写 `wiki/sources/`、`wiki/world/`、`wiki/rules/`、`wiki/style/`、`wiki/memory/`、`wiki/outlines/main.md`、base `characters/locations/factions/items`、base `relationships/*.md`、base `plot-arcs/*.md` 或 legacy 目录；不写候选行动、未选择选项、未来可能和未确认推测。 | 只能通过 pending/review/apply 边界；`current-scene` overwrite；`events` append/create；player、quests、outline progress 和 runtime overlays merge。 |
 
 ### 固定 Schema Slots
 
-这些 slot 是全新 `llmWikiRPG` 项目的固定入口文件，也是后续 Context Compiler 读取优先级和 import target policy 的基础。缺失固定 slot 表示新项目结构不完整，应产生 warning 或可修复结构提示；这不是旧项目迁移、legacy fallback 或旧路径保留场景。
+这些 slot 是全新 `llmWikiRPG` 项目的固定入口文件，也是后续 module-specific input builders / runtime handoff readers 的读取优先级和 import target policy 的基础。缺失固定 slot 表示新项目结构不完整，应产生 warning 或可修复结构提示；这不是旧项目迁移、legacy fallback 或旧路径保留场景。
 
 | slotId | path | owner | requiredForNewProject | runtimePriority | importPolicy | writePolicy |
 |---|---|---|---|---|---|---|
+| `world_basic_overview` | `wiki/world/basic_overview.md` | `source_ingest` | true | high | `ordinary_ingest` | `merge` |
+| `world_history` | `wiki/world/history.md` | `source_ingest` | true | normal | `ordinary_ingest` | `merge` |
+| `world_common_sense` | `wiki/world/common_sense.md` | `source_ingest` | true | normal | `ordinary_ingest` | `merge` |
+| `world_supernatural_presence` | `wiki/world/supernatural_presence.md` | `source_ingest` | true | normal | `ordinary_ingest` | `merge` |
+| `world_social_structure` | `wiki/world/social_structure.md` | `source_ingest` | true | normal | `ordinary_ingest` | `merge` |
 | `main_outline` | `wiki/outlines/main.md` | `control_doc` | true | high | `controlled_canonicalize` | `manual_or_review_only` |
 | `outline_progress` | `wiki/outlines/progress.md` | `runtime` | true | high | `runtime_apply` | `merge` |
 | `rules_core` | `wiki/rules/core.md` | `control_doc` | true | critical | `controlled_canonicalize` | `manual_or_review_only` |
@@ -120,6 +125,27 @@
 | `player_known_information` | `wiki/player/known_information.md` | `campaign_setup` | true | high | `campaign_bootstrap` | `merge` |
 
 `owner` 表示该 slot 的主要语义拥有者；显式的 `campaign_setup_import` 或 `control_doc_import` 可以初始化对应 slot，但后续 runtime 写回仍必须遵守该 slot 的 `writePolicy` 和 mode 禁止路径。
+
+### 固定 `world/` 文件集合
+
+`wiki/world/` 固定包含以下文件：
+
+```text
+wiki/world/basic_overview.md
+wiki/world/history.md
+wiki/world/common_sense.md
+wiki/world/supernatural_presence.md
+wiki/world/social_structure.md
+```
+
+约定：
+
+- `world/basic_overview.md`：世界核心前提、时代、主要舞台、类型基调、整体氛围。
+- `world/history.md`：世界历史、公开过去、历史背景和已确定的大事件；不记录当前战役回合事件。
+- `world/common_sense.md`：普通人默认知道的常识、习俗、禁忌、日常社会认知和公共知识。
+- `world/supernatural_presence.md`：超自然、科技、怪异、神秘体系在世界中的存在方式和可见呈现；可执行规则进入 `rules/`。
+- `world/social_structure.md`：社会结构、制度、阶层、法律、经济、公共权力结构和广义组织方式；具体组织进入 `factions/`。
+- import framework 不应新增或删除任意 `wiki/world/*.md`；额外 world 子主题应合并进上述固定 slot。
 
 ### 固定 `player/` 文件集合
 
@@ -163,7 +189,81 @@ relationships/*.md           + relationships/runtime/*.md
 plot-arcs/*.md               + plot-arcs/runtime/*.md
 ```
 
-Context Compiler 读取时先读 base，再叠加 runtime overlay，得到当前战役视角。overlay 是分层读取/组织模型；merge 是更新单个目标文件的写入策略。`runtime_update_apply` 不直接改写 base `relationships/*.md` 或 base `plot-arcs/*.md`，关系和剧情弧的运行时变化写入对应 `runtime/` overlay。
+Module-specific input builders / runtime handoff readers 读取时先读 base，再叠加 runtime overlay，得到当前战役视角。overlay 是分层读取/组织模型；merge 是更新单个目标文件的写入策略。`runtime_update_apply` 不直接改写 base `relationships/*.md` 或 base `plot-arcs/*.md`，关系和剧情弧的运行时变化写入对应 `runtime/` overlay。
+
+## 阶段读写矩阵
+
+本节只描述 `wiki/` 持久目录在各阶段的可改动范围和可读取范围。运行时中间产物、turn record、runtime journal、pending metadata、LLM input/output contract 和 `.llm-wiki/runtime/` 不属于普通 wiki category；它们可以引用 `wiki/`，但不能作为 `wiki/runtime/` 页面被普通 ingest 写入。
+
+Runtime-only 类型契约、字段枚举和各 LLM step 的 JSON schema 应放在对应 runtime/interaction 文档或代码类型中维护；本文件只保留目录级 schema、落点、读写边界和跨目录语义。
+
+### 阶段 / 模块名称
+
+- `source_ingest`：普通来源导入，把原始资料压缩到 source/world/base entity/event/relationship/plot-arc 等目录。
+- `control_doc_import`：控制文档导入，规范化大纲、规则、文风、长期记忆和 raw source anchor。
+- `campaign_setup_import`：战役初始化导入，写入 PC、开局场景、序章、初始目标、初始关系和开局 runtime overlay。
+- `manual_or_review`：用户手动编辑，或用户明确接受 review / pending item 后的受控写入。所有目录都可改动，故省略
+- `post_ingest_derivation`：导入后的派生整理，如关系、张力、capsule、索引或摘要；默认产出待审结果，不能绕过 review 直接写控制层。
+- `recall_selector`：召回选择模块，只从已索引/已编译材料中筛选本轮相关材料，不直接写 `wiki/`。
+- `action_resolver`：行动裁判模块，读取当前场景、PC、规则和相关对象；不直接写 `wiki/`。
+- `world_tick`：世界推进 / reaction 模块，读取行动结果、当前状态和相关 overlay；不直接写 `wiki/`。
+- `outline_brief`：Outline-aware Brief Compiler，读取大纲切片、进度、剧情弧、关系张力和召回材料；不直接写 `wiki/`。
+- `story_outline_regenerator`：重大偏离时的大纲修订提案模块，只产出临时 handoff 或独立 outline review item；不自动改写 `wiki/outlines/main.md`。
+- `narration_generator`：叙事生成模块，读取前置 handoff、召回材料、style bundle 和可见性边界；不直接读任意 `wiki/` 文件，也不直接写 `wiki/`。
+- `runtime_update_proposal`：写回提案模块，读取结构化回合 delta、引用材料和允许目标策略，生成 pending/review proposal；不直接落盘。
+- `runtime_update_apply`：用户接受 pending 后的实际写回，只写允许的 runtime apply 目标。
+
+当前代码中仍存在的 `compileRpgContext()` / `CompactStoryBrief` 应称为 `legacy_context_compiler_v0` 或 `legacy_compact_brief_builder`。它是待拆除实现，不是目标 runtime 模块；正式 runtime 目标不是新建 `Context Compiler v1`，而是拆成 module-specific input builders / runtime handoff readers。
+
+### 目录矩阵
+
+| 目录 / 文件 | 可改动阶段 | 可读取阶段 / runtime 模块 | 写读边界 |
+|---|---|---|---|
+| `wiki/sources/` | `source_ingest`、`control_doc_import` raw anchor | `recall_selector`、`runtime_update_proposal` 引用审计、`post_ingest_derivation` | 来源证据层；runtime 模块只引用 provenance，不把 sources 当作当前状态权威。 |
+| 固定 `wiki/world/*.md` slot | `source_ingest`、受审 `post_ingest_derivation` | `recall_selector`、`world_tick`、`outline_brief`、`narration_generator` 通过 handoff、`runtime_update_proposal` 引用审计 | 固定五 slot；runtime apply 不写 world，不新增 `world/<custom>.md`。 |
+| `wiki/characters/*.md` | `source_ingest`、受审 `post_ingest_derivation` | `recall_selector`、`action_resolver`、`world_tick`、`outline_brief`、`narration_generator` 通过 handoff、`runtime_update_proposal` | base 角色页保存稳定画像和长期可扮演信息；游玩变化进入 `characters/runtime/`。 |
+| `wiki/characters/runtime/*.md` | `runtime_update_apply` | `recall_selector`、`action_resolver`、`world_tick`、`outline_brief`、`runtime_update_proposal` | 只保存已审阅的本战役角色状态 overlay；不是每轮临时工作区。 |
+| 固定 `wiki/player/*.md` slot | `campaign_setup_import`、`runtime_update_apply`；`source_ingest` 仅限来源明确声明当前 PC | `recall_selector`、`action_resolver`、`world_tick`、`outline_brief`、`narration_generator` 通过 handoff、`runtime_update_proposal` | 固定五 slot；不自由新增 player 页面。`known_information.md` 只接收 PC 已知或 PC 误解。 |
+| `wiki/locations/*.md` | `source_ingest`、受审 `post_ingest_derivation` | `recall_selector`、`action_resolver`、`world_tick`、`outline_brief`、`runtime_update_proposal` | base 地点页保存稳定地理、权限和可互动结构；当前封锁、破坏、可达性进入 runtime overlay。 |
+| `wiki/locations/runtime/*.md` | `campaign_setup_import`、`runtime_update_apply` | `recall_selector`、`action_resolver`、`world_tick`、`outline_brief`、`runtime_update_proposal` | 记录本战役地点当前状态、临时危险、封锁、在场线索或开放路径。 |
+| `wiki/factions/*.md` | `source_ingest`、受审 `post_ingest_derivation` | `recall_selector`、`action_resolver`、`world_tick`、`outline_brief`、`runtime_update_proposal` | base 组织页保存稳定目标、资源、结构和边界；当前行动、损耗、立场变化进入 runtime overlay。 |
+| `wiki/factions/runtime/*.md` | `runtime_update_apply` | `recall_selector`、`action_resolver`、`world_tick`、`outline_brief`、`runtime_update_proposal` | 记录本战役组织状态，不改写 base faction 设定。 |
+| `wiki/items/*.md` | `source_ingest`、受审 `post_ingest_derivation` | `recall_selector`、`action_resolver`、`world_tick`、`runtime_update_proposal` | base 物品页保存稳定来源、能力、限制和规则关联；持有、损坏、消耗进入 player 或 runtime overlay。 |
+| `wiki/items/runtime/*.md` | `campaign_setup_import`、`runtime_update_apply` | `recall_selector`、`action_resolver`、`world_tick`、`runtime_update_proposal` | 记录本战役物品当前位置、状态、归属、消耗和临时效果。 |
+| `wiki/relationships/*.md` | `source_ingest`、`campaign_setup_import`、受审 `post_ingest_derivation` | `recall_selector`、`world_tick`、`outline_brief`、`narration_generator` 通过 tension handoff、`runtime_update_proposal` | base 关系页保存初始或稳定关系结构；游玩中的信任、误解、张力变化进入 `relationships/runtime/`。 |
+| `wiki/relationships/runtime/*.md` | `runtime_update_apply` | `recall_selector`、`world_tick`、`outline_brief`、`narration_generator` 通过 tension handoff、`runtime_update_proposal` | 记录已发生或已审阅的关系变化；轻微情绪压力不足以落盘时留在 journal/review。 |
+| `wiki/plot-arcs/*.md` | `source_ingest`、`campaign_setup_import`、受审 `post_ingest_derivation` | `recall_selector`、`outline_brief`、`world_tick` 作为 tension/gap 材料、`narration_generator` 通过 handoff、`runtime_update_proposal` | 保存伏笔、冲突、可能发展和推进方向；不得伪造成已发生事件。 |
+| `wiki/plot-arcs/runtime/*.md` | `runtime_update_apply` | `recall_selector`、`outline_brief`、`world_tick`、`narration_generator` 通过 handoff、`runtime_update_proposal` | 保存本战役已审阅的 branch state、压力、未解决张力和偏离影响。 |
+| `wiki/outlines/main.md` | `control_doc_import`、`campaign_setup_import` 初始主线；接受 `story_outline_regenerator` 的独立 review item 后才可受控改动 | `outline_brief`、`story_outline_regenerator`、`narration_generator` 仅通过 handoff、`runtime_update_proposal` 引用审计 | 作者/GM 控制层；runtime 普通写回不直接改主线大纲。 |
+| `wiki/outlines/progress.md` | `control_doc_import`、`campaign_setup_import`、`runtime_update_apply` | `recall_selector`、`action_resolver` 当前目标背景、`world_tick` pacing/gap、`outline_brief`、`story_outline_regenerator`、`runtime_update_proposal` | 记录相对大纲进度、已完成/跳过/失效 beat 和偏离说明；不把未来修订写成事实。 |
+| `wiki/events/*.md` | `source_ingest`、`campaign_setup_import` 序章、`runtime_update_apply` | `recall_selector`、`world_tick` 历史约束、`outline_brief`、`narration_generator` 通过 handoff、`runtime_update_proposal` | 只写 confirmed happened 事件；候选行动、未确认尝试和未来计划不得进入 events。 |
+| `wiki/current-scene/scene_state.md` | `campaign_setup_import`、`runtime_update_apply` | `recall_selector`、`action_resolver`、`world_tick`、`outline_brief`、`narration_generator` 通过 handoff、`runtime_update_proposal` | 覆盖式当前快照；不保存完整历史，历史进入 events。 |
+| `wiki/quests/*.md` | `campaign_setup_import`、`runtime_update_apply` | `recall_selector`、`action_resolver`、`world_tick`、`outline_brief`、`narration_generator` 通过 handoff、`runtime_update_proposal` | 记录玩家当前目标、任务状态和可行动目标；不是大纲未来安排的替代物。 |
+| 固定 `wiki/style/*.md` slot | `control_doc_import` | `recall_selector`、`narration_generator` 通过 `styleBundle`、`outline_brief` 的 reveal/style 边界、`runtime_update_proposal` 引用审计 | 表达方式和禁用表达层；不提升为世界事实、事件事实或 PC knowledge。 |
+| 固定 `wiki/rules/*.md` slot | `control_doc_import` | `recall_selector`、`action_resolver`、`world_tick`、`narration_generator` 通过 hard constraints、`runtime_update_proposal` 引用审计 | 可执行裁判边界；不存玩家个人能力，PC 能力进入 `player/abilities.md`。 |
+| 固定 `wiki/memory/*.md` slot | `control_doc_import` | `recall_selector`、`narration_generator` 通过 preference/session handoff、`runtime_update_proposal` 引用审计 | 长期提示、会话笔记和玩家偏好；不作为已发生剧情或规则事实自动写回。 |
+
+Runtime 模块的直接输出默认进入本轮 handoff、turn record、journal 或 pending/review。只有 `runtime_update_apply` 在用户接受 pending 后可以落盘到允许目标；`action_resolver`、`world_tick`、`outline_brief`、`story_outline_regenerator`、`narration_generator` 和 `runtime_update_proposal` 都不能绕过 review/apply 直接写 `wiki/`。
+
+### 阶段 / 模块信息流矩阵
+
+本表从阶段视角描述“输入从哪里来、输出到哪里去”。它不替代上面的目录矩阵；目录矩阵定义目录权限，本表定义阶段 / 模块的信息流。表中 section 名称是 schema 级推荐落点，实际页面可以使用等价标题，但应保留相同语义。
+
+| 阶段 / 模块 | 输入信息来源 | 输出去向 / 输出内容 | 边界 |
+|---|---|---|---|
+| `source_ingest` | 原始来源文本；用户提供的 source metadata；已有 `wiki/sources/*` 的来源摘要、影响目录、可信度 / 优先级和冲突信息；已有 base 页的 `## 来源` / `## 待确认 / 矛盾点` 用于合并判断。 | 写入 `wiki/sources/<source>.md` 的来源名称、类型、摘要、影响目录、可信度和冲突；写入固定 `wiki/world/*.md` 的稳定事实、常识、历史或社会结构；写入 base `characters/*.md` 的 `## 核心定位`、`## 静态设定`、`## 性格与行为模式`、`## 说话方式`、`## 能力与限制`、`## 行为边界`、`## 剧情钩子`、`## 来源与待确认`；写入 base `locations/factions/items/*.md`、base `relationships/*.md`、`plot-arcs/*.md` 的核心问题 / 未解决悬念 / 冲突结构、`events/*.md` 的已发生时间 / 参与者 / 地点 / 结果；明确 PC 来源才可写固定 `player/*.md`。 | 不能写 `current-scene`、控制层、runtime overlay 或任意 `wiki/world/<custom>.md`；不能把未来可能写成 event；不能把原作角色默认写成 PC。 |
+| `control_doc_import` | 用户显式控制文档：主线大纲、章节安排、揭示顺序、规则、桌规、文风要求、禁用词、长期记忆、玩家偏好；可读取已有 `outlines/main.md` 的 `## Runtime Capsule` / `## Act Structure` / `## Must Not Contradict`、`outlines/progress.md` 的当前进度、rules/style/memory 固定 slot 的冲突点用于合并。 | 写入 `wiki/outlines/main.md` 的 `## Runtime Capsule`、`## Campaign Premise`、`## Act Structure`、`## Intended Reveals`、`## Delayed Reveals`、`## Branch Conditions`、`## Must Not Contradict`；写入 `wiki/outlines/progress.md` 的 `## Current Stage`、`## Completed Beats`、`## Divergence Notes`、`## Next Useful Beats`；写入 `rules/*.md` 的成功/失败条件、资源代价、时间距离、能力限制、硬约束；写入 `style/*.md` 的 narration/dialogue/forbidden；写入 `memory/*.md` 的 long-term/session-notes/player-preferences；可生成 `wiki/sources/imports/<source>.md` raw anchor。 | 不写已发生事件、不写当前场景、不把规则/风格/偏好当作剧情事实；未来 reveal 只能留在 outline/control 层。 |
+| `campaign_setup_import` | 玩家角色卡；初始能力、背包、已知信息、目标；开局场景；序章事实；初始关系；开局地点 / 物品状态；可读取 world/rules/style/outlines 的开局约束和 forbidden reveal。 | 写入固定 `player/player.md` 的身份、背景、稳定设定、当前状态摘要；写入 `player/abilities.md` 的能力、限制、代价、当前可用性；写入 `player/inventory.md` 的持有物、数量、装备/消耗状态；写入 `player/goals.md` 的主观目标、承诺、动机；写入 `player/known_information.md` 的 PC 已知事实和 PC 误解；写入 `current-scene/scene_state.md` 的当前时间地点、在场人物、可交互对象、可见线索、下一轮必须承接；写入 `events/prologue.md`、`quests/*.md` 的目标 / 状态 / 下一步可行动作、`relationships/*.md`、`outlines/main.md` / `progress.md` 的开局段、`plot-arcs/*.md`、必要的 `locations/runtime/*.md` 和 `items/runtime/*.md`。 | 只做开局 bootstrap；不把 NPC 当前状态写进 base character；不新增 player 子页；不把未来剧情写进 events。 |
+| `manual_or_review` | 用户直接编辑；用户接受的 pending / review item；用户提供的修订说明；相关页面当前内容、目标 section、冲突点和 review 风险说明。 | 所有 `wiki/` 持久目录都可由用户显式改动；review apply 只写该 review item 声明的 target path / target section / strategy，并应保留 reason、source references、风险说明和用户接受记录。 | 这是权限入口，不是自动模块。自动流程不得借 `manual_or_review` 名义绕过用户确认。 |
+| `post_ingest_derivation` | 已写入的 `sources`、world/base entity/event/relationship/plot-arc 页面；来源引用；轻量 lint / graph / capsule 输入；重复、冲突和遗漏信号；可读取 entity 页的 `## 相关条目`、`## 来源`、`## 待确认 / 矛盾点`，relationship 页的关系定位 / 当前张力，plot-arc 页的未解决悬念 / 冲突结构。 | 默认输出 review/pending；接受后可补充 `relationships/*.md` 的关系定位、关系历史、当前张力、后续推进限制；补充 `plot-arcs/*.md` 的核心问题、未解决悬念、冲突结构；补充角色/地点/组织/物品页的 `## 相关条目`、`## 待确认 / 矛盾点`、summary/capsule；可更新索引或非 wiki metadata。 | 不能自动写控制层；不能把派生推测当作 confirmed event；高风险派生必须走 review。 |
+| `recall_selector` | module-specific recall reader / 检索索引；玩家行动文本；当前场景 entities；近期 events；source refs；允许读取的 section metadata。优先读取 scene 状态、PC 能力/知识、规则硬约束、相关角色当前状态、地点可达性、关系张力、plot-arc pressure、outline progress。 | 输出非落盘 `RecallSelection` / `recalledMaterials` handoff；每条 material 应带 path、sectionId / heading、summary、reason、lineTarget、visibility、readMode、confidence；可写 journal 审计；不写 wiki。 | 只筛选，不解释新事实；不直接读取 forbidden/GM-only 给 PC 可见线，除非 handoff 标明 visibility。 |
+| `action_resolver` | 玩家提交行动；`buildActionResolverInputFromWiki()` 直接读取 `current-scene` 的在场人物 / 可交互对象 / 可见线索 / active clocks；固定 player slot 的能力限制 / 资源 / 库存 / PC knowledge；`rules/core.md`、`rules/world.md`、`rules/table.md` 的成功失败条件和代价；相关角色/地点/物品/faction base + runtime 当前状态；quests 当前目标。 | 输出非落盘 `ActionResolution` / `PostActionWorkingState` 初稿到 turn record / journal，并交给 `world_tick` 和 `runtime_update_proposal`。输出内容包括行动是否可行、判定依据、直接结果、代价、阻碍、`timeDelta`、`playerActionDelta`、`progressPotential`、需要确认的问题。 | 不写 wiki；不推进 NPC 世界反应；不从 `CompactStoryBrief` 派生输入；不把尝试但未确认的行动写成 happened event。 |
+| `world_tick` | `ActionResolution`、`PostActionWorkingState`；current-scene 的 active clocks / pending reactions / pacing state；相关 runtime overlay；events 最近后果和历史约束；relationships/runtime 当前张力；plot-arcs/runtime unresolved pressure；quests 状态；outline progress；rules hard constraints。 | 输出非落盘 `WorldTickResult` 到 turn record / journal，并交给 `outline_brief`、`narration_generator`、`runtime_update_proposal`。输出内容包括 worldDeltas、clockUpdates、settledOngoingEvents、informationBroadcast、reactionQueue、pacingUpdate、gapSignal、affectedPaths、visibility / knowledge / happenedStatus。 | 不重新裁判玩家行动；不生成正文；不写 wiki；ongoing/possible_future 不得直接变成 confirmed event。 |
+| `outline_brief` | context / recall handoff；`outlines/main.md` 受控切片中的 Act Structure / Intended Reveals / Delayed Reveals / Branch Conditions / Must Not Contradict；`outlines/progress.md` 的 Current Stage / Completed Beats / Divergence Notes / Next Useful Beats；plot-arcs base/runtime 的未解决悬念和冲突结构；relationships/runtime 当前张力；WorldTick pacing/gap；events 已发生约束；style/rules/memory 边界。 | 输出非落盘 `OutlineAwareNarrationBrief`、outlineImpactReport 和 narration handoff，不写 wiki。输出内容包括 playerFacingBrief、parallelLineBrief、tensionBriefInput、revealPolicy、mustNotReveal、outlineImpactLevel；必要时输出 regeneration request，说明受影响线、失效 beat/reveal/branch refs、必须保留事实和需要重检的控制点。 | 不生成玩家正文；不生成 update proposal；不改 `outlines/main.md`；非重大偏离不得触发大纲重写。 |
+| `story_outline_regenerator` | 只有 `outline_brief` 判定重大偏离时才读取：已发生 events、current-scene、player 状态、outline slices、progress、plot-arcs/runtime、受影响 reveal / beat / branch refs、safety constraints。 | 输出非落盘 provisional outline handoff 和独立 outline review item；review item 可提出 `outlines/main.md` 的 Act Structure / Intended Reveals / Delayed Reveals / Branch Conditions / Must Not Contradict 修订建议，以及 `outlines/progress.md` 的 Divergence Notes / Next Useful Beats 更新建议；同时输出 safety report、受影响 refs、保留事实、拒绝方案；用户接受后才可能改 `outlines/main.md` 或相关控制层。 | 不能自动写主线大纲；不能改已确认事实；未来方案不能进入 events；未接受 proposal 不能被当作事实材料。 |
+| `narration_generator` | `PostActionWorkingState`、`ActionResolution`、`WorldTickResult`、RecallSelection/recalledMaterials、OutlineAwareNarrationBrief、可选 provisional handoff、style/narration、style/dialogue、style/forbidden、rules hard constraints、forbiddenForNarration、playerKnowledgeBoundary。 | 输出非落盘 `TurnNarration` 到 turn record / journal，并交给 `runtime_update_proposal`。输出内容包括 playerFacingText、parallelLineText、tensionBrief、displayPolicy、narrationMeta、nextActionOptions、references；其中 playerFacingText 是 PC 可见正文，parallelLineText 是用户可见但 PC 未知镜头，tensionBrief 是关系/情感/剧情压力 handoff。 | 不直接读取任意 wiki 文件；不裁判行动；不推进世界；不写 wiki；parallelLineText 不授予 PC knowledge；nextActionOptions 不是事实。 |
+| `runtime_update_proposal` | 完整 turn record；ActionResolution；WorldTickResult；TurnNarration；consistency validation；references；allowedTargets / writePolicy / reviewPolicy；当前目标页面的相关 sections 用于定位 merge/append/overwrite，如 `current-scene` 当前快照字段、`events` confirmed happened 事件段、`player/*` 当前状态/能力/库存/目标/已知信息、`quests` 状态和下一步、runtime overlay 当前状态 / 张力 / branch state、`outlines/progress` Current Stage / Completed Beats / Divergence Notes / Next Useful Beats。 | 输出 pending/review proposal、journal entries、skippedDeltas、pacingUpdateProposal、proposalGroups、outlineRevisionReviewItems，不直接落盘。每条普通 proposal 应带 targetPath、strategy、reason、sourceDeltas、references、visibility、knowledgeScope、happenedStatus、confidence。 | 只提案不 apply；不能扩展 allowedTargets；`events` 要求 confirmed_happened；player knowledge 只接收 PC known / misunderstanding；outline main 修订必须是独立 review item。 |
+| `runtime_update_apply` | 用户接受的 pending updates；本地 validator 结果；目标文件当前内容；write policy；proposal sourceDeltas 和 references；目标 section 的当前文本。 | 实际写入 `current-scene/scene_state.md` 的覆盖式当前快照；写入 `events/*.md` 的 append/create confirmed event；merge 固定 `player/*.md`、`quests/*.md`、`outlines/progress.md` 和各类 `*/runtime/*.md`；写入 apply journal / audit，并保留来源、turn id、references 和 review 接受痕迹。 | 不能写 sources/world/rules/style/memory/outlines/main/base entity/base relationship/base plot-arcs；不能 apply rejected / skipped delta；不能把未确认或未来内容写成事实。 |
 
 # 目录定义
 
@@ -216,6 +316,8 @@ sources/user_custom_setting_001.md
 
 存放世界观层面的稳定设定，包括世界结构、历史背景、社会常识、文化、时代背景、技术水平、超自然存在、公共认知等。
 
+`world/` 是固定 slot 目录，不是自由多页目录。普通 Source Ingest 只能写入五个固定文件，不能新增 `world/<custom>.md`。
+
 `world/` 回答的问题是：
 
 > 这个世界是什么样的？普通人如何理解这个世界？故事发生在怎样的大环境中？
@@ -247,9 +349,7 @@ sources/user_custom_setting_001.md
 
 ### 推荐页面粒度
 
-按照世界观主题拆分，而不是所有内容塞进一个大文件。
-
-示例：
+第一版固定使用以下文件集合：
 
 ```text
 world/basic_overview.md
@@ -258,6 +358,16 @@ world/common_sense.md
 world/supernatural_presence.md
 world/social_structure.md
 ```
+
+额外世界观主题必须合并进最接近的固定 slot；如果无法自然合并，通常说明它应进入 `rules/`、`locations/`、`factions/`、`plot-arcs/` 或 `sources/`。
+
+推荐拆分：
+
+* `basic_overview.md`：世界核心前提、时代、主要舞台、类型基调、整体氛围。
+* `history.md`：世界历史、公开过去、历史背景和已确定的大事件；不记录当前战役回合事件。
+* `common_sense.md`：普通人默认知道的常识、习俗、禁忌、日常社会认知和公共知识。
+* `supernatural_presence.md`：超自然、科技、怪异、神秘体系在世界中的存在方式和可见呈现；可执行规则进入 `rules/`。
+* `social_structure.md`：社会结构、制度、阶层、法律、经济、公共权力结构和广义组织方式；具体组织进入 `factions/`。
 
 ### 与旧 `concepts/` 路径的切分边界
 
@@ -477,7 +587,7 @@ characters/caster.md
 ### 不应放入的信息
 
 不要把所有玩家发言完整复制进来。
-玩家发言流水应放入 `runtime/turn_log.md`，这里只维护被剧情承认的状态和结果。
+玩家发言流水和每轮中间产物应放入 turn record、runtime journal 或 `.llm-wiki/runtime/`，这里只维护被剧情承认的状态和结果。
 
 ### 推荐页面粒度
 
@@ -751,7 +861,7 @@ plot-arcs/player_power_mystery.md
 
 > 这场战役原本打算如何展开？哪些内容应在什么节奏下揭示？玩家偏离后，大纲应该如何被审阅式修订？
 
-`outlines/` 属于控制层，不是已发生事实层，也不是运行时状态层。它可以指导 Context Compiler 和 narration，但不能被当成已经发生的事件。
+`outlines/` 属于控制层，不是已发生事实层，也不是运行时状态层。它可以指导 `outline_brief`、`story_outline_regenerator` 和 narration handoff，但不能被当成已经发生的事件。
 
 ### 需要抽取的信息
 
@@ -796,7 +906,7 @@ outlines/branch_conditions.md
 # 主线大纲
 
 ## Runtime Capsule
-- 本轮上下文编译时最需要保留的大纲指导。
+- 本轮 module-specific outline / narration handoff 最需要保留的大纲指导。
 
 ## Campaign Premise
 - 战役核心前提。
@@ -825,7 +935,7 @@ outlines/branch_conditions.md
 # 大纲进度
 
 ## Runtime Capsule
-- 本轮上下文编译时最需要保留的当前进度。
+- 本轮 module-specific outline / narration handoff 最需要保留的当前进度。
 
 ## Current Stage
 - 当前处于哪一幕 / 哪个章节 / 哪个 beat。
@@ -883,7 +993,7 @@ outlines/branch_conditions.md
 ### 不应放入的信息
 
 不要在事件页中写未来剧情建议。
-未来推进应放入 `plot-arcs/` 或 `runtime/unresolved_threads.md`。
+未来推进应放入 `plot-arcs/`、`outlines/` 控制层或 `.llm-wiki/runtime/` 的待审 runtime metadata；不能写成已发生事件。
 
 以下内容不能作为单一 `events/` 页面：
 
@@ -952,6 +1062,9 @@ events/event_002.md
 * 可见线索
 * 当前叙事焦点
 * 下一轮生成时必须承接的内容
+* active clocks / countdowns 摘要
+* pending reactions
+* pacing state
 
 ### 不应放入的信息
 
@@ -1159,156 +1272,17 @@ rules/table.md
 
 更细的规则主题可以在固定文件内分节维护；玩家个人能力、技能、限制和当前可用性应进入 `player/abilities.md`，不拆到 `rules/`。
 
----
-
-# `runtime/`
-
-`runtime/` 不是从原始设定中抽取出的稳定 wiki，而是每轮游戏运行时生成和更新的工作区。
-
-它的作用是：
-
-> 把庞大的 wiki 压缩成当前这一轮模型真正需要的短上下文。
+Action Resolver 读取 `rules/` 时，需要的是可执行裁判边界：行动成功/失败条件、资源代价、距离、时间、感知、隐蔽、战斗、调查、能力限制和硬约束。纯世界观解释应进入 `world/`，不要把规则页写成只有背景说明、却无法支持行动判定的资料页。
 
 ---
 
-## `runtime/context_pack.md`
+# 运行时中间产物边界
 
-### 定义
+运行时短上下文、回合记录、pending update、outline revision proposal、skipped delta、校验结果和待审 runtime metadata 不属于普通 `wiki/` 抽取目录。它们应保存在 turn record、runtime journal 或 `.llm-wiki/runtime/` 下，作为可追溯、可审阅、可丢弃或可 apply 的运行时工作产物。
 
-每轮生成前编译出的短上下文包。
+这些产物可以引用 `wiki/` 中的持久事实、当前快照、runtime overlay 和控制层进度，也可以在 review/apply 后生成对 `wiki/current-scene/scene_state.md`、`wiki/events/`、`wiki/player/`、`wiki/outlines/progress.md` 或各类 `wiki/*/runtime/` overlay 的更新；但它们本身不是 `wiki/runtime/` 页面，也不应被普通 ingest 当作推荐输出目标。
 
-它是给最终剧情生成模型看的，不是长期设定源。
-
-### 需要包含的信息
-
-包括：
-
-* 当前场景摘要
-* 玩家当前行动
-* 必须承接的上一轮内容
-* 当前在场角色状态
-* 与当前场景相关的角色关系
-* 与当前场景相关的世界规则
-* 与当前场景相关的地点信息
-* 与当前剧情线相关的伏笔
-* 本轮叙事目标
-* 本轮禁止事项
-* 文风要求
-* 输出格式要求
-
-### 不应包含的信息
-
-不要塞入完整 wiki。
-不要把所有角色、所有世界观、所有历史事件都放进来。
-
-`context_pack.md` 的目标是短、准、可控。
-
-### 推荐结构
-
-```md
-# Runtime Context Pack
-
-## 当前场景
-...
-
-## 玩家行动
-...
-
-## 必须承接
-...
-
-## 相关角色状态
-...
-
-## 相关关系张力
-...
-
-## 相关规则
-...
-
-## 当前剧情目标
-...
-
-## 本轮写作要求
-...
-
-## 禁止事项
-...
-```
-
----
-
-## `runtime/turn_log.md`
-
-### 定义
-
-记录玩家行动和模型输出的原始运行日志。
-
-它是后续更新 `events/`、`characters/`、`relationships/`、`current-scene/` 的依据。
-
-### 需要记录的信息
-
-包括：
-
-* 回合编号
-* 玩家输入
-* 模型输出
-* 本轮使用的 context pack 摘要
-* 本轮发生的事实变化
-* 本轮需要写入 wiki 的更新项
-* 本轮是否产生矛盾
-* 本轮是否产生新伏笔
-
-### 不应作为最终上下文直接长期输入
-
-`turn_log.md` 会越来越长，不能每次全部塞给模型。
-它主要用于追溯和二次整理。
-
----
-
-## `runtime/unresolved_threads.md`
-
-### 定义
-
-记录尚未解决的伏笔、悬念、目标、冲突和待推进事项。
-
-它是防止剧情散掉的重要文件。
-
-### 需要记录的信息
-
-包括：
-
-* 未解决伏笔
-* 玩家未完成目标
-* NPC 未完成目标
-* 尚未揭示的信息
-* 尚未处理的后果
-* 需要回收的道具
-* 需要再次登场的角色
-* 需要推进的关系变化
-* 当前最适合推进的剧情点
-* 暂时不应推进的剧情点
-
-### 与 `plot-arcs/` 的区别
-
-`plot-arcs/` 是结构化剧情线。
-`unresolved_threads.md` 是运行时待办清单。
-
-例如：
-
-```md
-## 未解决伏笔
-- Caster 的真实身份尚未完全确认。
-- 玩家能力的来源尚未解释。
-- 远坂凛对玩家的信任正在上升，但仍未完全放下戒备。
-
-## 近期应推进
-- 让玩家发现 Caster 与柳洞寺之间的联系。
-- 让远坂凛通过一次小事件表达对玩家的认可。
-
-## 暂时不要推进
-- 不要过早揭示最终敌人的完整计划。
-```
+如果需要记录尚未解决的伏笔、悬念、待推进压力或未来修订，优先使用 `plot-arcs/`、`outlines/progress.md`、对应 runtime overlay 或 `.llm-wiki/runtime/` pending metadata，并保留 `HappenedStatus` / visibility / knowledge metadata；不要把这些内容写成 `events/` 里的既成事实。
 
 ---
 
@@ -1327,7 +1301,6 @@ outlines/
 plot-arcs/
 style/
 rules/
-runtime/context_pack.md
 ```
 
 这些决定“下一轮能不能接得住”。
@@ -1340,7 +1313,6 @@ locations/
 items/
 factions/
 events/
-runtime/unresolved_threads.md
 ```
 
 这些决定“跑 100 轮以后会不会崩”。
@@ -1349,7 +1321,6 @@ runtime/unresolved_threads.md
 
 ```text
 sources/
-runtime/turn_log.md
 ```
 
 这些决定“以后能不能查清楚设定从哪里来”。
@@ -1373,7 +1344,6 @@ plot-arcs/         剧情正在往哪里走
 relationships/     角色关系如何变化
 current-scene/     当前这一刻发生在什么状态下
 style/             应该怎么写
-runtime/           每轮运行时临时编译和记录
 ```
 
 ---
@@ -1385,13 +1355,13 @@ runtime/           每轮运行时临时编译和记录
 ```text
 设定层：world / rules / characters / locations / factions / items / style
 状态层：player / relationships / events / plot-arcs / current-scene
-运行层：runtime/context_pack.md / turn_log.md / unresolved_threads.md
+运行层：turn record / runtime journal / .llm-wiki/runtime/（非普通 wiki category）
 ```
 
 第一版 llmWikiRPG 只要能做到：
 
 ```text
-原始文本 → 抽取成 wiki → 根据玩家行动检索相关 wiki → 编译 context_pack → 生成剧情 → 回写状态
+原始文本 → 抽取成 wiki → 根据玩家行动由各模块读取所需 wiki → 生成剧情 → 回写状态
 ```
 
 就已经是一个可运行的最小闭环。

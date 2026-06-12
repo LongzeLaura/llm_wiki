@@ -1,7 +1,12 @@
 import type { LlmConfig } from "@/stores/wiki-store"
 import { streamChat, type RequestOverrides } from "../../llm-client"
 import type { RpgInteractionPrompt } from "../interaction-spec"
-import type { RpgRuntimeUpdateInteractionAdapter } from "./runtime-update-adapter"
+import type {
+  RpgRuntimeUpdateInteractionAdapter,
+  RpgRuntimeUpdateProposalAdapter,
+} from "./runtime-update-adapter"
+import type { BuildRuntimeUpdateInteractionInput } from "./runtime-update-interaction"
+import { runtimeUpdateInteractionSpec } from "./runtime-update-interaction"
 
 export interface CreateLlmRpgRuntimeUpdateInteractionAdapterInput {
   llmConfig: LlmConfig
@@ -19,6 +24,19 @@ export function createLlmRpgRuntimeUpdateInteractionAdapter(
   return {
     async generateUpdateProposal(prompt) {
       return collectRpgRuntimeUpdateOutput(input, options, prompt)
+    },
+  }
+}
+
+export function createLlmRpgRuntimeUpdateProposalAdapter(
+  input: CreateLlmRpgRuntimeUpdateInteractionAdapterInput,
+  options: LlmRpgRuntimeUpdateInteractionAdapterOptions = {},
+): RpgRuntimeUpdateProposalAdapter {
+  return {
+    async generateRuntimeUpdateProposal(proposalInput: BuildRuntimeUpdateInteractionInput) {
+      const prompt = runtimeUpdateInteractionSpec.buildPrompt(proposalInput)
+      const output = await collectRpgRuntimeUpdateOutput(input, options, prompt)
+      return runtimeUpdateInteractionSpec.parseOutput(output, proposalInput)
     },
   }
 }

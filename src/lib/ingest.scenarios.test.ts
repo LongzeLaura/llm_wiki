@@ -580,7 +580,7 @@ describe("ingest scenarios (fixture-driven)", () => {
     pendingResponses = [
       "analysis one",
       [
-        "---FILE: wiki/world/harbor-law.md---",
+        "---FILE: wiki/world/social_structure.md---",
         "---",
         'type: "world"',
         'title: "Harbor Law"',
@@ -631,8 +631,8 @@ describe("ingest scenarios (fixture-driven)", () => {
 
     const written = await autoIngest(projectPath, `${projectPath}/raw/sources/mixed-import.md`, cfg)
 
-    expect(written).toContain("wiki/world/harbor-law.md")
-    expect(await fileExists(`${projectPath}/wiki/world/harbor-law.md`)).toBe(true)
+    expect(written).toContain("wiki/world/social_structure.md")
+    expect(await fileExists(`${projectPath}/wiki/world/social_structure.md`)).toBe(true)
     for (const forbiddenPath of [
       "wiki/rules/core.md",
       "wiki/style/narration.md",

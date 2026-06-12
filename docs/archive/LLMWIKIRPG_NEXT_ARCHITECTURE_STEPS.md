@@ -1000,7 +1000,7 @@ docs/LLMWIKIRPG_NEXT_ARCHITECTURE_STEPS.md
 
 详细方案见 `docs/CONTEXT_COMPILER_REDESIGN_PLAN.md`。本节只保留路线级摘要。
 
-目标：把 Context Compiler v0 的确定性上下文拼装升级为可测试、可降级、可预算的多轮上下文编译链路，让 runtime narration 在每轮生成前获得短而明确的运行时 brief，并让大纲材料显式参与本轮剧情指导。
+目标：把 Context Compiler v0 的确定性上下文拼装升级为可测试、可预算、固定两轮 LLM interaction 的上下文编译链路，让 runtime narration 在每轮生成前获得短而明确的运行时 brief，并让大纲材料被编译成本回合可执行的剧情推进压力。Context Compiler v1 的重点不是普通摘要，而是让系统能依据玩家行动、当前状态和未来大纲自主推进战役。
 
 核心链路：
 
@@ -1009,25 +1009,26 @@ SubmittedAction + recent turns + runtime anchors
   -> local candidate preparation
   -> LLM 1: Recall Selector / Memory Routing
   -> local read selected wiki materials
-  -> LLM 2: Outline-aware Context Brief Compiler
+  -> LLM 2: Outline-aware Plot Advancement Brief Compiler
   -> narration generator input
 ```
 
 必须实现：
 
 - 第一轮 LLM 只做召回选择，输出 memo id、wiki path、runtime path、plot arc / quest / relationship path、priority、reason 和 exclusions，不输出长篇剧情总结。
-- 第二轮 LLM 做 outline-aware brief 编译，输入第一轮选中的实际材料、current-scene、player、quests、relationships、runtime overlays、style/rules/memory 和 active outline slice，输出给 narration generator 的短 brief。
-- 大纲材料必须显式进入第二轮 brief，包括 active arc、current stage、dramatic question、intended pressure、next useful beats、delayed reveals、branch conditions 和 must-not-contradict。
+- 第二轮 LLM 做 outline-aware plot advancement brief 编译，输入第一轮选中的实际材料、current-scene、固定 player slots、quests、relationships base + runtime overlays、plot-arcs base + runtime overlays、rules slots、memory slots 和 active outline slice，输出给 narration generator 的短 brief、导演判断和剧情推进义务。
+- 第二轮必须输出本回合 campaign delta：至少说明 `thisTurnMustChange`、`pacingIntent`、`advancementStrength`、`pressureMove`、`revealPolicy` 和 `playerAgencyRule`，让 narration 不只是回应玩家，还要让世界产生可观察的推进。
+- 大纲材料必须显式进入第二轮 brief，读取当前 schema slot 与章节语义：`wiki/outlines/main.md` 提供 Campaign Premise、Act Structure、Intended Reveals、Delayed Reveals、Branch Conditions、Must Not Contradict；`wiki/outlines/progress.md` 提供 Current Stage、Completed Beats、Divergence Notes、Next Useful Beats；active `plot-arcs/*.md` + `plot-arcs/runtime/*.md` 提供核心问题、当前阶段、未解决悬念、冲突结构、推进条件和 runtime beat 变化。
 - selected option 的 `intent`、`riskLevel`、`likelyAffectedPaths` 必须作为强检索信号；freeform action 必须走本地候选准备和召回选择。
-- `style`、`rules`、`memory` 高优先级保留，`{{setvar::...}}`、禁用词和 hard gate 不得被普通压缩丢弃。
+- `rules_core` / `rules_world` / `rules_table` 可进入 Context Compiler 判断行动边界；`style_narration` / `style_dialogue` 默认直达 narration generator，不由 Context Compiler 改写为二手文风摘要；`style_forbidden`、`memory_player_preferences`、`{{setvar::...}}`、禁用词和 hard gate 必须作为高优先级控制材料保留。
 - LLM 只能选择或总结 runtime context allowlist 内的材料；实际读取、path validation、去重、排序、预算裁剪和 fallback 都必须由本地代码完成。
 - 第一版必须支持注入式 adapter 和 fixture adapter；测试不依赖真实 LLM。
 - LLM 失败时必须 fallback 到 v0 deterministic context compilation，并返回 warnings。
-- 可选第三轮只用于 retrieval repair 或 pre-narration outline impact probe，不默认启用，不正式改写大纲。
+- 第一版不降级为 1 次 LLM，也不升级为 3 次 LLM；召回冲突、模糊输入和大纲偏离压力必须在固定两轮内通过 unresolved questions、warnings、branch allowance、do-not-railroad 和 must-not-contradict guidance 表达。
 
 不得实现：
 
-- 不生成玩家可见 narration，不生成 next action options。
+- 不生成玩家可见 narration，不生成 next action options，不预写完整 NPC 台词。
 - 不提取或写入 wiki update，不创建 pending updates，不自动 accept/apply。
 - 不把未选择的 `nextActionOptions` 当作已发生事实。
 - 不让 LLM 自行决定读取任意磁盘路径；所有 wiki 读取必须经过 runtime context allowlist 和 path normalization。
@@ -1037,20 +1038,23 @@ SubmittedAction + recent turns + runtime anchors
 建议实现位置：
 
 ```text
-src/lib/rpg-interactions/context-compiler-interaction.ts
-src/lib/rpg-interactions/llm-context-compiler-adapter.ts
+src/lib/rpg-interactions/context-compiler/
+  recall-interaction.ts
+  brief-interaction.ts
+  context-compiler-adapter.ts
+  index.ts
 src/lib/rpg-runtime/context-compiler.ts
 src/lib/rpg-runtime/context-retrieval.ts
 src/lib/rpg-context-compiler.test.ts
-src/lib/rpg-context-compiler-interaction.test.ts
+src/lib/rpg-context-compiler-interactions.test.ts
 ```
 
 验收标准：
 
-- Context Compiler v1 默认支持两轮 LLM interaction：Recall Selector 与 Outline-aware Context Brief Compiler。
-- 简单回合可以降级跳过第一轮；复杂或冲突回合可以通过扩展点启用第三轮 probe / repair。
-- 第二轮输出必须比召回材料短，并明确面向 narration generator，不面向玩家。
-- fixture tests 覆盖 selected option、freeform action、likelyAffectedPaths、quests/objectives、recent accepted events、runtime overlays、plot-arcs outline guidance、manual control blocks、LLM failure fallback 和未选择 option 污染防护。
+- Context Compiler v1 默认支持两轮 LLM interaction：Recall Selector 与 Outline-aware Plot Advancement Brief Compiler。
+- 每个正式叙事回合固定执行两轮 LLM interaction；LLM failure fallback 到 v0 deterministic compilation 不计为普通降级模式。
+- 第二轮输出必须比召回材料短，并明确面向 narration generator，不面向玩家；如果 `thisTurnMustChange` 为空，应视为 brief 质量不足。
+- fixture tests 覆盖 selected option、freeform action、likelyAffectedPaths、quests/objectives、recent accepted events、runtime overlays、outlines/main + outlines/progress guidance、plot-arcs base + runtime guidance、manual control blocks、campaign delta、pacingIntent、revealPolicy、固定两轮调用、LLM failure fallback 和未选择 option 污染防护。
 - 更新 `docs/CURRENT_STATE.md` 与 `docs/IMPLEMENTATION_LOG.md`。
 
 ### 阶段 7：Relationship/Tension Deriver v0

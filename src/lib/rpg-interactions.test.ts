@@ -3,7 +3,11 @@ import fs from "node:fs/promises"
 import { createTempProject, readFileRaw, writeFileRaw } from "@/test-helpers/fs-temp"
 import type { LlmConfig } from "@/stores/wiki-store"
 import { streamChat } from "./llm-client"
-import type { CompactStoryBrief, RpgTurnRecord, RpgTurnResult } from "./rpg-runtime"
+import { buildRuntimeUpdateProposalInputFromTurnRecord, type RpgTurnRecord, type RuntimeUpdateProposalResult } from "./rpg-runtime"
+import {
+  sampleTurnNarration,
+  sampleTurnRecordRuntimeParts,
+} from "./rpg-runtime-test-fixtures"
 import {
   buildRpgAnalysisPrompt,
   buildRpgGenerationPrompt,
@@ -20,7 +24,6 @@ import {
   listImplementedRpgInteractionKinds,
   listPlannedRpgInteractionKinds,
   listRpgInteractionRegistryEntries,
-  narrationInteractionSpec,
   pageMergeInteractionSpec,
   runtimeUpdateInteractionSpec,
   sourceIngestAnalysisInteractionSpec,
@@ -57,15 +60,25 @@ describe("RPG Interaction Contract", () => {
       "page_merge",
       "control_doc_canonicalization",
       "campaign_setup_import_contract",
-      "narration",
-      "runtime_state_update",
+      "action_resolver",
+      "world_tick",
+      "recall_selector",
+      "outline_brief",
+      "outline_regeneration",
+      "narration_generator",
+      "runtime_update_proposal",
     ] as const
     const llmKinds = [
       "source_ingest_analysis",
       "source_ingest_generation",
       "page_merge",
-      "narration",
-      "runtime_state_update",
+      "action_resolver",
+      "world_tick",
+      "recall_selector",
+      "outline_brief",
+      "outline_regeneration",
+      "narration_generator",
+      "runtime_update_proposal",
     ] as const
 
     expect(listImplementedRpgInteractionKinds()).toEqual(implementedKinds)
@@ -87,8 +100,6 @@ describe("RPG Interaction Contract", () => {
     expect(listPlannedRpgInteractionKinds()).toEqual([
       "campaign_setup_generation",
       "relationship_derivation",
-      "outline_impact",
-      "outline_regeneration",
     ])
 
     for (const kind of listPlannedRpgInteractionKinds()) {
@@ -134,6 +145,10 @@ describe("RPG Interaction Contract", () => {
 
     expect(campaignSetupImportContract.supportedSlots).toEqual([
       "player_main",
+      "player_abilities",
+      "player_inventory",
+      "player_goals",
+      "player_known_information",
       "current_scene",
       "events_prologue",
       "main_quest",
@@ -143,6 +158,10 @@ describe("RPG Interaction Contract", () => {
     expect(campaignSetupImportContract.usesLlmByDefault).toBe(false)
     expect(campaignSetupImportContract.writePolicies).toEqual({
       player_main: "merge",
+      player_abilities: "merge",
+      player_inventory: "merge",
+      player_goals: "merge",
+      player_known_information: "merge",
       current_scene: "overwrite",
       events_prologue: "append",
       main_quest: "merge",
@@ -150,6 +169,10 @@ describe("RPG Interaction Contract", () => {
       player_relationship: "merge",
     })
     expect(getCampaignSetupImportTargetPath("player_main")).toBe("wiki/player/player.md")
+    expect(getCampaignSetupImportTargetPath("player_abilities")).toBe("wiki/player/abilities.md")
+    expect(getCampaignSetupImportTargetPath("player_inventory")).toBe("wiki/player/inventory.md")
+    expect(getCampaignSetupImportTargetPath("player_goals")).toBe("wiki/player/goals.md")
+    expect(getCampaignSetupImportTargetPath("player_known_information")).toBe("wiki/player/known_information.md")
     expect(getCampaignSetupImportTargetPath("current_scene")).toBe("wiki/current-scene/scene_state.md")
     expect(getCampaignSetupImportTargetPath("events_prologue")).toBe("wiki/events/prologue.md")
     expect(getCampaignSetupImportTargetPath("main_quest")).toBe("wiki/quests/main.md")
@@ -242,6 +265,9 @@ describe("RPG Interaction Contract", () => {
     await expect(fs.access("src/lib/rpg-runtime/" + "narration-" + "prompts.ts")).rejects.toThrow()
     await expect(fs.access("src/lib/rpg-runtime/" + "narration-" + "adapter.ts")).rejects.toThrow()
     await expect(fs.access("src/lib/rpg-runtime/" + "llm-" + "narration-adapter.ts")).rejects.toThrow()
+    await expect(fs.access("src/lib/rpg-interactions/runtime/" + "narration-" + "interaction.ts")).rejects.toThrow()
+    await expect(fs.access("src/lib/rpg-interactions/runtime/" + "narration-" + "adapter.ts")).rejects.toThrow()
+    await expect(fs.access("src/lib/rpg-interactions/runtime/" + "llm-" + "narration-adapter.ts")).rejects.toThrow()
 
     const runtimeFiles = await readTextFilesUnder("src/lib/rpg-runtime")
     const runtimeSource = runtimeFiles.join("\n")
@@ -251,11 +277,15 @@ describe("RPG Interaction Contract", () => {
 
     const runtimeInteractionFiles = await readTextFilesUnder("src/lib/rpg-interactions/runtime")
     const runtimeInteractionSource = runtimeInteractionFiles.join("\n")
-    expect(runtimeInteractionSource).toContain("You are the dedicated llmWikiRPG narration runtime")
-    expect(runtimeInteractionSource).toContain("You are the llmWikiRPG runtime state update interaction")
-    expect(runtimeInteractionSource).toContain("# RPG Narration Brief")
-    expect(runtimeInteractionSource).toContain("RpgNarrationAdapter")
-    expect(runtimeInteractionSource).toContain("createLlmRpgNarrationAdapter")
+    expect(runtimeInteractionSource).toContain("You are the llmWikiRPG Runtime Update Proposal interaction")
+    expect(runtimeInteractionSource).not.toContain("You are the dedicated llmWikiRPG narration runtime")
+    expect(runtimeInteractionSource).not.toContain("# RPG Narration Brief")
+    expect(runtimeInteractionSource).not.toContain("RpgNarrationAdapter")
+    expect(runtimeInteractionSource).not.toContain("createLlmRpgNarrationAdapter")
+    expect(runtimeInteractionSource).not.toContain("buildRpgNarrationPrompt")
+    expect(runtimeInteractionSource).not.toContain("narrationInteractionSpec")
+    expect(runtimeInteractionSource).toContain("RpgNarrationGeneratorAdapter")
+    expect(runtimeInteractionSource).toContain("createLlmRpgNarrationGeneratorAdapter")
     expect(runtimeInteractionSource).toContain("validateRpgRuntimeUpdateProposals")
     expect(runtimeInteractionSource).toContain("validateRpgRuntimeUpdateTarget")
   })
@@ -263,7 +293,7 @@ describe("RPG Interaction Contract", () => {
   it("builds source ingest analysis prompts through the interaction spec", () => {
     const input = {
       purpose: "Track RPG runtime facts.",
-      index: "# Index\n- wiki/world/archive.md",
+      index: "# Index\n- wiki/world/basic_overview.md",
       sourceContent: "The Moonlit Archive keeps sealed maps.",
       sourceIdentity: "raw/sources/archive.md",
       folderContext: "Imported from setting notes.",
@@ -368,7 +398,9 @@ describe("RPG Interaction Contract", () => {
     const adapter = createFixtureRuntimeUpdateInteractionAdapter(output)
 
     await expect(
-      adapter.generateUpdateProposal(runtimeUpdateInteractionSpec.buildPrompt({ turnRecord: sampleTurnRecord() })),
+      adapter.generateUpdateProposal(
+        runtimeUpdateInteractionSpec.buildPrompt(buildRuntimeUpdateProposalInputFromTurnRecord(sampleTurnRecord())),
+      ),
     ).resolves.toBe(output)
   })
 
@@ -409,51 +441,6 @@ describe("RPG Interaction Contract", () => {
       signal,
       requestOverrides,
     )
-  })
-
-  it("builds a narration prompt through the interaction spec with completed-boundary rules", () => {
-    const prompt = narrationInteractionSpec.buildPrompt({ brief: sampleBrief() })
-    const combined = `${prompt.systemPrompt}\n${prompt.userPrompt}`
-
-    expect(narrationInteractionSpec.kind).toBe("narration")
-    expect(combined).toContain("llmWikiRPG narration runtime")
-    expect(combined).toContain("Unchosen nextActionOptions are candidate future actions only")
-    expect(combined).toContain("must not appear inside narrative as completed outcomes")
-    expect(combined).toContain("must not extract facts from unchosen nextActionOptions")
-    expect(combined).toContain("Do not perform wiki writes")
-    expect(combined).toContain("I show Mira the lantern key")
-    expect(combined).toContain("The main outline keeps the gate patron hidden until the sigil is decoded")
-    expect(combined).toContain("Open the canal gate without alerting the Harbor Watch")
-    expect(combined).toContain("wiki/current-scene/scene_state.md")
-  })
-
-  it("parses fenced narration JSON into a validated RpgTurnResult", () => {
-    const turnResult = sampleTurnResult({ narrative: "The result came from a fenced JSON block." })
-
-    expect(
-      narrationInteractionSpec.parseOutput(["```json", JSON.stringify(turnResult, null, 2), "```"].join("\n"), {
-        brief: sampleBrief(),
-      }),
-    ).toEqual(turnResult)
-  })
-
-  it("parses bare narration JSON into a validated RpgTurnResult", () => {
-    const turnResult = sampleTurnResult({ narrative: "The result came from bare JSON." })
-
-    expect(narrationInteractionSpec.parseOutput(JSON.stringify(turnResult), { brief: sampleBrief() })).toEqual(turnResult)
-  })
-
-  it("rejects invalid narration RpgTurnResult output", () => {
-    expect(() =>
-      narrationInteractionSpec.parseOutput(
-        JSON.stringify({
-          narrative: "Too few options.",
-          nextActionOptions: [],
-          references: [],
-        }),
-        { brief: sampleBrief() },
-      ),
-    ).toThrow(/invalid RpgTurnResult/i)
   })
 
   it("lists the shared runtime update target rules", () => {
@@ -515,7 +502,7 @@ describe("RPG Interaction Contract", () => {
     ["wiki/entities/ghost.md", "merge", "legacy path"],
     ["wiki/concepts/ghost.md", "merge", "legacy path"],
     ["wiki/queries/ghost.md", "merge", "legacy path"],
-    ["wiki/world/city.md", "merge", "world path"],
+    ["wiki/world/basic_overview.md", "merge", "world path"],
     ["wiki/style/narrative.md", "merge", "style path"],
     ["wiki/rules/magic.md", "merge", "rules path"],
     ["wiki/sources/session.md", "merge", "sources path"],
@@ -543,10 +530,10 @@ describe("RPG Interaction Contract", () => {
   })
 
   it("builds a runtime update prompt with allowed target rules and completed-turn boundaries", () => {
-    const prompt = runtimeUpdateInteractionSpec.buildPrompt({ turnRecord: sampleTurnRecord() })
+    const prompt = runtimeUpdateInteractionSpec.buildPrompt(buildRuntimeUpdateProposalInputFromTurnRecord(sampleTurnRecord()))
     const combined = `${prompt.systemPrompt}\n${prompt.userPrompt}`
 
-    expect(runtimeUpdateInteractionSpec.kind).toBe("runtime_state_update")
+    expect(runtimeUpdateInteractionSpec.kind).toBe("runtime_update_proposal")
     expect(combined).toContain("wiki/current-scene/scene_state.md")
     expect(combined).toContain("wiki/events/*.md")
     expect(combined).toContain("wiki/quests/*.md")
@@ -554,12 +541,22 @@ describe("RPG Interaction Contract", () => {
     expect(combined).toContain("wiki/relationships/runtime/*.md")
     expect(combined).toContain("wiki/plot-arcs/runtime/*.md")
     expect(combined).toContain("wiki/outlines/progress.md")
-    expect(combined).toContain("completed turn record")
-    expect(combined).toContain("submittedAction + generatedNarrative + references")
-    expect(combined).toContain("Do not use, infer from, or mention unchosen nextActionOptions as facts")
+    expect(combined).toContain("structured current-turn sources")
+    expect(combined).toContain("PostActionWorkingState")
+    expect(combined).toContain("ActionResolution")
+    expect(combined).toContain("WorldTickResult")
+    expect(combined).toContain("TurnNarration")
+    expect(combined).toContain("generatedNarrative and playerFacingText are display/evidence material")
+    expect(combined).not.toContain("The factual source is strictly submittedAction + generatedNarrative + references")
+    expect(combined).toContain("outlineAwareNarrationBrief")
+    expect(combined).toContain("outlineImpactReport")
+    expect(combined).toContain("outlineRevisionProposal can only become independent outlineRevisionReviewItems")
+    expect(combined).toContain("attempted_not_confirmed cannot enter confirmed events")
+    expect(combined).toContain("parallelLineText and user_visible_pc_unknown material")
+    expect(combined).toContain("nextActionOptions are candidate future actions")
     expect(combined).toContain("You may only propose updates")
     expect(combined).toContain("Stable, manual, base, and legacy paths are forbidden")
-    expect(combined).toContain("There will be no second LLM validation round")
+    expect(combined).toContain("This stage only parses JSON and performs structure/boundary checks")
     expect(combined).toContain("events updates must contain only confirmed happened events")
     expect(combined).toContain("current-scene must be a compact latest-moment snapshot only")
     expect(combined).toContain("Cross-directory sync contract")
@@ -577,58 +574,44 @@ describe("RPG Interaction Contract", () => {
     expect(combined).toContain("Forbidden runtime targets include base wiki/relationships/*.md")
     expect(combined).toContain("base wiki/plot-arcs/*.md")
     expect(combined).toContain("wiki/outlines/main.md")
-    expect(combined).toContain("Rejected proposals will be skipped and reported for review")
-    expect(combined).toContain("Warning-only proposals may enter pending")
-    expect(combined).toContain("rpg-wiki-update")
+    expect(combined).toContain("Do not stage pending updates")
+    expect(combined).toContain("do not apply updates")
+    expect(combined).toContain("RuntimeUpdateProposalResult JSON")
+    expect(combined).toContain("proposedWikiUpdates")
+    expect(combined).toContain("sourceDeltas, lineTarget, visibility, knowledgeScope, happenedStatus, confidence, and validationHints")
+    expect(combined).toContain("The only accepted output contract is structured JSON")
+    expect(combined).not.toContain("rpg-wiki-update")
     expect(combined).toContain("Ask Rin whether the sigil is a ward or a lure.")
+    expect(combined).toContain("A cautious sigil read begins; the gate opening is not confirmed.")
   })
 
-  it("parses legal rpg-wiki-update blocks into proposed wiki updates", () => {
+  it("rejects rpg-wiki-update blocks at the runtime update proposal boundary", () => {
     const turnRecord = sampleTurnRecord()
-    const result = runtimeUpdateInteractionSpec.parseOutput(
-      [
-        "```rpg-wiki-update",
-        "targetPath: wiki/events/example.md",
-        "strategy: append",
-        "reason: Record the completed ward inspection.",
-        "---",
-        "# Ward Inspection",
-        "",
-        "Rin confirmed the sigil behaves like a ward.",
-        "```",
-      ].join("\n"),
-      { turnRecord },
-    )
-
-    expect(result.warnings).toEqual([])
-    expect(result.proposedUpdates).toEqual([
-      expect.objectContaining({
-        targetPath: "wiki/events/example.md",
-        strategy: "append",
-        reason: "Record the completed ward inspection.",
-        content: "# Ward Inspection\n\nRin confirmed the sigil behaves like a ward.",
-        sourceTurnId: "turn-69",
-        references: ["wiki/current-scene/scene_state.md", "wiki/player/state.md"],
-      }),
-    ])
+    expect(() =>
+      runtimeUpdateInteractionSpec.parseOutput(
+        [
+          "```rpg-wiki-update",
+          "targetPath: wiki/events/example.md",
+          "strategy: append",
+          "reason: Record the completed ward inspection.",
+          "---",
+          "# Ward Inspection",
+          "",
+          "Rin confirmed the sigil behaves like a ward.",
+          "```",
+        ].join("\n"),
+        buildRuntimeUpdateProposalInputFromTurnRecord(turnRecord),
+      ),
+    ).toThrow(/RuntimeUpdateProposalResult must be bare JSON or a fenced JSON block/)
   })
 
-  it("returns warnings and no proposed update for illegal output paths", () => {
-    const result = runtimeUpdateInteractionSpec.parseOutput(
-      [
-        "```rpg-wiki-update",
-        "targetPath: wiki/world/city.md",
-        "strategy: merge",
-        "reason: Stable world pages are not valid runtime update targets.",
-        "---",
-        "WORLD_POISON",
-        "```",
-      ].join("\n"),
-      { turnRecord: sampleTurnRecord() },
-    )
-
-    expect(result.proposedUpdates).toEqual([])
-    expect(result.warnings.join("\n")).toContain("outside allowed runtime update paths")
+  it("rejects empty runtime update proposal output", () => {
+    expect(() =>
+      runtimeUpdateInteractionSpec.parseOutput(
+        "",
+        buildRuntimeUpdateProposalInputFromTurnRecord(sampleTurnRecord()),
+      ),
+    ).toThrow(/JSON output is empty/)
   })
 
   it("does not read or write wiki files while building prompts or parsing output", async () => {
@@ -690,20 +673,11 @@ describe("RPG Interaction Contract", () => {
       sourceFileName: "source.md",
     })
     const turnRecord = sampleTurnRecord()
-    runtimeUpdateInteractionSpec.buildPrompt({ turnRecord })
+    const proposalInput = buildRuntimeUpdateProposalInputFromTurnRecord(turnRecord)
+    runtimeUpdateInteractionSpec.buildPrompt(proposalInput)
     runtimeUpdateInteractionSpec.parseOutput(
-      [
-        "```rpg-wiki-update",
-        "targetPath: wiki/current-scene/scene_state.md",
-        "strategy: overwrite",
-        "reason: Keep the scene aligned.",
-        "---",
-        "# Current Scene",
-        "",
-        "Rin studies the ward beside the quiet gate.",
-        "```",
-      ].join("\n"),
-      { turnRecord },
+      JSON.stringify(sampleRuntimeUpdateProposalResult(turnRecord)),
+      proposalInput,
     )
     const after = await snapshotFiles(projectPath)
 
@@ -713,14 +687,69 @@ describe("RPG Interaction Contract", () => {
 })
 
 function sampleTurnRecord(): RpgTurnRecord {
+  const submittedAction = {
+    id: "turn-69",
+    text: "Ask Rin whether the sigil is a ward or a lure.",
+    source: "freeform" as const,
+  }
   return {
-    submittedAction: {
-      id: "turn-69",
-      text: "Ask Rin whether the sigil is a ward or a lure.",
-      source: "freeform",
-    },
+    submittedAction,
+    ...sampleTurnRecordRuntimeParts(submittedAction),
+    turnNarration: sampleTurnNarration({
+      playerFacingText: "Rin kneels by the gate and confirms the sigil is an old ward, not bait.",
+    }),
     generatedNarrative: "Rin kneels by the gate and confirms the sigil is an old ward, not bait.",
     references: ["wiki/current-scene/scene_state.md", "wiki/player/state.md", "wiki/entities/legacy-poison.md"],
+  }
+}
+
+function sampleRuntimeUpdateProposalResult(turnRecord: RpgTurnRecord): RuntimeUpdateProposalResult {
+  return {
+    proposedWikiUpdates: [
+      {
+        id: "runtime-update-scene-turn-69",
+        targetPath: "wiki/current-scene/scene_state.md",
+        strategy: "overwrite",
+        reason: "Keep the scene aligned.",
+        content: "# Current Scene\n\nRin studies the ward beside the quiet gate.",
+        sourceTurnId: turnRecord.submittedAction.id,
+        references: ["wiki/current-scene/scene_state.md"],
+        sourceDeltas: [
+          {
+            deltaId: "source-delta-scene-turn-69",
+            sourceStage: "postActionWorkingState",
+            sourceField: "campaignDelta",
+            summary: "The current scene remains focused on Rin reading the ward.",
+            lineTarget: "playerVisibleLine",
+            visibility: "pc_visible",
+            knowledgeScope: "pc_known",
+            happenedStatus: "ongoing",
+            usePurpose: "writeback",
+            affectedPaths: ["wiki/current-scene/scene_state.md"],
+            runtimeDeltaRefs: turnRecord.postActionWorkingState.runtimeDeltaRefs,
+          },
+        ],
+        lineTarget: "playerVisibleLine",
+        visibility: "pc_visible",
+        knowledgeScope: "pc_known",
+        happenedStatus: "ongoing",
+        confidence: "high",
+        validationHints: [
+          {
+            hintId: "hint-scene-turn-69",
+            severity: "info",
+            code: "structured_source_delta",
+            message: "Structured proposal fixture for interaction tests.",
+          },
+        ],
+      },
+    ],
+    outlineRevisionReviewItems: [],
+    journalEntries: [],
+    skippedDeltas: [],
+    pacingUpdateProposal: null,
+    proposalGroups: [],
+    warnings: [],
   }
 }
 
@@ -739,64 +768,6 @@ function sampleLlmConfig(): LlmConfig {
     ollamaUrl: "",
     customEndpoint: "",
     maxContextSize: 10000,
-  }
-}
-
-function sampleBrief(): CompactStoryBrief {
-  return {
-    submittedAction: {
-      id: "act-1",
-      text: "I show Mira the lantern key and ask whether the canal gate can open quietly.",
-      source: "freeform",
-    },
-    currentScene: "Iven and Mira are beneath the River Port, facing a locked canal gate.",
-    playerState: "Smuggler-mage carrying a brass lantern key.",
-    hardFacts: ["The River Port is under curfew."],
-    activeConstraints: ["Do not resolve the gate without visible cost."],
-    presentCharacters: ["Mira is alert, injured, and suspicious of loud magic."],
-    relationshipTensions: ["Trust between Iven and Mira is rising but fragile."],
-    activePlotPressure: ["The sealed canal gate is an active pressure point."],
-    outlineNotes: ["The main outline keeps the gate patron hidden until the sigil is decoded."],
-    activeQuests: ["Open the canal gate without alerting the Harbor Watch."],
-    relevantLocations: ["wiki/locations/river-port.md: Old sluices connect to the lower city."],
-    relevantFactions: ["wiki/factions/harbor-watch.md: Patrols enforce the curfew."],
-    relevantItems: ["wiki/items/lantern-key.md: Brass key tied to canal wards."],
-    styleRules: ["Keep prose tense and grounded."],
-    ruleNotes: ["Cannot open a warded gate without a key or ritual."],
-    memoryNotes: ["Mira dislikes grandstanding."],
-    forbiddenContradictions: ["Never reveal the gate's patron before the sigil is decoded."],
-    references: ["wiki/current-scene/scene_state.md", "wiki/player/player.md"],
-  }
-}
-
-function sampleTurnResult(overrides: Partial<RpgTurnResult> = {}): RpgTurnResult {
-  return {
-    narrative: "Mira studies the sigil while the lantern key warms in Iven's palm.",
-    nextActionOptions: [
-      {
-        id: "opt-touch-key",
-        playerFacingText: "Touch the lantern key to the lowest sigil.",
-        intent: "use_item",
-        riskLevel: "medium",
-        likelyAffectedPaths: ["wiki/current-scene/scene_state.md", "wiki/items/runtime/lantern-key.md"],
-      },
-      {
-        id: "opt-ask-mira",
-        playerFacingText: "Ask Mira what the glowing tooth means.",
-        intent: "talk",
-        riskLevel: "low",
-        likelyAffectedPaths: ["wiki/relationships/runtime/iven-mira.md"],
-      },
-      {
-        id: "opt-force-gate",
-        playerFacingText: "Force the canal gate before the patrol returns.",
-        intent: "fight",
-        riskLevel: "high",
-        likelyAffectedPaths: ["wiki/current-scene/scene_state.md", "wiki/events/session-03.md"],
-      },
-    ],
-    references: ["wiki/current-scene/scene_state.md", "wiki/player/player.md"],
-    ...overrides,
   }
 }
 

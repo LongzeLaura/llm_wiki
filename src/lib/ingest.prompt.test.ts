@@ -547,7 +547,7 @@ describe("buildGenerationPrompt language directive", () => {
     expect(prompt).toContain("character-specific voice, catchphrases, address habits, politeness level")
     expect(prompt).toContain("Executable mechanics, limits, costs, checks")
     expect(prompt).toContain("control_doc_import material for REVIEW")
-    expect(prompt).toContain("world/ should keep only background, common knowledge, history, society, geography, and stable setting facts")
+    expect(prompt).toContain("world/ is fixed to basic_overview.md, history.md, common_sense.md, supernatural_presence.md, and social_structure.md")
     expect(prompt).toContain("wiki/player/inventory.md is for current holdings")
     expect(prompt).toContain("Do not store player TODO/checklists or quest progress ledgers in plot-arcs")
     expect(prompt).toContain("Character-specific voice, catchphrases, address habits, politeness level, and avoided topics belong here, not in global wiki/style/")

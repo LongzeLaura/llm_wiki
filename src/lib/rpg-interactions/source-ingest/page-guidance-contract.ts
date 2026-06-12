@@ -238,8 +238,8 @@ export function buildFocusedRpgPageGuidance(input: RpgPageGuidanceInput): string
     // 中文：玩家待办清单在普通 Source Ingest 中进入 REVIEW，除非它们确实是当前 PC 主观目标并写入 wiki/player/goals.md。
     "Global writing rules are control_doc_import material for REVIEW; character-specific voice, catchphrases, address habits, politeness level, and relationship-driven tone changes go to characters/ or relationships/.",
     // 中文：全局写作规则属于 control_doc_import 材料，应进入 REVIEW；角色专属语气、口癖、称呼习惯、礼貌等级和关系驱动的语气变化进入 characters/ 或 relationships/。
-    "Executable mechanics, limits, costs, checks, allowed/disallowed actions, and success/failure boundaries are control_doc_import material for REVIEW; world/ should keep only background, common knowledge, history, society, geography, and stable setting facts.",
-    // 中文：可执行机制、限制、代价、判定、行动边界和成败边界属于 control_doc_import 材料，应进入 REVIEW；world/ 只保留背景、常识、历史、社会、地理和稳定设定事实。
+    "Executable mechanics, limits, costs, checks, allowed/disallowed actions, and success/failure boundaries are control_doc_import material for REVIEW; world/ is fixed to basic_overview.md, history.md, common_sense.md, supernatural_presence.md, and social_structure.md for stable setting facts.",
+    // 中文：可执行机制、限制、代价、判定、行动边界和成败边界属于 control_doc_import 材料，应进入 REVIEW；world/ 固定为 basic_overview.md、history.md、common_sense.md、supernatural_presence.md 和 social_structure.md，用于稳定设定事实。
     "For structured signals scored 4-5, put the usable target-page material first in ## Runtime Capsule.",
     // 中文：结构化信号 4-5 分时，应优先把可用目标页材料放入 ## Runtime Capsule。
     "",

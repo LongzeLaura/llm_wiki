@@ -115,7 +115,7 @@ describe("Stage 10 RPG smoke test", () => {
 
     await writeFileRaw(`${projectPath}/schema.md`, RPG_SCHEMA)
     await writeFileRaw(`${projectPath}/purpose.md`, "# Purpose\n\nTrack a story-driven tabletop RPG campaign.\n")
-    await writeFileRaw(`${projectPath}/wiki/index.md`, "# Index\n\n- [[world/basic-overview]]\n")
+    await writeFileRaw(`${projectPath}/wiki/index.md`, "# Index\n\n- [[world/basic_overview]]\n")
     await writeFileRaw(
       `${projectPath}/wiki/current-scene/scene_state.md`,
       "# Current Scene\n\nRuntime-owned snapshot before ordinary ingest.",
@@ -185,13 +185,13 @@ describe("Stage 10 RPG smoke test", () => {
     queueIngest(
       [
         "## RPG Extraction",
-        "- world/basic-overview.md",
+        "- world/basic_overview.md",
         "- locations/river-port.md",
         "- factions/amber-guild.md",
         "- items/lantern-key.md",
       ].join("\n"),
       [
-        "---FILE: wiki/world/basic-overview.md---",
+        "---FILE: wiki/world/basic_overview.md---",
         "---",
         'type: "world"',
         'title: "Harborfall Overview"',
@@ -402,7 +402,7 @@ describe("Stage 10 RPG smoke test", () => {
     await autoIngest(projectPath, turnTwoSourcePath, llmConfig)
 
     const expectedFiles = [
-      `${projectPath}/wiki/world/basic-overview.md`,
+      `${projectPath}/wiki/world/basic_overview.md`,
       `${projectPath}/wiki/characters/mira-vale.md`,
       `${projectPath}/wiki/player/player.md`,
       `${projectPath}/wiki/locations/river-port.md`,
@@ -444,12 +444,12 @@ describe("Stage 10 RPG smoke test", () => {
     const index = await readFileRaw(`${projectPath}/wiki/index.md`)
     expect(detectWikiMode({ schema, index, paths: expectedFiles })).toBe("llmwikirpg")
 
-    expect(inferWikiTypeFromPath(`${projectPath}/wiki/world/basic-overview.md`)).toBe("world")
+    expect(inferWikiTypeFromPath(`${projectPath}/wiki/world/basic_overview.md`)).toBe("world")
     expect(inferWikiTypeFromPath(`${projectPath}/wiki/current-scene/scene_state.md`)).toBe("current-scene")
     expect(inferWikiTypeFromPath(`${projectPath}/wiki/relationships/player-mira.md`)).toBe("relationships")
 
     const prioritized = prioritizeChatSearchResults([
-      makeResult(`${projectPath}/wiki/world/basic-overview.md`, 30),
+      makeResult(`${projectPath}/wiki/world/basic_overview.md`, 30),
       makeResult(`${projectPath}/wiki/player/player.md`, 25),
       makeResult(`${projectPath}/wiki/current-scene/scene_state.md`, 10),
       makeResult(`${projectPath}/wiki/events/canal-gate-incident.md`, 20),

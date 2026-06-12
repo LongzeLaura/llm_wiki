@@ -222,7 +222,7 @@ const CLOSER_LINE = /^---\s*END\s+FILE\s*---\s*$/i
  * sandboxing of its own (it's a generic command used for many things),
  * so the gate has to live here at the parse boundary.
  *
- * Allowed: any path under `wiki/` (e.g. `wiki/world/foo.md`).
+ * Allowed: any safe path under `wiki/`; llmWikiRPG mode applies stricter target policy later.
  * Rejected:
  *   - paths not starting with `wiki/`
  *   - absolute paths (`/etc/passwd`, `C:/Windows/...`)
@@ -1316,7 +1316,7 @@ async function writeFileBlocks(
       relativePath = sourceSummaryPath
     }
     if (isLegacyWikiPath(relativePath)) {
-      const msg = `Rejected legacy llm_wiki FILE block "${relativePath}". Ordinary llmWikiRPG Source Ingest writes only wiki/sources/, wiki/world/, wiki/characters/, fixed wiki/player/ slots when the source explicitly declares the current PC, wiki/locations/, wiki/factions/, wiki/items/, wiki/plot-arcs/, wiki/events/, wiki/relationships/, plus wiki/index.md, wiki/overview.md, and wiki/log.md.`
+      const msg = `Rejected legacy llm_wiki FILE block "${relativePath}". Ordinary llmWikiRPG Source Ingest writes only wiki/sources/, fixed wiki/world/ slots, wiki/characters/, fixed wiki/player/ slots when the source explicitly declares the current PC, wiki/locations/, wiki/factions/, wiki/items/, wiki/plot-arcs/, wiki/events/, wiki/relationships/, plus wiki/index.md, wiki/overview.md, and wiki/log.md.`
       console.warn(`[ingest] ${msg}`)
       warnings.push(msg)
       reviewItems.push({
@@ -1356,7 +1356,7 @@ async function writeFileBlocks(
       }
     }
     if (rpgMode && !isRpgSourceIngestAllowedTarget(relativePath)) {
-      const msg = `Skipped ordinary Source Ingest FILE block "${relativePath}" because it is not an allowed source-ingest target. Use wiki/sources/, wiki/world/, wiki/characters/, fixed wiki/player/ slots, wiki/locations/, wiki/factions/, wiki/items/, wiki/plot-arcs/, wiki/events/, wiki/relationships/, or structural wiki/index.md, wiki/overview.md, wiki/log.md.`
+      const msg = `Skipped ordinary Source Ingest FILE block "${relativePath}" because it is not an allowed source-ingest target. Use wiki/sources/, fixed wiki/world/ slots, wiki/characters/, fixed wiki/player/ slots, wiki/locations/, wiki/factions/, wiki/items/, wiki/plot-arcs/, wiki/events/, wiki/relationships/, or structural wiki/index.md, wiki/overview.md, wiki/log.md.`
       console.warn(`[ingest] ${msg}`)
       warnings.push(msg)
       reviewItems.push({

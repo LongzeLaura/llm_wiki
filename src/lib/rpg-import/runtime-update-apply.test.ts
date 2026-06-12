@@ -6,7 +6,23 @@ import {
   runRpgImport,
   type RuntimeUpdateApplyResult,
 } from "."
-import type { PendingRpgUpdate, ProposedWikiUpdate, RpgTurnRecord, RpgUpdateStrategy } from "../rpg-runtime"
+import type {
+  OutlineRevisionReviewItem,
+  PendingRpgUpdate,
+  ProposalGroup,
+  ProposedWikiUpdate,
+  RpgTurnRecord,
+  RpgUpdateStrategy,
+  RuntimeProposedWikiUpdate,
+  RuntimeUpdateProposalResult,
+  RuntimeUpdateSourceDelta,
+  SkippedRuntimeDelta,
+} from "../rpg-runtime"
+import {
+  sampleRecallSelection,
+  sampleTurnNarration,
+  sampleTurnRecordRuntimeParts,
+} from "../rpg-runtime-test-fixtures"
 
 vi.mock("@/commands/fs", () => realFs)
 
@@ -25,36 +41,40 @@ describe("RPG import runtime_update_apply", () => {
     expect(listRpgImportModeSpecs().map((spec) => spec.mode)).toContain("runtime_update_apply")
   })
 
-  it("stages fenced rpg-wiki-update blocks as proposed and pending updates without writing wiki files", async () => {
+  it("stages structured RuntimeUpdateProposalResult JSON as proposed and pending updates without writing wiki files", async () => {
     const projectPath = await createProject("runtime-update-stage-fenced")
     await writeFileRaw(`${projectPath}/wiki/current-scene/scene_state.md`, "# Current Scene\n\nOld scene.")
+    const turnId = "turn-stage-structured"
     const result = await runRpgImport({
       mode: "runtime_update_apply",
       projectPath,
-      sourceText: [
-        "```rpg-wiki-update",
-        "targetPath: wiki/current-scene/scene_state.md",
-        "strategy: overwrite",
-        "reason: Keep the latest scene snapshot after the completed action.",
-        "---",
-        "# Current Scene",
-        "",
-        "Iven and Mira stand by the opened canal gate.",
-        "```",
-        "",
-        "```rpg-wiki-update",
-        "targetPath: wiki/events/canal-gate-opened.md",
-        "strategy: append",
-        "reason: Record the completed gate opening as happened history.",
-        "---",
-        "# Canal Gate Opened",
-        "",
-        "Iven opened the canal gate with the lantern key.",
-        "```",
-      ].join("\n"),
+      sourceText: JSON.stringify(
+        runtimeProposalResult({
+          proposedWikiUpdates: [
+            runtimeProposedUpdate({
+              id: "scene-structured",
+              targetPath: "wiki/current-scene/scene_state.md",
+              strategy: "overwrite",
+              reason: "Keep the latest scene snapshot after the completed action.",
+              content: "# Current Scene\n\nIven and Mira stand by the opened canal gate.",
+              sourceTurnId: turnId,
+            }),
+            runtimeProposedUpdate({
+              id: "event-structured",
+              targetPath: "wiki/events/canal-gate-opened.md",
+              strategy: "append",
+              reason: "Record the completed gate opening as happened history.",
+              content: "# Canal Gate Opened\n\nIven opened the canal gate with the lantern key.",
+              sourceTurnId: turnId,
+            }),
+          ],
+        }),
+        null,
+        2,
+      ),
       options: {
         operation: "stage_pending",
-        turnRecord: sampleTurnRecord("turn-stage-fenced"),
+        turnRecord: sampleTurnRecord(turnId),
       },
     }) as RuntimeUpdateApplyResult
 
@@ -77,24 +97,34 @@ describe("RPG import runtime_update_apply", () => {
 
   it("keeps validation-rejected updates out of pending", async () => {
     const projectPath = await createProject("runtime-update-stage-validation-reject")
+    const turnId = "turn-stage-reject"
     const result = await runRpgImport({
       mode: "runtime_update_apply",
       projectPath,
-      sourceText: [
-        "```rpg-wiki-update",
-        "targetPath: wiki/events/canal-gate-future.md",
-        "strategy: append",
-        "reason: This wrongly stores possible future options as event history.",
-        "---",
-        "# Canal Gate Future",
-        "",
-        "## Possible Futures",
-        "- Next action: the player may force the gate before the patrol returns.",
-        "```",
-      ].join("\n"),
+      sourceText: JSON.stringify(
+        runtimeProposalResult({
+          proposedWikiUpdates: [
+            runtimeProposedUpdate({
+              id: "event-future-structured",
+              targetPath: "wiki/events/canal-gate-future.md",
+              strategy: "append",
+              reason: "This wrongly stores possible future options as event history.",
+              content: [
+                "# Canal Gate Future",
+                "",
+                "## Possible Futures",
+                "- Next action: the player may force the gate before the patrol returns.",
+              ].join("\n"),
+              sourceTurnId: turnId,
+            }),
+          ],
+        }),
+        null,
+        2,
+      ),
       options: {
         operation: "stage_pending",
-        turnRecord: sampleTurnRecord("turn-stage-reject"),
+        turnRecord: sampleTurnRecord(turnId),
       },
     }) as RuntimeUpdateApplyResult
 
@@ -110,6 +140,92 @@ describe("RPG import runtime_update_apply", () => {
     expect(await fileExists(`${projectPath}/wiki/events/canal-gate-future.md`)).toBe(false)
   })
 
+  it("preserves structured proposal audit fields as review items and warnings", async () => {
+    const projectPath = await createProject("runtime-update-stage-audit-fields")
+    const turnId = "turn-stage-audit"
+    const skippedSourceDelta = runtimeSourceDelta({
+      deltaId: "delta-hidden",
+      summary: "Hidden outline pressure should stay review-only.",
+      lineTarget: "tensionLine",
+      visibility: "gm_only",
+      knowledgeScope: "gm_only",
+      happenedStatus: "possible_future",
+      usePurpose: "reviewOnly",
+      affectedPaths: ["wiki/outlines/main.md"],
+    })
+
+    const result = await runRpgImport({
+      mode: "runtime_update_apply",
+      projectPath,
+      sourceText: JSON.stringify(
+        runtimeProposalResult({
+          proposedWikiUpdates: [
+            runtimeProposedUpdate({
+              id: "scene-audit",
+              targetPath: "wiki/current-scene/scene_state.md",
+              strategy: "overwrite",
+              reason: "Keep the accepted visible scene state.",
+              content: "# Current Scene\n\nMira finishes the sigil read beside Iven.",
+              sourceTurnId: turnId,
+            }),
+          ],
+          skippedDeltas: [
+            runtimeSkippedDelta({
+              skipId: "skip-hidden-outline",
+              sourceDelta: skippedSourceDelta,
+              code: "hidden_outline_boundary",
+              reason: "Hidden outline pressure is review-only and cannot become an ordinary wiki update.",
+              reviewPolicy: "review_only",
+            }),
+          ],
+          outlineRevisionReviewItems: [outlineRevisionReviewItem()],
+          journalEntries: ["Structured proposal audit entry."],
+          pacingUpdateProposal: {
+            proposalId: "pacing-audit",
+            sourceDeltaIds: ["delta-scene-audit"],
+            previousPacingState: "low pacing debt",
+            nextPacingState: "gate scene moved",
+            timeDeltaSummary: "A few minutes pass while Mira reads the sigil.",
+            campaignDelta: "The canal-gate scene gains a meaningful decision point.",
+            pacingDebtChange: "decreased",
+            targetPath: "journal_only",
+            reviewPolicy: "review_only",
+          },
+          proposalGroups: [
+            runtimeProposalGroup({
+              groupId: "group-audit",
+              updateIds: ["scene-audit"],
+              skippedDeltaIds: ["skip-hidden-outline"],
+              sourceDeltaIds: ["delta-scene-audit", "delta-hidden"],
+            }),
+          ],
+          warnings: ["Structured parser warning retained."],
+        }),
+        null,
+        2,
+      ),
+      options: {
+        operation: "stage_pending",
+        turnRecord: sampleTurnRecord(turnId),
+      },
+    }) as RuntimeUpdateApplyResult
+
+    expect(result.proposedUpdates.map((update) => update.id)).toEqual(["scene-audit"])
+    expect(result.pendingUpdates.map((update) => update.id)).toEqual(["scene-audit"])
+    expect(result.proposedUpdates.map((update) => update.targetPath)).not.toContain("wiki/outlines/main.md")
+    expect(result.pendingUpdates.map((update) => update.targetPath)).not.toContain("wiki/outlines/main.md")
+
+    const auditSurface = `${JSON.stringify(result.reviewItems)}\n${result.warnings.join("\n")}`
+    expect(auditSurface).toContain("runtime-update-skipped-delta")
+    expect(auditSurface).toContain("skip-hidden-outline")
+    expect(auditSurface).toContain("outline-revision-review")
+    expect(auditSurface).toContain("outline-review-audit")
+    expect(auditSurface).toContain("Structured proposal audit entry.")
+    expect(auditSurface).toContain("pacing-audit")
+    expect(auditSurface).toContain("group-audit")
+    expect(auditSurface).toContain("Structured parser warning retained.")
+  })
+
   it("rejects stable, base, source, and manual-control targets before pending staging", async () => {
     const projectPath = await createProject("runtime-update-stage-target-policy")
     const forbiddenTargets = [
@@ -119,7 +235,7 @@ describe("RPG import runtime_update_apply", () => {
       "wiki/rules/core.md",
       "wiki/style/narration.md",
       "wiki/sources/campaign-notes.md",
-      "wiki/world/river-port.md",
+      "wiki/world/basic_overview.md",
     ]
 
     const result = await runRpgImport({
@@ -321,15 +437,146 @@ async function createProject(label: string): Promise<string> {
 }
 
 function sampleTurnRecord(id: string): RpgTurnRecord {
+  const submittedAction = {
+    id,
+    text: "Ask Mira to inspect the canal gate sigil before I use the lantern key.",
+    source: "freeform" as const,
+  }
+  const runtimeParts = sampleTurnRecordRuntimeParts(submittedAction, {
+    recallSelection: sampleRecallSelection(`action-resolution-${id}`),
+  })
   return {
-    submittedAction: {
-      id,
-      text: "Ask Mira to inspect the canal gate sigil before I use the lantern key.",
-      source: "freeform",
-    },
+    submittedAction,
+    ...runtimeParts,
+    turnNarration: sampleTurnNarration({ playerFacingText: "Mira inspected the canal gate sigil." }),
     generatedNarrative: "Mira inspected the canal gate sigil.",
     references: ["wiki/current-scene/scene_state.md", "wiki/player/player.md"],
   }
+}
+
+function runtimeProposalResult(overrides: Partial<RuntimeUpdateProposalResult> = {}): RuntimeUpdateProposalResult {
+  return {
+    proposedWikiUpdates: [],
+    outlineRevisionReviewItems: [],
+    journalEntries: [],
+    skippedDeltas: [],
+    pacingUpdateProposal: null,
+    proposalGroups: [],
+    warnings: [],
+    ...overrides,
+  }
+}
+
+function runtimeProposedUpdate(
+  overrides: Partial<RuntimeProposedWikiUpdate> &
+    Pick<RuntimeProposedWikiUpdate, "id" | "targetPath" | "strategy" | "content" | "sourceTurnId">,
+): RuntimeProposedWikiUpdate {
+  const sourceDeltaId = `delta-${overrides.id}`
+  return {
+    reason: "Track accepted runtime state.",
+    references: ["wiki/current-scene/scene_state.md"],
+    sourceDeltas: [
+      runtimeSourceDelta({
+        deltaId: sourceDeltaId,
+        affectedPaths: [overrides.targetPath],
+      }),
+    ],
+    lineTarget: "playerVisibleLine",
+    visibility: "pc_visible",
+    knowledgeScope: "pc_known",
+    happenedStatus: "confirmed_happened",
+    confidence: "high",
+    validationHints: [],
+    ...overrides,
+  }
+}
+
+function runtimeSourceDelta(overrides: Partial<RuntimeUpdateSourceDelta> = {}): RuntimeUpdateSourceDelta {
+  const deltaId = overrides.deltaId ?? "delta-runtime"
+  return {
+    deltaId,
+    sourceStage: "worldTickResult",
+    sourcePath: `.llm-wiki/runtime/turns/turn-structured/world-tick.json#${deltaId}`,
+    sourceField: "worldDeltas.playerVisibleLine",
+    summary: "Structured current-turn runtime delta.",
+    lineTarget: "playerVisibleLine",
+    visibility: "pc_visible",
+    knowledgeScope: "pc_known",
+    happenedStatus: "confirmed_happened",
+    usePurpose: "writeback",
+    affectedPaths: ["wiki/current-scene/scene_state.md"],
+    runtimeDeltaRefs: [runtimeDeltaRef(deltaId)],
+    ...overrides,
+  }
+}
+
+function runtimeSkippedDelta(overrides: Partial<SkippedRuntimeDelta> = {}): SkippedRuntimeDelta {
+  return {
+    skipId: "skip-runtime",
+    sourceDelta: runtimeSourceDelta(),
+    code: "review_only_delta",
+    reason: "Delta was intentionally kept out of ordinary pending updates.",
+    reviewPolicy: "review_only",
+    ...overrides,
+  }
+}
+
+function outlineRevisionReviewItem(overrides: Partial<OutlineRevisionReviewItem> = {}): OutlineRevisionReviewItem {
+  return {
+    reviewItemId: "outline-review-audit",
+    sourceProposalId: "outline-proposal-audit",
+    sourceRequestId: "regen-request-audit",
+    reviewItemKind: "outlineRevision",
+    outlineImpactLevel: "major_rewrite_required",
+    summary: "Review a future outline adjustment without staging a wiki update.",
+    proposedRevisionSummary: "Move the future canal-gate reveal behind the accepted scene fact.",
+    targetOutlineRefs: [
+      {
+        refId: "outline-ref-audit",
+        path: "wiki/outlines/main.md",
+        sectionId: "outline.main",
+        stableId: "beat-canal-gate",
+        summary: "Canal gate future reveal beat.",
+        lineTarget: "tensionLine",
+        visibilityScope: "gm_only",
+        knowledgeScope: "gm_only",
+      },
+    ],
+    mustPreserveFacts: ["Mira finished the visible sigil read."],
+    runtimeDeltaRefs: [runtimeDeltaRef("delta-hidden")],
+    reviewPolicy: "manual_review",
+    ordinaryRuntimeUpdate: false,
+    proposedWikiUpdate: false,
+    autoWriteMainOutline: false,
+    warnings: [],
+    ...overrides,
+  }
+}
+
+function runtimeProposalGroup(overrides: Partial<ProposalGroup> = {}): ProposalGroup {
+  return {
+    groupId: "group-runtime",
+    title: "Runtime proposal audit group",
+    lineTarget: "tensionLine",
+    updateIds: [],
+    skippedDeltaIds: [],
+    sourceDeltaIds: [],
+    reason: "Keep related proposal and audit records together for review.",
+    reviewPolicy: "review_only",
+    ...overrides,
+  }
+}
+
+function runtimeDeltaRef(deltaId: string) {
+  return {
+    deltaId,
+    sourceStage: "worldTick",
+    sourcePath: `.llm-wiki/runtime/turns/turn-structured/world-tick.json#${deltaId}`,
+    summary: `Runtime delta ${deltaId}.`,
+    narrativeLine: "playerVisibleLine",
+    usePurpose: "writeback",
+    happenedStatus: deltaId.includes("hidden") ? "possible_future" : "confirmed_happened",
+  } as const
 }
 
 function proposedUpdate(overrides: Partial<ProposedWikiUpdate>): ProposedWikiUpdate {

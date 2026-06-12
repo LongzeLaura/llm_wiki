@@ -1,8 +1,13 @@
 import { describe, expect, it, afterEach } from "vitest"
 import fs from "node:fs/promises"
 import { createTempProject, readFileRaw, writeFileRaw } from "@/test-helpers/fs-temp"
-import { cleanRpgReferences, createRpgTurnRecord } from "./rpg-runtime"
+import { cleanRpgReferences, createRpgTurnRecord, createTurnResultFromTurnNarration } from "./rpg-runtime"
 import type { RpgTurnResult, SubmittedAction } from "./rpg-runtime"
+import {
+  sampleRecallSelection,
+  sampleTurnNarration,
+  sampleTurnRecordRuntimeParts,
+} from "./rpg-runtime-test-fixtures"
 
 interface Ctx {
   tmp: { path: string; cleanup: () => Promise<void> }
@@ -18,6 +23,43 @@ afterEach(async () => {
 })
 
 describe("RPG Turn Model", () => {
+  it("derives the transitional RpgTurnResult from TurnNarration in one helper", () => {
+    const turnNarration = sampleTurnNarration({
+      playerFacingText: "Mira names the safe sigil edge while the patrol light nears.",
+    })
+    turnNarration.references = [
+      ...turnNarration.references,
+      {
+        path: "wiki/entities/legacy-poison.md",
+        usePurpose: "narration",
+        reason: "Legacy paths must not survive the transition helper.",
+      },
+      {
+        path: "wiki/current-scene/scene_state.md",
+        usePurpose: "narration",
+        reason: "Duplicate path should be deduplicated.",
+      },
+    ]
+
+    const result = createTurnResultFromTurnNarration(turnNarration)
+    const serialized = JSON.stringify(result)
+
+    expect(result).toEqual({
+      narrative: turnNarration.playerFacingText,
+      nextActionOptions: turnNarration.nextActionOptions.map((option) => ({
+        id: option.id,
+        playerFacingText: option.playerFacingText,
+        intent: option.intent,
+        riskLevel: option.riskLevel,
+        likelyAffectedPaths: option.likelyAffectedPaths,
+      })),
+      references: ["wiki/current-scene/scene_state.md", "wiki/player/player.md"],
+    })
+    expect(serialized).not.toContain(turnNarration.parallelLineText)
+    expect(serialized).not.toContain(turnNarration.tensionBrief.summary)
+    expect(serialized).not.toContain("wiki/entities/legacy-poison.md")
+  })
+
   it("creates a completed turn record from a SubmittedAction and RpgTurnResult", () => {
     const submittedAction: SubmittedAction = {
       id: "act-1",
@@ -38,16 +80,44 @@ describe("RPG Turn Model", () => {
       references: ["wiki/characters/mira.md", "wiki/current-scene/scene_state.md"],
     }
 
-    const record = createRpgTurnRecord({ submittedAction, turnResult })
+    const runtimeParts = sampleTurnRecordRuntimeParts(submittedAction)
+    const turnNarration = sampleTurnNarration({ playerFacingText: turnResult.narrative })
+    const record = createRpgTurnRecord({
+      submittedAction,
+      ...runtimeParts,
+      turnNarration,
+      turnResult,
+    })
 
     expect(record).toEqual({
       submittedAction,
+      actionResolution: runtimeParts.actionResolution,
+      worldTickResult: runtimeParts.worldTickResult,
+      visibleSelection: runtimeParts.visibleSelection,
+      postActionWorkingState: runtimeParts.postActionWorkingState,
+      recallSelection: sampleRecallSelection(),
+      recalledMaterials: [],
+      outlineAwareNarrationBrief: runtimeParts.outlineAwareNarrationBrief,
+      outlineImpactReport: runtimeParts.outlineImpactReport,
+      turnNarration,
       generatedNarrative: turnResult.narrative,
-      references: ["wiki/characters/mira.md", "wiki/current-scene/scene_state.md"],
+      references: [
+        "wiki/characters/mira.md",
+        "wiki/current-scene/scene_state.md",
+        "wiki/factions/runtime/harbor-watch.md",
+        "wiki/player/player.md",
+        "wiki/rules/core.md",
+      ],
     })
   })
 
-  it("keeps generated narrative but excludes next action options from the record", () => {
+  it("keeps generated narrative and actionResolution but excludes next action options from the record", () => {
+    const submittedAction: SubmittedAction = {
+      id: "act-2",
+      text: "Lift the lantern toward the lock.",
+      source: "freeform",
+    }
+    const runtimeParts = sampleTurnRecordRuntimeParts(submittedAction)
     const turnResult: RpgTurnResult = {
       narrative: "The brass lantern flares once, revealing fresh scratches around the lock.",
       nextActionOptions: [
@@ -63,26 +133,62 @@ describe("RPG Turn Model", () => {
     }
 
     const record = createRpgTurnRecord({
-      submittedAction: { id: "act-2", text: "Lift the lantern toward the lock.", source: "freeform" },
+      submittedAction,
+      ...runtimeParts,
+      turnNarration: sampleTurnNarration({ playerFacingText: turnResult.narrative }),
       turnResult,
     })
     const serializedRecord = JSON.stringify(record)
 
     expect(record.generatedNarrative).toContain("brass lantern flares")
+    expect(record.actionResolution).toEqual(runtimeParts.actionResolution)
     expect("nextActionOptions" in record).toBe(false)
     expect(serializedRecord).not.toContain("Leave Mira behind")
     expect(serializedRecord).not.toContain("opt-avoid-mira")
     expect(serializedRecord).not.toContain("wiki/relationships/iven-mira.md")
   })
 
-  it("normalizes, deduplicates, sorts, and filters references", () => {
+  it("keeps outline regeneration audit fields separate from narrative and references", () => {
+    const submittedAction: SubmittedAction = {
+      id: "act-regeneration-audit",
+      text: "Break the canal gate seal early.",
+      source: "freeform",
+    }
+    const runtimeParts = sampleTurnRecordRuntimeParts(submittedAction)
+    const auditFields = sampleRegenerationAuditFields()
+
     const record = createRpgTurnRecord({
-      submittedAction: {
-        id: "act-3",
-        text: "Check the courtyard, then compare notes with Mira.",
-        source: "selected_option",
-        selectedOptionId: "opt-check-yard",
+      submittedAction,
+      ...runtimeParts,
+      ...auditFields,
+      turnNarration: sampleTurnNarration({ playerFacingText: "The seal breaks before the old beat can land." }),
+      turnResult: {
+        narrative: "The seal breaks before the old beat can land.",
+        nextActionOptions: [],
+        references: ["wiki/current-scene/scene_state.md"],
       },
+    })
+
+    expect(record.provisionalOutlinePatch).toEqual(auditFields.provisionalOutlinePatch)
+    expect(record.outlineRevisionProposal).toEqual(auditFields.outlineRevisionProposal)
+    expect(record.regenerationSafetyReport).toEqual(auditFields.regenerationSafetyReport)
+    expect(record.generatedNarrative).not.toContain("Future-only outline review candidate")
+    expect(record.references).not.toContain("wiki/outlines/main.md")
+  })
+
+  it("normalizes, deduplicates, sorts, and filters references", () => {
+    const submittedAction: SubmittedAction = {
+      id: "act-3",
+      text: "Check the courtyard, then compare notes with Mira.",
+      source: "selected_option",
+      selectedOptionId: "opt-check-yard",
+    }
+    const record = createRpgTurnRecord({
+      submittedAction,
+      ...sampleTurnRecordRuntimeParts(submittedAction),
+      turnNarration: sampleTurnNarration({
+        playerFacingText: "The courtyard is empty, but the wet footprints stop at the old shrine door.",
+      }),
       turnResult: {
         narrative: "The courtyard is empty, but the wet footprints stop at the old shrine door.",
         nextActionOptions: [],
@@ -93,7 +199,7 @@ describe("RPG Turn Model", () => {
           "wiki/events/session-04.md",
           "./wiki/locations/courtyard.md",
           "/wiki/characters/mira.md",
-          "wiki/world//shrines.md",
+          "wiki/world//supernatural_presence.md",
           "wiki/quests/main.md",
           "wiki/entities/legacy-poison.md",
           "wiki/concepts/legacy-poison.md",
@@ -105,10 +211,14 @@ describe("RPG Turn Model", () => {
 
     expect(record.references).toEqual([
       "wiki/characters/mira.md",
+      "wiki/current-scene/scene_state.md",
       "wiki/events/session-04.md",
-      "wiki/locations/courtyard.md",
-      "wiki/quests/main.md",
-      "wiki/world/shrines.md",
+        "wiki/factions/runtime/harbor-watch.md",
+        "wiki/locations/courtyard.md",
+        "wiki/player/player.md",
+        "wiki/quests/main.md",
+      "wiki/rules/core.md",
+      "wiki/world/supernatural_presence.md",
     ])
   })
 
@@ -133,6 +243,8 @@ describe("RPG Turn Model", () => {
     const before = await snapshotFiles(projectPath)
     createRpgTurnRecord({
       submittedAction: { id: "act-4", text: "Listen at the closed door.", source: "freeform" },
+      ...sampleTurnRecordRuntimeParts({ id: "act-4", text: "Listen at the closed door.", source: "freeform" }),
+      turnNarration: sampleTurnNarration({ playerFacingText: "No footsteps answer from the other side." }),
       turnResult: {
         narrative: "No footsteps answer from the other side.",
         nextActionOptions: [],
@@ -145,6 +257,88 @@ describe("RPG Turn Model", () => {
     expect(await readFileRaw(`${projectPath}/wiki/current-scene/scene_state.md`)).toContain("The door is closed.")
   })
 })
+
+function sampleRegenerationAuditFields() {
+  return {
+    provisionalOutlinePatch: {
+      patchId: "patch-audit",
+      sourceRequestId: "request-audit",
+      scope: "same_turn_only" as const,
+      outlineImpactLevel: "major_rewrite_required" as const,
+      affectedOutlineRefs: [],
+      suspendedBeatRefs: [],
+      invalidatedBeatRefs: [],
+      preservedConfirmedFacts: [],
+      runtimeDeltaRefs: [],
+      narrativeLines: ["playerVisibleLine" as const],
+      visibilityBoundary: [],
+      narrationHandoff: {
+        handoffId: "handoff-audit",
+        sourcePatchId: "patch-audit",
+        mustFollow: ["Follow the changed same-turn direction."],
+        mustPreserveFacts: [],
+        mustNotReveal: [],
+        invalidatedOldBeats: [],
+        nextSceneDirection: "Continue from the changed seal.",
+        narrativeLines: ["playerVisibleLine" as const],
+        visibilityBoundaries: [],
+        runtimeDeltaRefs: [],
+        outlineRefs: [],
+        grantsPcKnowledgeFromHiddenMaterial: false as const,
+      },
+      nonPersistenceBoundary: {
+        sameTurnOnly: true as const,
+        writesToWiki: false as const,
+        modifiesMainOutline: false as const,
+        persistedToOutlinesMain: false as const,
+        ordinaryRuntimeUpdate: false as const,
+        acceptedWikiFacts: false as const,
+      },
+    },
+    outlineRevisionProposal: {
+      proposalId: "proposal-audit",
+      sourceRequestId: "request-audit",
+      reviewItemKind: "outlineRevision" as const,
+      outlineImpactLevel: "major_rewrite_required" as const,
+      targetOutlineRefs: [],
+      invalidatedAssumptions: ["Old sequence needs review."],
+      mustPreserveFacts: [],
+      proposedRevision: {
+        summary: "Future-only outline review candidate.",
+        revisedBeats: [],
+        revisedRevealOrder: [],
+        branchAdjustments: [],
+        futureOnly: true as const,
+      },
+      visibilityAndKnowledgeScope: [],
+      runtimeDeltaRefs: [],
+      reviewBoundary: {
+        reviewItemKind: "outlineRevision" as const,
+        reviewBoundary: "independent_pending_review" as const,
+        ordinaryRuntimeUpdate: false as const,
+        proposedWikiUpdate: false as const,
+        autoWriteMainOutline: false as const,
+        mainOutlineWritePolicy: "manual_or_review_only" as const,
+      },
+    },
+    regenerationSafetyReport: {
+      reportKind: "regenerationSafetyReport" as const,
+      safetyConclusion: "safe" as const,
+      preservesConfirmedFacts: true as const,
+      futureNotWrittenAsEvent: true as const,
+      forbiddenRevealProtected: true as const,
+      mainOutlineNotDirectlyModified: true as const,
+      provisionalPatchNonPersistent: true as const,
+      proposalReviewBoundary: true as const,
+      ordinaryRuntimeUpdateBoundary: true as const,
+      noWikiWrite: true as const,
+      noPlayerFacingProse: true as const,
+      checkedRuntimeRefs: [],
+      checkedOutlineRefs: [],
+      warnings: [],
+    },
+  }
+}
 
 async function snapshotFiles(root: string): Promise<Record<string, string>> {
   const result: Record<string, string> = {}
