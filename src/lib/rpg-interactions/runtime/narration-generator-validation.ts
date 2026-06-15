@@ -10,6 +10,7 @@ import type {
   TurnNarration,
 } from "../../rpg-runtime/types"
 import type { RpgKnowledgeScope, RpgNarrativeLine, RpgUsePurpose, RpgVisibilityScope } from "../../rpg-wiki-schema"
+import { isConcreteNonPcActorRef, validateRpgKnowledgeClaim } from "../../rpg-runtime/actor-knowledge"
 
 const ALLOWED_ACTION_INTENTS = new Set<RuntimeNarrationActionOption["intent"]>([
   "investigate",
@@ -413,6 +414,22 @@ function validateReference(value: unknown, label: string): NarrationSourceRef {
     throw new Error(`Invalid ${label}.path: Narration Generator must not receive or output full outlines/main.md payload references.`)
   }
 
+  const knowledgeScope =
+    record.knowledgeScope === undefined
+      ? undefined
+      : readEnum(record, "knowledgeScope", ALLOWED_KNOWLEDGE_SCOPES, `${label}.knowledgeScope`)
+  const knowledgeClaims = record.knowledgeClaims === undefined
+    ? undefined
+    : readArray(record, "knowledgeClaims", `${label}.knowledgeClaims`).map((claim, index) =>
+      validateRpgKnowledgeClaim(claim, `${label}.knowledgeClaims[${index}]`),
+    )
+  if (
+    knowledgeScope === "npc_known" &&
+    !knowledgeClaims?.some((claim) => claim.holders.some(isConcreteNonPcActorRef))
+  ) {
+    throw new Error(`Invalid ${label}.knowledgeClaims: npc_known references require concrete npc/faction/group holders.`)
+  }
+
   return {
     path,
     sectionId: readOptionalString(record, "sectionId", `${label}.sectionId`),
@@ -428,10 +445,8 @@ function validateReference(value: unknown, label: string): NarrationSourceRef {
       record.visibilityScope === undefined
         ? undefined
         : readEnum(record, "visibilityScope", ALLOWED_VISIBILITY_SCOPES, `${label}.visibilityScope`),
-    knowledgeScope:
-      record.knowledgeScope === undefined
-        ? undefined
-        : readEnum(record, "knowledgeScope", ALLOWED_KNOWLEDGE_SCOPES, `${label}.knowledgeScope`),
+    knowledgeScope,
+    ...(knowledgeClaims ? { knowledgeClaims } : {}),
     reason: readString(record, "reason", `${label}.reason`),
   }
 }

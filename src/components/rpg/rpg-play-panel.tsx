@@ -5,7 +5,8 @@ import {
   createSubmittedActionFromFreeform,
   createSubmittedActionFromOption,
 } from "@/lib/rpg-runtime/play-panel-state"
-import type { RpgActionOption, SubmittedAction } from "@/lib/rpg-runtime"
+import type { RpgActionOption } from "@/lib/rpg-runtime/turn-model"
+import type { SubmittedAction } from "@/lib/rpg-runtime/types"
 import { ActionOptionsPanel } from "./action-options-panel"
 import { CurrentScenePanel } from "./current-scene-panel"
 import { TurnNarrativePanel } from "./turn-narrative-panel"
@@ -70,7 +71,7 @@ export function RpgPlayPanel({
 
       <section className="min-w-0 border-b border-border/70 bg-card/30 px-4 py-3" aria-labelledby="rpg-freeform-action-heading">
         <h2 id="rpg-freeform-action-heading" className="text-sm font-semibold text-foreground">
-          Freeform action
+          自由行动
         </h2>
         <div className="mt-2 rounded-md border border-border/80 bg-background p-2 focus-within:border-ring/60 focus-within:ring-2 focus-within:ring-ring/20">
           <textarea
@@ -78,7 +79,7 @@ export function RpgPlayPanel({
             onChange={(event) => setFreeformActionText(event.target.value)}
             disabled={disabled}
             rows={3}
-            placeholder="Describe your action..."
+            placeholder="描述你的行动……"
             className="block max-h-32 min-h-20 w-full resize-none bg-transparent px-2 py-1 text-sm leading-6 placeholder:text-muted-foreground focus:outline-none disabled:cursor-not-allowed disabled:opacity-50"
           />
           <div className="mt-2 flex items-center justify-end border-t border-border/60 pt-2">
@@ -88,10 +89,10 @@ export function RpgPlayPanel({
               onClick={handleSubmitFreeform}
               disabled={disabled || !freeformActionText.trim()}
               className="h-8 gap-1.5 rounded-md px-3"
-              title="Submit freeform action"
+              title="提交自由行动"
             >
               <Send className="h-3.5 w-3.5" />
-              <span>Submit</span>
+              <span>提交</span>
             </Button>
           </div>
         </div>
@@ -100,7 +101,7 @@ export function RpgPlayPanel({
       <section className="min-w-0 flex-1 overflow-auto bg-background px-4 py-3" aria-labelledby="rpg-submitted-action-heading">
         <h2 id="rpg-submitted-action-heading" className="flex items-center gap-2 text-sm font-semibold text-foreground">
           <TextCursorInput className="h-4 w-4 text-muted-foreground" />
-          Submitted action
+          已提交行动
         </h2>
         {submittedAction ? (
           <div className="mt-2 rounded-md border border-border/80 bg-card/60 px-3 py-2 text-sm">
@@ -111,7 +112,7 @@ export function RpgPlayPanel({
             </p>
           </div>
         ) : (
-          <p className="mt-2 text-sm text-muted-foreground">No action submitted yet.</p>
+          <p className="mt-2 text-sm text-muted-foreground">尚未提交行动。</p>
         )}
       </section>
     </div>

@@ -2,6 +2,10 @@ import {
   buildRpgDirectoryBoundaryGuidance,
   buildSourceIngestTargetPolicyGuidance,
 } from "./page-guidance-contract"
+import {
+  RPG_FIXED_PLAYER_SLOT_PATHS,
+  RPG_FIXED_WORLD_SLOT_PATHS,
+} from "@/lib/rpg-wiki-schema"
 import { promptLanguageRule } from "./shared-ingest-contract"
 import type { RpgInteractionSpec } from "../interaction-spec"
 
@@ -127,18 +131,12 @@ function buildRpgExtractionAnalysisGuidance(): string {
     // 中文：不要把 sources 写入 needed_categories；来源摘要页始终由 Stage 2 生成。
     "Choose at most 4 needed_categories from: world, characters, player, locations, factions, items, plot-arcs, events, relationships.",
     // 中文：从 world、characters、player、locations、factions、items、plot-arcs、events、relationships 中最多选择 4 个 needed_categories。
-    "Do not put quests, rules, or style in ordinary Source Profile needed_categories; route clear trackable quest/control/style material to REVIEW unless the active import mode explicitly owns it.",
-    // 中文：普通 Source Profile 的 needed_categories 不写 quests、rules 或 style；清晰的任务/控制/文风材料进入 REVIEW，除非当前导入模式明确拥有它们。
+    "Do not put current-scene, quests, rules, style, memory, outlines, or runtime-overlay material in ordinary Source Profile needed_categories; follow Source Ingest Target Policy and route that material to REVIEW with the recommended mode.",
+    // 中文：普通 Source Profile 的 needed_categories 不写 current-scene、任务、规则、风格、记忆、大纲或运行时 overlay 材料；这些材料按 Source Ingest Target Policy 进入 REVIEW 并标注推荐模式。
     "Use suppressed_categories for tempting but intentionally excluded RPG directories, especially events, player, or relationships when the source does not justify them.",
     // 中文：对看似可能但应刻意排除的 RPG 目录使用 suppressed_categories，尤其是来源不足以支持 events、player 或 relationships 时。
-    "Ordinary ingest must not put current-scene in needed_categories.",
-    // 中文：普通 ingest 不得把 current-scene 写入 needed_categories。
-    "Ordinary ingest must not generate or update wiki/current-scene/scene_state.md.",
-    // 中文：普通 ingest 不得生成或更新 wiki/current-scene/scene_state.md。
-    "current-scene is owned by the RPG Play/Runtime apply flow, not by source ingest.",
-    // 中文：current-scene 属于 RPG Play/Runtime apply 写回链路，不属于来源 ingest。
-    "Do not put rules, style, memory, outlines, quests, current-scene, or any */runtime/ overlay in ordinary Source Ingest FILE targets.",
-    // 中文：普通 Source Ingest 的 FILE 目标不得包含 rules、style、memory、outlines、quests、current-scene 或任何 */runtime/ overlay。
+    "Ordinary ingest must not put current-scene in needed_categories. Live current-scene material is REVIEW-only here and belongs to campaign_setup_import or runtime_update_apply.",
+    // 中文：普通 ingest 不得把 current-scene 写入 needed_categories。实时 current-scene 材料在此只进入 REVIEW，属于 campaign_setup_import 或 runtime_update_apply。
     "If the source is a control document (rules, style, memory, outline, hard gate, preference, or GM guidance), emit REVIEW and recommend control_doc_import.",
     // 中文：如果来源是控制文档（规则、文风、记忆、大纲、硬门槛、偏好或 GM 指导），输出 REVIEW 并推荐 control_doc_import。
     "If the source is an opening scene, player initial profile pack, initial inventory/abilities/goals package, or current-scene bootstrap, emit REVIEW and recommend campaign_setup_import.",
@@ -171,12 +169,12 @@ function buildRpgExtractionAnalysisGuidance(): string {
     // 中文：- source：来源材料的出处、类型、摘要、影响分类、可靠性、优先级或来源冲突。
     "- world_fact: stable or slowly changing setting facts, public history, social norms, atmosphere, or reusable world context.",
     // 中文：- world_fact：稳定或缓慢变化的设定事实、公开历史、社会规范、氛围或可复用世界上下文。
-    "- rules/control mechanics: executable mechanics, limits, costs, checks, allowed/disallowed actions, success/failure boundaries, and hard constraints are control_doc_import material; ordinary source ingest should emit REVIEW instead of writing rules/ or hiding them inside world prose.",
-    // 中文：- rules/control mechanics：可执行机制、限制、代价、判定、行动边界、成败边界和硬约束属于 control_doc_import 材料；普通 source ingest 应输出 REVIEW，而不是写 rules/ 或藏进 world 散文。
+    "- rules/control mechanics: executable mechanics, limits, costs, checks, allowed/disallowed actions, success/failure boundaries, and hard constraints are control_doc_import material; ordinary source ingest should emit REVIEW instead of hiding them inside world prose.",
+    // 中文：- rules/control mechanics：可执行机制、限制、代价、判定、行动边界、成败边界和硬约束属于 control_doc_import 材料；普通 source ingest 应输出 REVIEW，而不是藏进 world 散文。
     "- npc_character: non-player or not-explicitly-PC character identity, canon facts, behavior, dialogue, relationships, variants, or RP usage; story protagonists, viewpoint characters, and controllable source-fiction characters stay here unless the source says they are the current RPG PC.",
     // 中文：- npc_character：非玩家或未明确为当前 PC 的角色身份、正史事实、行为、对话、关系、变体或 RP 使用方式；故事主角、视角角色和来源虚构作品中的可操控角色，除非来源说明其为当前 RPG PC，否则留在这里。
-    "- player_character: accepted state, resources, goals, abilities, inventory, knowledge, or consequences for the current RPG player-created or explicitly declared PC only.",
-    // 中文：- player_character：仅用于当前 RPG 中由玩家创建或明确声明的 PC 的已接受状态、资源、目标、能力、物品、知识或后果。
+    `- player_character: accepted state, resources, goals, abilities, inventory, knowledge, or consequences for the current RPG player-created or explicitly declared PC only; use only fixed player slots ${RPG_FIXED_PLAYER_SLOT_PATHS.join(", ")}.`,
+    // 中文：- player_character：仅用于当前 RPG 中由玩家创建或明确声明的 PC 的已接受状态、资源、目标、能力、物品、知识或后果；只使用固定 player slot。
     "- player_character goals mean subjective PC goals, wishes, promises, and personal motives; do not classify plot pressure or game objective progress as player goals.",
     // 中文：- player_character 中的 goals 指 PC 主观目标、愿望、承诺和个人动机；不要把剧情压力或游戏目标进度归为 player goals。
     "- location: important or repeated places, spatial relationships, access conditions, contents, current state, clues, or scene hooks; extract clear or strongly implied play/plot-relevant places, but mark thin evidence as uncertain instead of inventing detail.",
@@ -201,8 +199,8 @@ function buildRpgExtractionAnalysisGuidance(): string {
     // 中文：- character_trait_or_trivia：值得并入相关角色页、而不是创建独立对象的角色相关细节。
     "- wiki_noise: tags, trope labels, list cruft, navigation text, meta commentary, formatting residue, or low-value trivia that should be ignored.",
     // 中文：- wiki_noise：应忽略的标签、套路标签、列表残片、导航文字、元评论、格式残留或低价值琐碎信息。
-    "Allowed suggested_route values: wiki/sources/, fixed wiki/world/ slots, wiki/characters/, wiki/player/, wiki/locations/, wiki/factions/, wiki/items/, wiki/plot-arcs/, wiki/events/, wiki/relationships/, merge-target, ignore.",
-    // 中文：允许的 suggested_route 值：wiki/sources/、固定 wiki/world/ slot、wiki/characters/、wiki/player/、wiki/locations/、wiki/factions/、wiki/items/、wiki/plot-arcs/、wiki/events/、wiki/relationships/、merge-target、ignore。
+    `Allowed suggested_route values: wiki/sources/, fixed world slots (${RPG_FIXED_WORLD_SLOT_PATHS.join(", ")}), wiki/characters/, fixed player slots (${RPG_FIXED_PLAYER_SLOT_PATHS.join(", ")}; only for explicitly declared current PC), wiki/locations/, wiki/factions/, wiki/items/, wiki/plot-arcs/, wiki/events/, wiki/relationships/, merge-target, ignore.`,
+    // 中文：允许的 suggested_route 值：wiki/sources/、固定 world slot、wiki/characters/、固定 player slot、wiki/locations/、wiki/factions/、wiki/items/、wiki/plot-arcs/、wiki/events/、wiki/relationships/、merge-target、ignore。
     "Allowed action values: create, update, merge-into, ignore.",
     // 中文：允许的 action 值：create、update、merge-into、ignore。
     "Use action=create for a source-supported object that needs a new page, update for a known page that should be changed, merge-into for material that belongs inside an existing or more important page, and ignore for noise or unsupported material.",

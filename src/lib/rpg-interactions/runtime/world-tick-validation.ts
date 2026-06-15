@@ -249,7 +249,7 @@ export function validateWorldTickResult(value: unknown): WorldTickResult {
   const pacingUpdate = validatePacingUpdate(record.pacingUpdate)
   const gapState = validateGapState(record.gapState)
   const runtimeDeltaRefs = readArray(record, "runtimeDeltaRefs", "WorldTickResult.runtimeDeltaRefs").map(
-    validateRuntimeDeltaRef,
+    (ref, index) => validateRuntimeDeltaRef(ref, `WorldTickResult.runtimeDeltaRefs[${index}]`),
   )
   const references = readArray(record, "references", "WorldTickResult.references").map(validateReference)
   const warnings = readArray(record, "warnings", "WorldTickResult.warnings").map(validateWarning)
@@ -444,7 +444,9 @@ function validateDeltaBase(record: Record<string, unknown>, label: string): Worl
     visibility: validateVisibility(record.visibility, `${label}.visibility`),
     happenedStatus: readEnum(record, "happenedStatus", ALLOWED_HAPPENED_STATUSES, `${label}.happenedStatus`),
     affectedPaths: readNonEmptyStringArray(record, "affectedPaths", `${label}.affectedPaths`),
-    runtimeDeltaRefs: readArray(record, "runtimeDeltaRefs", `${label}.runtimeDeltaRefs`).map(validateRuntimeDeltaRef),
+    runtimeDeltaRefs: readArray(record, "runtimeDeltaRefs", `${label}.runtimeDeltaRefs`).map((ref, index) =>
+      validateRuntimeDeltaRef(ref, `${label}.runtimeDeltaRefs[${index}]`),
+    ),
   }
 }
 
@@ -480,34 +482,34 @@ function validateActionResolverTimeDelta(value: unknown): ActionResolverTimeDelt
   }
 }
 
-function validateRuntimeDeltaRef(value: unknown, index: number): RpgRuntimeDeltaRef {
-  const record = expectRecord(value, `WorldTickResult.runtimeDeltaRefs[${index}]`)
+function validateRuntimeDeltaRef(value: unknown, label: string): RpgRuntimeDeltaRef {
+  const record = expectRecord(value, label)
   const sourceStage = readEnumValue(
     record.sourceStage,
     ALLOWED_DELTA_SOURCE_STAGES,
-    `WorldTickResult.runtimeDeltaRefs[${index}].sourceStage`,
+    `${label}.sourceStage`,
   )
   const usePurpose = readEnumValue(
     record.usePurpose,
     WORLD_TICK_DELTA_PURPOSES,
-    `WorldTickResult.runtimeDeltaRefs[${index}].usePurpose`,
+    `${label}.usePurpose`,
   )
 
   return {
-    deltaId: readString(record, "deltaId", `WorldTickResult.runtimeDeltaRefs[${index}].deltaId`),
+    deltaId: readString(record, "deltaId", `${label}.deltaId`),
     sourceStage,
-    sourcePath: readString(record, "sourcePath", `WorldTickResult.runtimeDeltaRefs[${index}].sourcePath`),
-    summary: readString(record, "summary", `WorldTickResult.runtimeDeltaRefs[${index}].summary`),
+    sourcePath: readString(record, "sourcePath", `${label}.sourcePath`),
+    summary: readString(record, "summary", `${label}.summary`),
     narrativeLine: readEnumValue(
       record.narrativeLine,
       ALLOWED_NARRATIVE_LINES,
-      `WorldTickResult.runtimeDeltaRefs[${index}].narrativeLine`,
+      `${label}.narrativeLine`,
     ),
     usePurpose,
     happenedStatus: readEnumValue(
       record.happenedStatus,
       ALLOWED_HAPPENED_STATUSES,
-      `WorldTickResult.runtimeDeltaRefs[${index}].happenedStatus`,
+      `${label}.happenedStatus`,
     ),
   }
 }

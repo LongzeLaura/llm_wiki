@@ -83,12 +83,73 @@ const ACTION_STOP_WORDS = new Set([
   "could",
   "would",
   "should",
+  "llm",
+  "json",
+  "input",
+  "output",
+  "reference",
+  "references",
+  "submitted",
   "open",
   "show",
   "look",
   "wait",
   "listen",
   "quietly",
+  "action",
+  "resolver",
+  "resolution",
+  "world",
+  "tick",
+  "turn",
+  "turns",
+  "delta",
+  "deltas",
+  "draft",
+  "result",
+  "contract",
+  "handoff",
+  "builder",
+  "recall",
+  "selector",
+  "wiki",
+  "runtime",
+  "current",
+  "scene",
+  "character",
+  "characters",
+  "location",
+  "locations",
+  "item",
+  "items",
+  "faction",
+  "factions",
+  "player",
+  "event",
+  "events",
+  "quest",
+  "quests",
+  "rule",
+  "rules",
+  "source",
+  "sources",
+  "relationship",
+  "relationships",
+  "plot",
+  "arcs",
+  "path",
+  "md",
+  "当前",
+  "场景",
+  "場景",
+  "人物",
+  "角色",
+  "物品",
+  "地点",
+  "地點",
+  "事件",
+  "线索",
+  "線索",
 ])
 
 const MAX_ENTRY_CHARS = 1400
@@ -308,7 +369,11 @@ function isActionOptionsLabel(text: string): boolean {
 
 export function tokenize(text: string): string[] {
   const normalized = text.toLowerCase().normalize("NFKC")
-  const latinTokens = normalized.match(/[a-z0-9][a-z0-9_-]{1,}/g) ?? []
+  const rawLatinTokens = normalized.match(/[a-z0-9][a-z0-9_-]{1,}/g) ?? []
+  const latinTokens = rawLatinTokens.flatMap((token) => [
+    token,
+    ...token.split(/[-_]+/).filter((part) => part.length >= 2),
+  ])
   const cjkTokens = normalized.match(/[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}]{2,}/gu) ?? []
   return [...new Set([...latinTokens, ...cjkTokens])].filter((token) => !ACTION_STOP_WORDS.has(token))
 }
@@ -316,11 +381,13 @@ export function tokenize(text: string): string[] {
 function scorePage(page: RuntimePage, actionTokens: string[]): number {
   if (actionTokens.length === 0) return 0
 
-  const haystack = `${page.relativePath}\n${extractTitle(page.content)}\n${page.content}`.toLowerCase().normalize("NFKC")
+  const pathTokens = new Set(tokenize(page.relativePath))
+  const titleTokens = new Set(tokenize(extractTitle(page.content)))
+  const contentTokens = new Set(tokenize(page.content))
   return actionTokens.reduce((score, token) => {
-    if (!haystack.includes(token)) return score
-    const pathBonus = page.relativePath.toLowerCase().includes(token) ? 4 : 0
-    const titleBonus = extractTitle(page.content).toLowerCase().includes(token) ? 3 : 0
+    if (!pathTokens.has(token) && !titleTokens.has(token) && !contentTokens.has(token)) return score
+    const pathBonus = pathTokens.has(token) ? 4 : 0
+    const titleBonus = titleTokens.has(token) ? 3 : 0
     return score + 1 + pathBonus + titleBonus
   }, 0)
 }
@@ -328,6 +395,7 @@ function scorePage(page: RuntimePage, actionTokens: string[]): number {
 export function rankedPages(pages: RuntimePage[], actionTokens: string[], limit: number): RuntimePage[] {
   return pages
     .map((page, index) => ({ page, score: scorePage(page, actionTokens), index }))
+    .filter((entry) => entry.score > 0)
     .sort((a, b) => b.score - a.score || a.page.relativePath.localeCompare(b.page.relativePath) || a.index - b.index)
     .slice(0, limit)
     .map(({ page }) => page)

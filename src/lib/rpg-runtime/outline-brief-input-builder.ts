@@ -1,11 +1,18 @@
 import type { RpgKnowledgeScope, RpgNarrativeLine, RpgSchemaSlotId, RpgVisibilityScope } from "@/lib/rpg-wiki-schema"
-import { buildOutlineBriefCompilerInputFromTurnState } from "./outline-brief-handoff"
+import {
+  buildOutlineBriefCompilerInputFromTurnState,
+  createOutlineControlMetadata,
+  lineTargetForOutlineControlKind,
+} from "./outline-brief-handoff"
+import { defaultKnowledgeClaimsForPath } from "./actor-knowledge"
 import type {
   ActionResolution,
   OutlineBriefCompilerInput,
   PostActionWorkingState,
+  RpgOutlineControlMetadata,
   RecalledMaterial,
   RecallSelection,
+  TurnSemanticHandoff,
   WorldTickResult,
   WorldTickVisibleSelection,
 } from "./types"
@@ -25,6 +32,7 @@ export interface BuildOutlineBriefInputFromTurnStateAndWikiInput {
   worldTickResult: WorldTickResult
   visibleSelection: WorldTickVisibleSelection
   postActionWorkingState: PostActionWorkingState
+  turnSemanticHandoff?: TurnSemanticHandoff
   recallSelection: RecallSelection
   recalledMaterials: RecalledMaterial[]
 }
@@ -36,6 +44,7 @@ export interface BuildOutlineBriefInputFromTurnStateAndWikiResult {
 
 const MAIN_OUTLINE_SECTION_NAMES = [
   "Runtime Capsule",
+  "Campaign Premise",
   "Act Structure",
   "Intended Reveals",
   "Delayed Reveals",
@@ -47,6 +56,10 @@ const PROGRESS_SECTION_NAMES = [
   "Runtime Capsule",
   "Current Stage",
   "Completed Beats",
+  "Skipped Beats",
+  "Delayed Beats",
+  "Active Reveal Gates",
+  "Current Information Boundary",
   "Divergence Notes",
   "Next Useful Beats",
 ] as const
@@ -135,15 +148,23 @@ function controlledOutlineMaterials(
     const content = extractMarkdownSection(page.content, sectionName)
     if (!content) return []
     const sectionId = `${sectionPrefix}.${sectionSlug(sectionName)}`
+    const outlineControl = createOutlineControlMetadata({
+      path: page.relativePath,
+      sectionId,
+      content,
+      fallback: `Controlled ${sectionName} section read directly for Outline Brief.`,
+    })
     return [
       pageMaterial(page, {
         sectionId,
         content,
-        reason: `Controlled ${sectionName} section read directly for Outline Brief.`,
-        expectedUse: "Use as bounded outline/progress control material; do not treat future plans as happened events.",
-        lineTarget: "tensionLine",
+        reason: `Controlled ${sectionName} section read directly for Outline Brief as ${outlineControl.controlKind} material.`,
+        expectedUse:
+          "Use as bounded GM control / reveal gate / progress material; lineTarget is only a narration lens fallback, not outline ownership, and future plans must not become happened events.",
+        lineTarget: lineTargetForOutlineControlKind(outlineControl.controlKind),
         visibilityScope: "gm_only",
         knowledgeScope: "gm_only",
+        outlineControl,
       }),
     ]
   })
@@ -158,6 +179,7 @@ function pageMaterial(
     lineTarget: RpgNarrativeLine
     visibilityScope: RpgVisibilityScope
     knowledgeScope: RpgKnowledgeScope
+    outlineControl?: RpgOutlineControlMetadata
     content?: string
   },
 ): RecalledMaterial {
@@ -171,6 +193,13 @@ function pageMaterial(
     expectedUse: options.expectedUse,
     visibilityScope: options.visibilityScope,
     knowledgeScope: options.knowledgeScope,
+    knowledgeClaims: defaultKnowledgeClaimsForPath({
+      path: page.relativePath,
+      visibilityScope: options.visibilityScope,
+      knowledgeScope: options.knowledgeScope,
+      summary: options.reason,
+    }),
+    ...(options.outlineControl ? { outlineControl: options.outlineControl } : {}),
     sections: [
       {
         sectionId: options.sectionId,

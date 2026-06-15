@@ -13,6 +13,7 @@ export interface CreateLlmRpgRecallSelectorAdapterInput {
 
 export interface LlmRpgRecallSelectorAdapterOptions {
   requestOverrides?: RequestOverrides
+  repairRequestOverrides?: RequestOverrides
 }
 
 export function createLlmRpgRecallSelectorAdapter(
@@ -24,6 +25,16 @@ export function createLlmRpgRecallSelectorAdapter(
       const output = await collectRpgRecallSelectorOutput(input, options, prompt)
       return recallSelectorInteractionSpec.parseOutput(output, promptInput)
     },
+    async selectRecallRawOutput(prompt) {
+      return collectRpgRecallSelectorOutput(input, options, prompt)
+    },
+    async repairRecallRawOutput(prompt) {
+      return collectRpgRecallSelectorOutput(input, options, prompt, {
+        temperature: 0,
+        max_tokens: 1800,
+        ...options.repairRequestOverrides,
+      })
+    },
   }
 }
 
@@ -31,6 +42,7 @@ async function collectRpgRecallSelectorOutput(
   input: CreateLlmRpgRecallSelectorAdapterInput,
   options: LlmRpgRecallSelectorAdapterOptions,
   prompt: RpgRecallSelectorPrompt,
+  requestOverrides: RequestOverrides | undefined = options.requestOverrides,
 ): Promise<string> {
   let output = ""
   let streamError: Error | undefined
@@ -52,7 +64,7 @@ async function collectRpgRecallSelectorOutput(
         },
       },
       input.signal,
-      options.requestOverrides,
+      requestOverrides,
     )
   } catch (error) {
     if (input.signal?.aborted) {

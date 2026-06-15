@@ -16,12 +16,18 @@ import type {
 } from "../../rpg-runtime/types"
 import type {
   RpgHappenedStatus,
+  RpgKnowledgeActorRef,
   RpgKnowledgeScope,
   RpgNarrativeLine,
   RpgReviewItemKind,
   RpgUsePurpose,
   RpgVisibilityScope,
 } from "../../rpg-wiki-schema"
+import {
+  isConcreteNonPcActorRef,
+  validateRpgKnowledgeClaim,
+  validateRpgRevealState,
+} from "../../rpg-runtime/actor-knowledge"
 import { validateRpgRuntimeUpdateTarget } from "./wiki-update-policy"
 
 const JSON_FENCE_PATTERN = /```(?:json|JSON)\s*([\s\S]*?)```/
@@ -281,6 +287,41 @@ function validateRuntimeProposedWikiUpdate(
         `Invalid proposedWikiUpdates[${index}]: player known information cannot be sourced from parallel-line or PC-unknown material.`,
       )
     }
+    if (
+      !sourceDeltas.every(sourceDeltaHasPcKnowledgeClaim) ||
+      sourceDeltas.some(sourceDeltaHasForbiddenPlayerKnowledgeClaim)
+    ) {
+      throw new Error(
+        `Invalid proposedWikiUpdates[${index}]: player known information requires pc holder claims with known, inferred, or misunderstood belief state.`,
+      )
+    }
+  }
+  const characterActor = actorRefFromRuntimePath(targetValidation.targetPath, "characters")
+  if (
+    characterActor &&
+    sourceDeltas.some((delta) => sourceDeltaAssertsConcreteActorKnowledge(delta) && !sourceDeltaMentionsActor(delta, characterActor))
+  ) {
+    throw new Error(
+      `Invalid proposedWikiUpdates[${index}]: characters/runtime knowledge claims must mention matching holder ${characterActor}.`,
+    )
+  }
+  if (
+    targetValidation.targetPath.startsWith("wiki/relationships/runtime/") &&
+    looksLikeInformationGapUpdate(update, sourceDeltas) &&
+    !sourceDeltas.some(sourceDeltaHasInformationGapClaim)
+  ) {
+    throw new Error(
+      `Invalid proposedWikiUpdates[${index}]: relationships/runtime information-gap updates require holder/non-holder or differing belief-state claims.`,
+    )
+  }
+  if (
+    isRevealProgressTarget(targetValidation.targetPath) &&
+    looksLikeRevealProgressUpdate(update, sourceDeltas) &&
+    !sourceDeltas.some(sourceDeltaHasRevealProgressMetadata)
+  ) {
+    throw new Error(
+      `Invalid proposedWikiUpdates[${index}]: reveal-progress updates require revealGateRefs and revealState metadata.`,
+    )
   }
   if (
     isRuntimeOverlayPath(targetValidation.targetPath) &&
@@ -328,6 +369,25 @@ function validateRuntimeProposedWikiUpdate(
 
 function validateRuntimeUpdateSourceDelta(value: unknown): RuntimeUpdateSourceDelta {
   const delta = expectRecord(value, "RuntimeUpdateSourceDelta")
+  const knowledgeScope = expectOneOf(delta.knowledgeScope, KNOWLEDGE_SCOPES, "RuntimeUpdateSourceDelta.knowledgeScope")
+  const knowledgeClaims = expectArray(delta.knowledgeClaims, "RuntimeUpdateSourceDelta.knowledgeClaims")
+    .map((entry, index) => validateRpgKnowledgeClaim(entry, `RuntimeUpdateSourceDelta.knowledgeClaims[${index}]`))
+  if (knowledgeClaims.length === 0) {
+    throw new Error("Invalid RuntimeUpdateSourceDelta.knowledgeClaims: at least one actor knowledge claim is required.")
+  }
+  if (
+    knowledgeScope === "npc_known" &&
+    !knowledgeClaims.some((claim) => claim.holders.some(isConcreteNonPcActorRef))
+  ) {
+    throw new Error(
+      "Invalid RuntimeUpdateSourceDelta.knowledgeClaims: npc_known source deltas require concrete npc/faction/group holders.",
+    )
+  }
+  const revealGateRefs = expectStringArray(delta.revealGateRefs, "RuntimeUpdateSourceDelta.revealGateRefs")
+  const revealState = delta.revealState === undefined
+    ? undefined
+    : validateRpgRevealState(delta.revealState, "RuntimeUpdateSourceDelta.revealState")
+
   return {
     deltaId: expectNonEmptyString(delta.deltaId, "RuntimeUpdateSourceDelta.deltaId"),
     sourceStage: expectOneOf(delta.sourceStage, SOURCE_STAGES, "RuntimeUpdateSourceDelta.sourceStage"),
@@ -336,12 +396,15 @@ function validateRuntimeUpdateSourceDelta(value: unknown): RuntimeUpdateSourceDe
     summary: expectNonEmptyString(delta.summary, "RuntimeUpdateSourceDelta.summary"),
     lineTarget: expectOneOf(delta.lineTarget, NARRATIVE_LINES, "RuntimeUpdateSourceDelta.lineTarget"),
     visibility: expectOneOf(delta.visibility, VISIBILITY_SCOPES, "RuntimeUpdateSourceDelta.visibility"),
-    knowledgeScope: expectOneOf(delta.knowledgeScope, KNOWLEDGE_SCOPES, "RuntimeUpdateSourceDelta.knowledgeScope"),
+    knowledgeScope,
     happenedStatus: expectOneOf(delta.happenedStatus, HAPPENED_STATUSES, "RuntimeUpdateSourceDelta.happenedStatus"),
     usePurpose: expectOneOf(delta.usePurpose, USE_PURPOSES, "RuntimeUpdateSourceDelta.usePurpose"),
     affectedPaths: expectStringArray(delta.affectedPaths, "RuntimeUpdateSourceDelta.affectedPaths"),
     runtimeDeltaRefs: expectArray(delta.runtimeDeltaRefs, "RuntimeUpdateSourceDelta.runtimeDeltaRefs")
       .map((entry) => expectRecord(entry, "RuntimeUpdateSourceDelta.runtimeDeltaRefs[]") as never),
+    knowledgeClaims,
+    revealGateRefs,
+    ...(revealState ? { revealState } : {}),
   }
 }
 
@@ -465,6 +528,111 @@ function rejectForbiddenOrdinaryUpdateContent(content: string, index: number, ta
   }
 }
 
+function sourceDeltaHasPcKnowledgeClaim(delta: RuntimeUpdateSourceDelta): boolean {
+  return delta.knowledgeClaims.some((claim) =>
+    claim.holders.includes("pc") &&
+    claim.beliefStateByActor.some((belief) =>
+      belief.actor === "pc" && ["known", "inferred", "misunderstood"].includes(belief.beliefState)
+    )
+  )
+}
+
+function sourceDeltaHasForbiddenPlayerKnowledgeClaim(delta: RuntimeUpdateSourceDelta): boolean {
+  return delta.knowledgeClaims.some((claim) => {
+    const pcBelief = claim.beliefStateByActor.find((belief) => belief.actor === "pc")
+    if (pcBelief && !["known", "inferred", "misunderstood"].includes(pcBelief.beliefState)) return true
+    if (claim.holders.length > 0 && !claim.holders.includes("pc")) return true
+    return claim.nonHolders.includes("pc")
+  })
+}
+
+function sourceDeltaAssertsConcreteActorKnowledge(delta: RuntimeUpdateSourceDelta): boolean {
+  if (delta.knowledgeScope === "npc_known") return true
+  return delta.knowledgeClaims.some((claim) =>
+    claim.holders.some(isConcreteNonPcActorRef) ||
+    claim.beliefStateByActor.some((belief) => isConcreteNonPcActorRef(belief.actor))
+  )
+}
+
+function sourceDeltaMentionsActor(delta: RuntimeUpdateSourceDelta, actor: RpgKnowledgeActorRef): boolean {
+  return delta.knowledgeClaims.some((claim) =>
+    claim.holders.includes(actor) ||
+    claim.nonHolders.includes(actor) ||
+    claim.beliefStateByActor.some((belief) => belief.actor === actor)
+  )
+}
+
+function sourceDeltaHasInformationGapClaim(delta: RuntimeUpdateSourceDelta): boolean {
+  return delta.knowledgeClaims.some((claim) => {
+    if (claim.holders.length > 0 && claim.nonHolders.length > 0) return true
+    const states = new Set(claim.beliefStateByActor.map((belief) => belief.beliefState))
+    return claim.beliefStateByActor.length >= 2 && states.size >= 2
+  })
+}
+
+function sourceDeltaHasRevealProgressMetadata(delta: RuntimeUpdateSourceDelta): boolean {
+  return delta.revealGateRefs.length > 0 && !!delta.revealState
+}
+
+function actorRefFromRuntimePath(
+  targetPath: string,
+  category: "characters" | "factions",
+): RpgKnowledgeActorRef | undefined {
+  const match = new RegExp(`^wiki/${category}/runtime/([^/]+)\\.md$`, "u").exec(targetPath)
+  if (!match) return undefined
+  return category === "characters" ? `npc:${match[1]}` : `faction:${match[1]}`
+}
+
+function isRevealProgressTarget(targetPath: string): boolean {
+  return targetPath === "wiki/outlines/progress.md" || targetPath.startsWith("wiki/plot-arcs/runtime/")
+}
+
+function looksLikeInformationGapUpdate(
+  update: Pick<RuntimeProposedWikiUpdate, "reason" | "content"> | Record<string, unknown>,
+  sourceDeltas: readonly RuntimeUpdateSourceDelta[],
+): boolean {
+  const text = [
+    typeof update.reason === "string" ? update.reason : "",
+    typeof update.content === "string" ? update.content : "",
+    ...sourceDeltas.map((delta) => delta.summary),
+  ].join("\n")
+  return /information gap|secret|misunderstanding|misread|knows?|unknown to|belief|信息差|秘密|误解|知道|未知|隐瞒|判断/iu.test(text)
+}
+
+function looksLikeRevealProgressUpdate(
+  update: Pick<RuntimeProposedWikiUpdate, "reason" | "content"> | Record<string, unknown>,
+  sourceDeltas: readonly RuntimeUpdateSourceDelta[],
+): boolean {
+  const text = [
+    typeof update.reason === "string" ? update.reason : "",
+    typeof update.content === "string" ? update.content : "",
+    ...sourceDeltas.map((delta) => `${delta.summary}\n${delta.revealGateRefs.join("\n")}\n${delta.revealState ?? ""}`),
+  ].join("\n")
+  return /reveal progress|reveal gate|currentRevealState|revealState|active reveal|gate\.|information boundary|揭示进度|揭示门槛|当前揭示|信息边界/iu.test(text)
+}
+
+function validateEventPcKnowledgeSeparation(updates: readonly RuntimeProposedWikiUpdate[]): void {
+  const hasValidPlayerKnowledgeUpdate = updates.some(
+    (update) =>
+      update.targetPath === "wiki/player/known_information.md" &&
+      update.sourceDeltas.length > 0 &&
+      update.sourceDeltas.every(sourceDeltaHasPcKnowledgeClaim) &&
+      !update.sourceDeltas.some(sourceDeltaHasForbiddenPlayerKnowledgeClaim),
+  )
+  const eventWithPcKnowledge = updates.find(
+    (update) =>
+      update.targetPath.startsWith("wiki/events/") &&
+      (update.knowledgeScope === "pc_known" ||
+        update.knowledgeScope === "pc_misunderstanding" ||
+        update.sourceDeltas.some(sourceDeltaHasPcKnowledgeClaim)),
+  )
+  if (eventWithPcKnowledge && !hasValidPlayerKnowledgeUpdate) {
+    throw new Error(
+      `Invalid proposedWikiUpdates[]: events may record confirmed happened facts, but PC knowledge grants require a separate valid wiki/player/known_information.md proposal.`,
+    )
+  }
+}
+
 function inferAllowedTargetKind(pathPattern: string): RuntimeUpdateAllowedTarget["targetKind"] {
   if (pathPattern === "wiki/current-scene/scene_state.md") return "currentScene"
   if (pathPattern.startsWith("wiki/events/")) return "events"
@@ -491,6 +659,7 @@ function validateStructuredProposalReferences(input: {
       sourceDeltaIds.add(sourceDelta.deltaId)
     }
   }
+  validateEventPcKnowledgeSeparation(input.proposedWikiUpdates)
   for (const skippedDelta of input.skippedDeltas) {
     sourceDeltaIds.add(skippedDelta.sourceDelta.deltaId)
   }

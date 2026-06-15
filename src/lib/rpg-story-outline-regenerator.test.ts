@@ -69,7 +69,7 @@ describe("RPG Story Outline Regenerator interaction", () => {
 
     expect(storyOutlineRegeneratorInteractionSpec.kind).toBe("outline_regeneration")
     expect(combined).toContain("Story Outline Regenerator")
-    expect(combined).toContain("conditional Step 14.5")
+    expect(combined).toContain("条件性 Step 14.5")
     expect(combined).toContain("OutlineImpactReport")
     expect(combined).toContain("RegenerationRequest")
     expect(combined).toContain("post-action working state")
@@ -81,22 +81,130 @@ describe("RPG Story Outline Regenerator interaction", () => {
     expect(combined).toContain("outlineRevisionProposal")
     expect(combined).toContain("regenerationSafetyReport")
     expect(combined).toContain("warnings")
-    expect(combined).toContain("Do not output player-facing prose")
-    expect(combined).toContain("Do not output wikiWrites")
-    expect(combined).toContain("Do not directly modify wiki/outlines/main.md")
-    expect(combined).toContain("Do not write future plans")
-    expect(combined).toContain("Do not rewrite confirmed facts")
-    expect(combined).toContain("user_visible_pc_unknown material into PC knowledge")
+    expect(combined).toContain("不要输出面向玩家的 prose")
+    expect(combined).toContain("不要输出 wikiWrites")
+    expect(combined).toContain("不要直接修改 wiki/outlines/main.md")
+    expect(combined).toContain("不要把未来计划")
+    expect(combined).toContain("不要重写输入边界中已确认的事实")
+    expect(combined).toContain("user_visible_pc_unknown 材料泄露为 PC 已知")
+    expect(combined).toContain("wildcard/glob/category/pathPattern")
+    expect(combined).toContain("wiki/sources/*.md")
+    expect(combined).toContain("wiki/outlines/main.md")
+    expect(combined).toContain("wiki/events/*")
+    expect(combined).toContain('"narrationHandoff": {')
+    expect(combined).toContain('"proposedRevision": {')
+    expect(combined).toContain("不要输出 patchId")
+    expect(combined).toContain('"checkedRuntimeRefs": string[]')
+    expect(combined).not.toContain('"patchId": string')
+    expect(combined).not.toContain('"nonPersistenceBoundary": {')
+    expect(combined).not.toContain('"reviewBoundary": {')
+    expect(combined).not.toContain("RuntimeDeltaRef 输出结构")
+    expect(combined).not.toContain('"provisionalOutlinePatch": ProvisionalOutlinePatch')
+    expect(combined).not.toContain('"outlineRevisionProposal": OutlineRevisionProposal')
+    expect(combined).not.toContain('"regenerationSafetyReport": RegenerationSafetyReport')
+    expect(prompt.debugSections?.map((section) => section.title)).toEqual(
+      expect.arrayContaining([
+        "系统固定提示词",
+        "OutlineImpactReport",
+        "RegenerationRequest",
+        "TurnSemanticHandoff",
+        "RecalledMaterials",
+        "大纲切片",
+        "Plot-arc 张力燃料",
+        "可见性边界",
+        "硬约束",
+        "已确认事实边界",
+        "禁止揭示边界",
+        "Runtime 引用",
+        "已知引用",
+        "返回契约",
+      ]),
+    )
+    expectPromptDebugSectionsRecompose(prompt)
   })
 
-  it("parses bare and fenced StoryOutlineRegeneratorOutput JSON", () => {
+  it("parses bare and fenced StoryOutlineRegeneratorDraft JSON", () => {
     const input = sampleRegeneratorInput()
     const output = sampleRegeneratorOutput()
 
-    expect(parseRpgStoryOutlineRegeneratorOutput(JSON.stringify(output), input)).toEqual(output)
+    const parsed = parseRpgStoryOutlineRegeneratorOutput(JSON.stringify(output), input)
+    expect(parsed.provisionalOutlinePatch.patchId).toBe("provisional-outline-patch-regen-request-major")
+    expect(parsed.provisionalOutlinePatch.narrationHandoff.sourcePatchId).toBe(parsed.provisionalOutlinePatch.patchId)
+    expect(parsed.outlineRevisionProposal.proposalId).toBe("outline-revision-proposal-regen-request-major")
     expect(
-      parseRpgStoryOutlineRegeneratorOutput(["```json", JSON.stringify(output, null, 2), "```"].join("\n"), input),
-    ).toEqual(output)
+      parseRpgStoryOutlineRegeneratorOutput(["```json", JSON.stringify(output, null, 2), "```"].join("\n"), input)
+        .outlineRevisionProposal.reviewBoundary.autoWriteMainOutline,
+    ).toBe(false)
+  })
+
+  it("rejects legacy placeholder-shaped Story Outline Regenerator output without auto-repair", () => {
+    const legacyOutput = {
+      provisionalOutlinePatch: {},
+      outlineRevisionProposal: {},
+      regenerationSafetyReport: {},
+      warnings: [],
+    }
+
+    expect(() => parseRpgStoryOutlineRegeneratorOutput(JSON.stringify(legacyOutput), sampleRegeneratorInput())).toThrow(
+      /nextSceneDirection|summary|safetyConclusion/i,
+    )
+  })
+
+  it("compiles lightweight draft and strips model-authored ids and boundaries", () => {
+    const input = sampleRegeneratorInput()
+    const draft = {
+      provisionalOutlinePatch: {
+        patchId: "model-patch",
+        affectedOutlineRefs: ["beat.follow_mira_warning", "reveal.gate_patron"],
+        suspendedBeatRefs: ["beat.decode_gate"],
+        invalidatedBeatRefs: ["beat.decode_gate"],
+        preservedConfirmedFacts: [],
+        runtimeDeltaRefs: ["ongoing-mira-sigil-read"],
+        narrativeLines: ["playerVisibleLine", "tensionLine"],
+        narrationHandoff: {
+          handoffId: "model-handoff",
+          mustFollow: ["Acknowledge Mira's completed warning."],
+          mustPreserveFacts: [],
+          mustNotReveal: [],
+          invalidatedOldBeats: ["beat.decode_gate"],
+          nextSceneDirection: "Keep the next scene focused on the gate decision.",
+          outlineRefs: ["beat.follow_mira_warning", "reveal.gate_patron"],
+        },
+        nonPersistenceBoundary: {
+          writesToWiki: false,
+          modifiesMainOutline: false,
+        },
+      },
+      outlineRevisionProposal: {
+        proposalId: "model-proposal",
+        targetOutlineRefs: ["beat.follow_mira_warning", "reveal.gate_patron"],
+        invalidatedAssumptions: ["The old touch-first beat order is no longer reliable."],
+        mustPreserveFacts: [],
+        proposedRevision: {
+          summary: "Future-only review candidate: branch the canal gate sequence around Mira's warning.",
+          revisedBeats: ["Follow with a trust decision around the safe edge."],
+          revisedRevealOrder: ["Keep the hidden patron reveal delayed."],
+          branchAdjustments: ["Track the trust-forward branch."],
+        },
+      },
+      regenerationSafetyReport: {
+        safetyConclusion: "safe",
+        checkedRuntimeRefs: ["ongoing-mira-sigil-read"],
+        checkedOutlineRefs: ["beat.follow_mira_warning", "reveal.gate_patron"],
+        warnings: [],
+      },
+      warnings: [],
+    }
+
+    const output = parseRpgStoryOutlineRegeneratorOutput(JSON.stringify(draft), input)
+
+    expect(output.provisionalOutlinePatch.patchId).toBe("provisional-outline-patch-regen-request-major")
+    expect(output.provisionalOutlinePatch.runtimeDeltaRefs[0]).toMatchObject({
+      deltaId: "delta-act-regenerate",
+      sourceStage: "actionResolution",
+    })
+    expect(output.provisionalOutlinePatch.nonPersistenceBoundary.writesToWiki).toBe(false)
+    expect(output.outlineRevisionProposal.reviewBoundary.autoWriteMainOutline).toBe(false)
   })
 
   it("accepts legal output and confirms provisional/review boundaries", () => {
@@ -142,6 +250,20 @@ describe("RPG Story Outline Regenerator interaction", () => {
     const eventWrite = cloneOutput()
     eventWrite.outlineRevisionProposal.targetOutlineRefs[0].path = "wiki/events/future-plan.md"
     expect(() => validateStoryOutlineRegeneratorOutput(eventWrite, sampleRegeneratorInput())).toThrow(/events/i)
+  })
+
+  it("rejects wildcard, glob, or category path refs in outline refs and visibility boundaries", () => {
+    const wildcardOutlineRef = cloneOutput()
+    wildcardOutlineRef.provisionalOutlinePatch.affectedOutlineRefs[0].path = "wiki/sources/*.md"
+    expect(() => validateStoryOutlineRegeneratorOutput(wildcardOutlineRef, sampleRegeneratorInput())).toThrow(
+      /path|refs/i,
+    )
+
+    const wildcardBoundary = cloneOutput()
+    wildcardBoundary.provisionalOutlinePatch.visibilityBoundary[0].sourcePath = "wiki/sources/*.md"
+    expect(() => validateStoryOutlineRegeneratorOutput(wildcardBoundary, sampleRegeneratorInput())).toThrow(
+      /path|refs/i,
+    )
   })
 
   it("rejects confirmed fact rewrites and forbidden reveal leaks", () => {
@@ -232,7 +354,10 @@ describe("RPG Story Outline Regenerator interaction", () => {
       { llmConfig: sampleLlmConfig(), signal },
       { requestOverrides },
     )
-    await expect(llm.regenerateOutline(prompt, input)).resolves.toEqual(output)
+    const parsed = await llm.regenerateOutline(prompt, input)
+    expect(parsed.provisionalOutlinePatch.patchId).toBe("provisional-outline-patch-regen-request-major")
+    expect(parsed.provisionalOutlinePatch.nonPersistenceBoundary.writesToWiki).toBe(false)
+    expect(parsed.outlineRevisionProposal.reviewBoundary.autoWriteMainOutline).toBe(false)
     expect(streamChatMock).toHaveBeenCalledWith(
       sampleLlmConfig(),
       [
@@ -677,4 +802,14 @@ function sampleLlmConfig(): LlmConfig {
     customEndpoint: "",
     maxContextSize: 10000,
   }
+}
+
+function expectPromptDebugSectionsRecompose(prompt: ReturnType<typeof buildStoryOutlineRegeneratorPrompt>): void {
+  const sections = prompt.debugSections ?? []
+  expect(sections.filter((section) => section.promptRole === "system").map((section) => section.content).join("\n\n")).toBe(
+    prompt.systemPrompt,
+  )
+  expect(sections.filter((section) => section.promptRole === "user").map((section) => section.content).join("\n\n")).toBe(
+    prompt.userPrompt,
+  )
 }

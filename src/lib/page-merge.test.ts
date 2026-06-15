@@ -346,7 +346,7 @@ describe("mergePageContent — LLM failure fallback", () => {
 
     const out = await mergePageContent(incoming, existing, merger, {
       ...baseOpts,
-      pagePath: "wiki/player/status.md",
+      pagePath: "wiki/player/player.md",
     })
 
     expect(out).toContain("The player is at the sealed canal gate")

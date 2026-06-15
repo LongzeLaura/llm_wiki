@@ -1,5 +1,515 @@
 # Current State
 
+## 2026-06-15 - Agent Runtime Prompt / Compiler Alignment Rule
+
+- 将 runtime prompt / compiler 对齐风险写入 `AGENTS.md` 常驻规则：修改 runtime 任一流程时，必须同步审查 prompt、LLM draft schema、parser、compiler、validator 和 debug trace handoff。
+- 新规则明确禁止只在 prompt 中写 `DraftX[]`、`object`、`lightweight draft` 等未展开抽象类型；关键嵌套对象字段必须展开，并且 prompt 要使用 compiler 实际读取的字段名。
+- 新规则要求对 `summary` 等 compiler 固定字段明确禁止 `settlementSummary` / `broadcastSummary` / `reactionSummary` / `description` / `text` 等自然语言别名，避免再次出现模型输出别名而本地 hard fail。
+- 新规则要求不要让 prompt 要求模型输出 compiler 禁止的 canonical 字段；ids、sourceDeltas、knowledgeClaims、revealGateRefs、validationHints 等由本地派生时，缺少派生证据应 skip/review-only，而不是硬造普通更新。
+- 新规则要求每次 runtime handoff 压缩时检查是否移除了 compiler/validator 派生所需证据，并补 focused prompt/contract 回归测试；发现不一致时优先修 prompt schema、compiler 派生或 validator 边界，不用 fallback 吞掉协议错误。
+- 本轮仅修改项目文档规则，未修改 runtime 代码、compiler、validator、writer/apply 或 legacy/default 路径；未执行 `git commit` 或 `git push`。
+
+## 2026-06-15 - RPG Runtime Update Proposal Prompt Slimming
+
+- 针对真实 trace 中 `runtime_update_proposal` 阶段约 150k 字符输入导致 provider 只输出 reasoning、不输出正文的问题，先只收窄最后一步 LLM 6 的 prompt handoff。
+- `RuntimeUpdateProposalInput` 和本地 compiler / validator 仍保留完整 canonical input；本轮只新增 prompt-only 压缩层，不放宽 target policy、actor knowledge、reveal gate、pending eligibility、apply/write containment 或任何旧 default / legacy fallback。
+- `runtime-update-proposal-structured-current-turn-sources` 现在使用压缩索引卡片：`postActionWorkingState` 只保留 action id、campaign delta、time/pacing/gap 摘要、runtimeDeltaRefs、references 和 warnings；完整 `actionResolution`、`worldTickResult`、`visibleSelection` 不再嵌套在其中重复传入。
+- `turnNarration` prompt handoff 不再传 `nextActionOptions` 明细，只保留 `nextActionOptionCount` 与玩家可见/parallel/tension 审阅摘要；候选未来行动仍明确不能写成事实。
+- `recalledMaterials` prompt handoff 不再传完整 section 正文，只传路径、用途、知识边界、knowledge claim 摘要和短 `contentExcerpt`；Outline Brief / World Tick / Action Resolution 也通过截断与浅层压缩降低提示体积。
+- 复查最后一步 prompt/schema 后确认 `RuntimeUpdateProposalDraft` 输出契约没有 `DraftX[]` 这类未展开抽象类型；同时收窄 reveal-progress 指引：如果压缩输入没有明确 reveal metadata，模型不得硬提普通 `plot-arcs/runtime` / `outlines/progress` reveal-progress 写入，应使用 `skippedDeltas` 的 `review_only` 记录。
+- 新增 focused 回归测试，确认最后一步 prompt 使用压缩来源、不再暴露重复嵌套对象或 `nextActionOptions` 明细，并保持 Runtime Update Proposal draft/compile/validation contract 不变。
+- 验证通过：`npm.cmd exec -- vitest run src/lib/rpg-runtime-update-proposal.test.ts --exclude='**/*.real-llm.test.ts'`（1 file / 29 tests）；`npm.cmd run typecheck`；`npm.cmd run build:runtime`。`build:runtime` 仍提示既有 Vite `inlineDynamicImports` deprecated warning。
+- 未执行 `git commit` 或 `git push`。
+
+## 2026-06-15 - RPG Runtime Soft Repair Retry All LLM Stages
+
+- 将显式启用的 `softSemanticRepairRetry` 从 Action Resolver 扩展到所有 runtime LLM 阶段：Action Resolver、World Tick、Recall Selector、Outline Brief、Story Outline Regenerator、Narration Generator 和 Runtime Update Proposal。
+- 新增共享 `parseSoftSemanticRawOutputWithOptionalRepairRetry()` runtime helper；每个阶段传入自己的最小 draft schema、parser/compiler/validator、repair adapter 和安全说明，修复输出仍重新走同一阶段本地解析、编译和 canonical validation。
+- Repair prompt 已改为阶段可配置安全边界，不再写死 Action Resolver 专用禁令；Runtime Update Proposal repair 只修复 draft JSON 形态，明确不创建 pending、不 apply、不写文件、不声称文件已修改。
+- Recall Selector、Outline Brief、Story Outline Regenerator 和 Runtime Update Proposal 的 JSON 解析统一接入 `parseSoftSemanticJsonOutput()`，debug trace 可记录本地 JSON report；原 soft trace 字段继续复用 `repairRetryAttempted` / `repairRetrySucceeded` / `repairRetryFailureSummary`。
+- 为 World Tick、Recall Selector、Outline Brief、Story Outline Regenerator、Narration Generator 和 Runtime Update Proposal 的 LLM adapter 增加 repair raw-output 方法，默认 `temperature: 0` / `max_tokens: 1800`，并支持 `repairRequestOverrides`。
+- RPG debug console 新增默认关闭的“修复重试”开关；Panel 只有开启时才向 runtime flow 传 `{ enabled: true, maxAttempts: 1 }`。
+- Runtime Update Validation、Pending Update Persistence、apply/write policy 仍是 deterministic hard boundary；本轮未放宽 target policy、actor knowledge、reveal gate、canonical validators、pending eligibility、apply/write containment，也未新增 legacy/default fallback、旧路径兼容或 silent parser fallback。
+- 验证通过：`npm.cmd exec -- vitest run src/lib/rpg-soft-semantic-repair-retry.test.ts src/lib/rpg-runtime-controller.test.ts src/lib/rpg-runtime-debug-trace.test.ts src/components/rpg/rpg-runtime-debug-console.test.tsx src/components/rpg/rpg-runtime-panel.test.tsx --exclude='**/*.real-llm.test.ts'`（5 files / 64 tests）；`npm.cmd run typecheck`；`npm.cmd run build:runtime`。`build:runtime` 仍提示既有 Vite `inlineDynamicImports` deprecated warning。
+- 未执行 `git commit` 或 `git push`。
+
+## 2026-06-15 - RPG Runtime Draft Prompt Schema Hardening
+
+- 排查真实 World Tick trace 中 `settledOngoingEvents[0].settlementSummary` 导致 `summary` 缺失失败后，审计了 Runtime 各 LLM-facing draft prompt 与本地 compiler 的必填字段对齐情况。
+- 修补高/中风险 prompt 漏洞，不放宽 compiler、validator、repair retry、persistence 或 write boundary：`WorldTickDraft` 现在展开 `DraftWorldDelta`、`DraftClockUpdate`、`DraftSettledOngoingEvent`、`DraftInformationBroadcast`、`DraftReaction`、`DraftPacingUpdate` 和 `DraftGapState` 的字段形态，并明确所有 delta-like 条目统一使用 `summary`，不要用 `settlementSummary` / `broadcastSummary` / `reactionSummary` 替代。
+- `RuntimeUpdateProposalDraft` prompt 展开了 `pacingUpdateProposal` 的具体字段：`sourceRuntimeDeltaIds`、`nextPacingState`、`timeDeltaSummary`、`campaignDelta`、`pacingDebtChange`、`targetPath`、`reviewPolicy`；同时把 `skippedDeltas[].sourceRef` 从泛泛的 `object` 改为具体 source ref 形态。
+- `OutlineBriefDraft.outlineImpactReport.affected` prompt 明确了 `lines` 是 narrative line enum 数组，`beats` / `reveals` / `branchConditions` / `plotArcs` / `tensionLine` 是 stableId string 或 `{ stableId }` 数组。
+- 新增/更新 prompt 回归断言，防止上述字段形态再次退化成抽象 Draft 类型名或含糊 “lightweight draft”。
+- 验证通过：`npm.cmd exec -- vitest run src/lib/rpg-world-tick-interaction.test.ts src/lib/rpg-runtime-update-proposal.test.ts src/lib/rpg-outline-brief.test.ts src/lib/rpg-interactions.test.ts --exclude='**/*.real-llm.test.ts'`（4 files / 122 tests）；`npm.cmd run typecheck`；`npm.cmd run build:runtime`。`build:runtime` 仍提示既有 Vite `inlineDynamicImports` deprecated warning。
+- 本轮未新增 schema 字段补全、字段别名 fallback、enum 修复、World Tick repair retry、Runtime Update Proposal repair retry、legacy/default 兼容或旧路径保留；未执行 `git commit` 或 `git push`。
+
+## 2026-06-15 - RPG Runtime Soft Format Recovery Phase 6
+
+- 完成 `docs/RPG_RUNTIME_SOFT_FORMAT_RECOVERY_PLAN.md` 的阶段 6：提示与 Schema 精简后续工作；本轮只收窄软语义阶段的模型输出契约和 prompt 展开，不新增恢复能力或写回放宽。
+- Action Resolver 的 `ActionResolutionDraft` prompt/编译器已从完整 `references` / structured `warnings` envelope 收窄为 `referencePaths?: string[]` 与 `warnings?: string[]`；本地 compiler 继续生成 canonical references、warning code/severity、IDs、runtime refs 和默认数组。
+- Action Resolver prompt 将 `parsedIntent`、`eventDraft`、`playerActionDelta` 的字符串数组字段标为仅有内容时输出；省略可选数组不会记录 loose recovery，非字符串数组成员、非法 enum、缺失必需语义字段和 forbidden safety key 仍 hard fail。
+- World Tick prompt 现在使用 `WorldTickActionBrief` 替代完整 `ActionResolution`、独立 `playerActionDelta` 和独立 `timeDelta` 展开；`WorldTickDraft` 契约移除 `tickId`、reference envelope 和 warning envelope，由本地 compiler 生成 canonical `tickId`、references、warnings、visibility、runtime refs 与默认字段。
+- Narration Generator prompt 将 `narrationSelfReport`、`nextActionOptions[].likelyAffectedPaths` 和 tension signal arrays 改为 prompt-level optional / derivable；compiler 在省略时默认 narration meta、空 likely paths 和空 signal arrays，玩家可见泄漏与非法 option enum 仍 hard fail。
+- Runtime contract classification matrix 已同步轻量字段职责；`rpg-interactions` 增加固定 fixture prompt 预算测试，防止软语义 prompt 重新引入完整 canonical object、旧 reference/warning envelope、`tickId` 或 `likelyAffectedPaths` 输出要求。
+- 验证通过：`npm.cmd exec -- vitest run src/lib/rpg-action-resolver-draft-compiler.test.ts src/lib/rpg-world-tick-interaction.test.ts src/lib/rpg-narration-draft-compiler.test.ts src/lib/rpg-runtime-compact-prompt.test.ts src/lib/rpg-runtime-formatting-audit.test.ts --exclude='**/*.real-llm.test.ts'`（5 files / 43 tests）；扩展回归 `npm.cmd exec -- vitest run src/lib/rpg-action-resolver-draft-compiler.test.ts src/lib/rpg-world-tick-interaction.test.ts src/lib/rpg-narration-draft-compiler.test.ts src/lib/rpg-runtime-compact-prompt.test.ts src/lib/rpg-runtime-formatting-audit.test.ts src/lib/rpg-action-resolver.test.ts src/lib/rpg-narration-generator.test.ts src/lib/rpg-interactions.test.ts src/lib/rpg-runtime-contract-classification.test.ts --exclude='**/*.real-llm.test.ts'`（9 files / 129 tests）；`npm.cmd run typecheck`；`npm.cmd run build:runtime`。`build:runtime` 仍提示既有 Vite `inlineDynamicImports` deprecated warning。
+- 本轮未扩展 repair retry；未接入 provider-native structured output；未修改 Runtime Update Proposal、Runtime Update Validation、Pending Persistence、Apply/write policy、target policy、actor knowledge、reveal gate、canonical validators、legacy/default fallback、旧路径兼容或 silent parser fallback；未执行 `git commit` 或 `git push`。
+
+## 2026-06-15 - RPG Runtime Soft Format Recovery Phase 5
+
+- 完成 `docs/RPG_RUNTIME_SOFT_FORMAT_RECOVERY_PLAN.md` 的阶段 5：Trace、指标与开发者可见性；本轮只增强结构化 trace、formatting audit 和 debug console 展示，不新增恢复能力或写回放宽。
+- `RpgRuntimeDebugStep` 现在结构化记录 `formatRecoveryApplied`、`localRepairOperations`、`looseCoercions`、`repairRetryAttempted`、`repairRetrySucceeded`、`repairRetryFailureSummary`，trace store 对新 trace 初始化默认值，并对旧 trace clone/import 提供默认值。
+- turn orchestrator 在保留现有 raw output、`JSON 提取与本地修复` section、repair retry 输出/摘要和 warnings 的同时，把本地 JSON 修复、loose draft coercion 与 repair retry 结果写入结构化字段。
+- `formatting-audit` 每行新增 `formatRecovery` 摘要，并输出按 step 聚合的 `formatRecoveryMetrics`，用于统计恢复应用次数、本地修复 operation 数、loose coercion 数和 repair retry 成功/失败频率。
+- RPG debug console 仅在存在恢复事件时显示顶部格式恢复总览、step 短标签和可展开“格式恢复”分组；无恢复时不显示额外噪声。
+- 验证通过：`npm.cmd exec -- vitest run src/lib/rpg-runtime-debug-trace.test.ts src/lib/rpg-runtime-debug-trace-export.test.ts src/lib/rpg-runtime-formatting-audit.test.ts src/components/rpg/rpg-runtime-debug-console.test.tsx --exclude='**/*.real-llm.test.ts'`（4 files / 29 tests）；`npm.cmd run typecheck`；`npm.cmd run build:runtime`。`build:runtime` 仍提示既有 Vite `inlineDynamicImports` deprecated warning。
+- 本轮未扩展 repair retry 到 World Tick 或 Narration Generator；未修改 Runtime Update Proposal、Runtime Update Validation、Pending Persistence、Apply/write policy、target policy、actor knowledge、reveal gate、canonical validators、legacy/default fallback、旧路径兼容或 silent parser fallback；未执行 `git commit` 或 `git push`。
+
+## 2026-06-15 - RPG Runtime Soft Format Recovery Phase 4
+
+- 完成 `docs/RPG_RUNTIME_SOFT_FORMAT_RECOVERY_PLAN.md` 的阶段 4：保持规范化校验边界，确认软格式恢复只发生在 canonical 规范化之前，未新增恢复能力或写回放宽。
+- `parseRpgWorldTickOutput(output, input)` 已收紧为有 `WorldTickInput` 时直接按 `WorldTickDraft` 编译并调用 `validateWorldTickResult()`，不再先把原始 LLM 输出当 canonical `WorldTickResult` 试验放行；无 input 的 canonical fixture 校验路径保留。
+- Action Resolver / Narration Generator 继续保持 `draft compiler -> strict canonical validator` 链路；测试覆盖 `playerActionDelta.notes: string -> string[]` 后仍拒绝非法 happened/status enum、Narration 宽松数组后仍拒绝非法 option enum 与玩家可见泄漏。
+- `validation-boundary` policy 已记录五层边界顺序：JSON 提取/本地修复、宽松草稿 coercion、可选 repair-only retry、draft compiler、canonical validation；hard persistence policy 明确不接收软恢复/loose coercion/repair retry 作为接受证据。
+- Runtime Update Proposal 仍是 `hard_persistence`；Runtime Update Validation 与 Pending Update Persistence 仍是 deterministic boundary。Persistence boundary 测试证明 rejected target 和 unsafe player knowledge claim 不会进入 `createPendingRpgUpdates()`。
+- 验证通过：`npm.cmd exec -- vitest run src/lib/rpg-action-resolver-draft-compiler.test.ts src/lib/rpg-world-tick-interaction.test.ts src/lib/rpg-narration-draft-compiler.test.ts src/lib/rpg-runtime-validation-boundary.test.ts src/lib/rpg-runtime-contract-classification.test.ts src/lib/rpg-runtime-persistence-boundary.test.ts src/lib/rpg-runtime-debug-trace.test.ts --exclude='**/*.real-llm.test.ts'`（7 files / 65 tests）；`npm.cmd run typecheck`；`npm.cmd run build:runtime`。`build:runtime` 仍提示既有 Vite `inlineDynamicImports` deprecated warning。
+- 本轮未把 repair retry 扩展到 World Tick 或 Narration Generator；未修改 Runtime Update Proposal 写回 contract、Runtime Update Validation、Pending Persistence、Apply/write policy、legacy/default fallback、旧路径兼容或自动写回行为；未执行 `git commit` 或 `git push`。
+
+## 2026-06-15 - RPG Runtime Soft Format Recovery Phase 3
+
+- 完成 `docs/RPG_RUNTIME_SOFT_FORMAT_RECOVERY_PLAN.md` 的阶段 3：为 Action Resolver 添加显式启用的一次性修复专用重试路径。
+- 新增 `src/lib/rpg-interactions/runtime/soft-semantic-repair-retry.ts`，提供共享修复提示构建器；提示只包含失败输出、初始 parser/compiler/validator 错误、可选 JSON parse report、最小 draft schema 和仅返回 JSON 的指令，不带原始长 runtime 上下文。
+- `ActionResolutionDraft` schema 已从 Action Resolver prompt 中抽为 `ACTION_RESOLUTION_DRAFT_SCHEMA_PROMPT_LINES`，普通 Action Resolver prompt 与修复提示共用同一份 schema。
+- `RpgActionResolverAdapter` 新增可选 `repairActionResolutionRawOutput()`；LLM adapter 复用现有 `streamChat`，修复请求默认 `temperature: 0`、`max_tokens: 1800`，并支持 `repairRequestOverrides`。
+- `RunRpgTurnInput` / `RunRpgRuntimeTurnFlowInput` / client-worker 输入链路新增 `softSemanticRepairRetry` 运行时选项；默认关闭，显式启用后首版只作用于 Action Resolver raw-output debug 路径。
+- Action Resolver 初始 parse/compile/validate 失败后会先分类错误；仅 `mechanical_format` 的 `json_extract_failed`、`malformed_json`、低风险 loose draft normalization 失败会触发一次修复重试。修复输出仍重新走 `parseRpgActionResolverOutput -> compileActionResolutionDraftOutput -> validateActionResolution`。
+- debug trace 现在会记录 `修复专用重试初始失败`、`修复专用重试输出`、`修复专用重试摘要`；修复成功时追加 `repair_retry_succeeded: action_resolver` warning，修复失败时保留原始失败与修复失败摘要。
+- 验证通过：`npm.cmd exec -- vitest run src/lib/rpg-soft-semantic-repair-retry.test.ts src/lib/rpg-action-resolver.test.ts src/lib/rpg-runtime-debug-trace.test.ts src/lib/rpg-soft-semantic-json.test.ts --exclude='**/*.real-llm.test.ts'`（4 files / 47 tests）；`npm.cmd run typecheck`；`npm.cmd run build:runtime`。`build:runtime` 仍提示既有 Vite `inlineDynamicImports` deprecated warning。`cargo check --manifest-path src-tauri\Cargo.toml` 已尝试，仍因本地缺少 `protoc` 在 `lance-encoding` build script 失败。
+- 本轮未将修复重试默认开启；未为 World Tick / Narration Generator / Runtime Update Proposal / Runtime Update Validation / Pending Persistence / Apply 接入修复重试；未修复非法 enum、缺失必需语义字段、安全键、持久化声明或写入目标；未新增 legacy/default 兼容、旧路径 fallback、完整长提示重跑或 silent fallback；未执行 `git commit` 或 `git push`。
+
+## 2026-06-15 - RPG Runtime Soft Format Recovery Phase 2
+
+- 完成 `docs/RPG_RUNTIME_SOFT_FORMAT_RECOVERY_PLAN.md` 的阶段 2：为软语义 LLM 输出加入共享、保守、可审计的 JSON 提取与本地修复路径。
+- `src/lib/rpg-interactions/runtime/soft-semantic-json.ts` 新增 `parseSoftSemanticJsonOutput()`、`SoftSemanticJsonParseReport`、`SoftSemanticJsonParseError`；报告记录原始/提取/修复长度、修复操作、是否改变文本、解析成功/失败与失败 kind。
+- Action Resolver、World Tick、Narration Generator 已统一走共享 JSON 预处理，并保留 `interactionSpec.parseOutput(output, input)` 原签名；三个公开 parser 额外支持 `onJsonParseReport` collector，供 debug trace 使用。
+- 本地修复范围保持保守：markdown fence、前后说明文字、尾随逗号、JSON 分隔符位置的智能引号、字符串内原始换行；缺少逗号、缺失业务字段、非法 enum、知识泄漏、安全键、写入目标和持久化声明仍然 hard fail。
+- turn orchestrator 的 raw-output 路径会在 `validationSections` 中记录 `JSON 提取与本地修复` report；发生修复时同步记录 `json_format_recovery` warning；本地解析失败仍分类为 `mechanical_format`。
+- 验证通过：`npm.cmd exec -- vitest run src/lib/rpg-soft-semantic-json.test.ts src/lib/rpg-action-resolver.test.ts src/lib/rpg-world-tick-interaction.test.ts src/lib/rpg-narration-generator.test.ts src/lib/rpg-runtime-debug-trace.test.ts --exclude='**/*.real-llm.test.ts'`（5 files / 71 tests）；`npm.cmd run typecheck`；`npm.cmd run build:runtime`。`build:runtime` 仍提示既有 Vite `inlineDynamicImports` deprecated warning。
+- 本轮未实现阶段 3 修复专用重试、LLM retry fallback、缺逗号本地猜测、schema 字段补全、enum 修正、Runtime Update Proposal/Validation/Pending/Apply 修复接入、legacy/default 兼容、旧路径保留或 silent fallback；未执行 `git commit` 或 `git push`。
+
+## 2026-06-15 - RPG Runtime Soft Format Recovery Phase 1
+
+- 完成 `docs/RPG_RUNTIME_SOFT_FORMAT_RECOVERY_PLAN.md` 的阶段 1：在软语义 draft compiler 内加入低风险宽松草稿规范化，接受可恢复的数组字段形态，并继续把 canonical validator 与持久化边界保持严格。
+- `src/lib/rpg-interactions/runtime/soft-draft-protocol.ts` 新增共享 loose reader：`readStringArrayLoose()`、`readArrayLoose()`、`SoftDraftLooseCoercion` 与 warning formatter；普通 `undefined -> []` 不记噪声 warning，`null` 可选数组、字符串转数组、字符串数组 trim/filter、单对象包装会记录 `loose_draft_coercion`。
+- Action Resolver 已接入宽松读取：`parsedIntent.targetRefs/ambiguityNotes`、`eventDraft` refs/checks/notes、`directResults[].affectedRefs`、`playerActionDelta.*`、`references` 和 `warnings`；真实 trace 中 `playerActionDelta.notes: string` 现在会编译为单项 `notes` 数组并在 debug trace warnings 中可见。
+- World Tick 已接入宽松读取：可选 draft 数组可安全接受 `null -> []`，字符串数组字段会 trim/filter，`warnings` / `references` 可接受单对象包装；forbidden keys、非法 enum、玩家叙事、next action、Recall/Outline 污染仍 hard fail。
+- Narration Generator 已接入宽松读取：`warnings`、`tensionBrief` signal 数组和 `nextActionOptions[].likelyAffectedPaths` 可接受安全字符串数组形态；单个 `nextActionOptions` 对象只会被包装后交给 canonical 3-5 个选项校验，不能自动补足或绕过。
+- 修复 debug trace phase 推断中过宽的 `/parse/` 匹配，避免把 `parsedIntent` 字段错误归类为 parse failure。
+- 验证通过：`npm.cmd exec -- vitest run src/lib/rpg-action-resolver-draft-compiler.test.ts src/lib/rpg-world-tick-interaction.test.ts src/lib/rpg-narration-draft-compiler.test.ts src/lib/rpg-runtime-debug-trace.test.ts --exclude='**/*.real-llm.test.ts'`（4 files / 41 tests）；`npm.cmd run typecheck`；`npm.cmd run build:runtime`。`build:runtime` 仍提示既有 Vite `inlineDynamicImports` deprecated warning。
+- 本轮未实现阶段 2 JSON 本地修复、阶段 3 修复专用重试、broken JSON fallback、legacy/default 兼容、旧路径保留或 silent fallback；未放松 Runtime Update Proposal、Runtime Update Validation、Pending Persistence、Apply/write policy、actor knowledge、reveal gate、target policy 或路径 containment；未执行 `git commit` 或 `git push`。
+
+## 2026-06-15 - RPG Runtime Soft Format Recovery Phase 0
+
+- 完成 `docs/RPG_RUNTIME_SOFT_FORMAT_RECOVERY_PLAN.md` 的阶段 0：只做基线审计、失败分类、debug trace 可见性、测试夹具和文档更新；未实现宽松规范化、JSON 本地修复、LLM 修复重试或任何写回边界放宽。
+- 审计并记录三条软语义路径：Action Resolver 为 `extractJsonObjectText -> JSON.parse -> compileActionResolutionDraftOutput -> validateActionResolution`；World Tick 为 `extractJsonObjectText -> JSON.parse -> validateWorldTickResult`，失败后尝试 `compileWorldTickDraftOutput -> validateWorldTickResult`；Narration Generator 为 `extractJsonObjectText -> JSON.parse -> compileTurnNarrationDraftOutput -> validateTurnNarration`。
+- `RpgRuntimeDebugError` 现在保留旧 `phase`，并新增可选 `origin`、`kind`、`category`；error section 同步输出 `phase / origin / kind / category / message`，让 trace 能区分机械格式、语义契约、安全和持久化失败。
+- Runtime contract error category 补齐 `json_extract_failed`、`loose_scalar_array`、`loose_single_object_array`、`null_optional_field`、`forbidden_safety_key`，并保持既有 `malformed_json`、`missing_semantic_field`、`invalid_semantic_enum`、`canonical_validation_failed`、`forbidden_persistence_claim`、`forbidden_write_target`。
+- 基于真实 trace 形态添加最小 sanitized fixture：`ActionResolutionDraft.playerActionDelta.notes` 为字符串时仍然 hard fail，但 trace 分类为 `origin: draft_normalization`、`kind: loose_scalar_array`、`category: mechanical_format`。
+- `formatting-audit` 会优先读取新错误 metadata，把机械格式失败汇总为 `mechanical_format_failure`，把 draft 编译/规范化失败与 canonical validation failure 分开。
+- 验证通过：`npm.cmd exec -- vitest run src/lib/rpg-runtime-debug-trace.test.ts src/lib/rpg-runtime-contract-classification.test.ts src/lib/rpg-runtime-formatting-audit.test.ts src/lib/rpg-action-resolver-draft-compiler.test.ts --exclude='**/*.real-llm.test.ts'`（4 files / 23 tests）；`npm.cmd run typecheck`；`npm.cmd run build:runtime`。`build:runtime` 仍提示既有 Vite `inlineDynamicImports` deprecated warning。
+- 本轮没有放松 Action Resolver、World Tick、Narration Generator、Runtime Update Proposal、Runtime Update Validation、Pending Persistence、Apply/write policy、actor knowledge、reveal gate、target policy 或路径 containment；没有新增 legacy/default 兼容、fallback、旧路径保留或静默 parser fallback；未执行 `git commit` 或 `git push`。
+
+## 2026-06-15 - RPG Runtime Update Validation Trace Fix
+
+- 排查真实完整循环 trace：`rpg-runtime-trace-rpg-action-1-mqeie0jp.json` 中 `runtime-update-rpg-action-1-3` 被拒不是因为真的写入候选行动，而是 `wiki/characters/runtime/unidentified_middle_aged_male.md` 的状态句“玩家未采取后续行动”命中了过宽的 `后续行动` candidate-action 检测。
+- 收窄 Runtime Update Validation：candidate pollution 会忽略“尚未/未/没有/并未 ... 下一步/后续行动”这类否定状态句，但仍拒绝 `Next action`、候选行动、未选择选项、玩家可以/可能等未来行动污染。
+- 收窄 current-scene cross-directory sync 启发式：不再把“观测装备”误判成 inventory/equipment sync，不再把“尚未触发关键揭示”误判成 plot-arc runtime progress，也不再把“已完成目视检查”误判成 outline progress。
+- `synthetic.whole` retrieval index 提示仍是第一版 recall index 对缺少 section metadata 页面使用 whole-file anchor 的已知 warning；本轮没有改变 recall index 结构。
+- 验证通过：`npm.cmd exec -- vitest run src/lib/rpg-runtime-update-validation.test.ts`（1 file / 17 tests）。`npx` 在当前 PowerShell 执行策略下被阻止，故使用 `npm.cmd exec`。
+- 本轮未放松 target policy、actor knowledge、reveal gate、pending persistence、apply/write policy、旧 default/legacy 兼容或路径保留；未执行 `git commit` 或 `git push`。
+
+## 2026-06-15 - RPG Recall Selector Draft Compiler
+
+- Recall Selector 的 LLM 输出契约已从完整 canonical `RecallSelection` 收窄为最小 `RecallSelectionDraft`：模型只选择 `path`、`readMode`、`priority`、`reason`、`expectedUse`、`sectionIds` 和具体 `exclusions`。
+- 新增 `RecallSelectionDraft` 类型与 `compileRecallSelectionDraftOutput()`；本地 compiler 生成 `selectionId`、`sourceWorkingStateId`、`lineTarget`、`visibilityScope`、`knowledgeScope`、`recallBudget`、`recallPolicy` 和空 `warnings`，再复用严格 `validateRecallSelection()`。
+- Recall Selector prompt 不再要求模型输出 protocol / budget / policy / warning / visibility / knowledge 字段；如果 Draft 中出现这些字段或写回、叙事、recalled material、outline-regeneration 污染字段，会 hard fail。
+- Downstream runtime 仍消费 canonical `RecallSelection`：fixture adapter、turn orchestrator、recall handoff、Outline Brief、Narration 和 Runtime Update Proposal 的内部接口保持不变。
+- 验证通过：`npx.cmd vitest run src/lib/rpg-recall-selector.test.ts src/lib/rpg-recall-selector-handoff.test.ts src/lib/rpg-turn-orchestrator.test.ts src/lib/rpg-runtime-debug-trace.test.ts --exclude='**/*.real-llm.test.ts'`（4 files / 53 tests）；`npm.cmd run typecheck`；`npm.cmd run build:runtime`。`build:runtime` 仍提示既有 Vite `inlineDynamicImports` deprecated warning。
+- 本轮未新增 broken JSON repair、retry repair、silent parser fallback、legacy/default 兼容或旧路径保留；未放松 Runtime Update Proposal / Runtime Update Validation / Pending Persistence / Apply 写回边界；未执行 `git commit` 或 `git push`。
+
+## 2026-06-14 - RPG Runtime 非写回 B 类字段本地化收口
+
+- 修复 `rpg-runtime-trace-rpg-action-1-mqdv8wd7.json` 暴露的 World Tick 失败：LLM 输出 `runtimeDeltaRefs: ["player-action-delta-rpg-action-1"]` 这类字符串短引用时，非写回 draft compiler 不再把它透传进 canonical validator；World Tick 统一由本地 compiler 生成 `worldTick` canonical runtime refs。
+- 新增 `soft-draft-protocol` helper，用于 soft semantic draft 阶段剥离已知可派生工程字段、拒绝危险写回/叙事污染字段，并支持把 runtime delta 短引用按输入 refs 映射。
+- Action Resolver 与 Narration Generator 不再因为模型多写 IDs、`runtimeDeltaRefs`、`narrationMeta`、`sourceRefs`、option protocol 等 B 类字段直接中断；compiler 会剥离这些字段并记录 warnings，语义必填字段和玩家可见泄漏仍 hard fail。
+- World Tick prompt 移除旧 canonical `RuntimeDeltaRef` / `WorldTickVisibilityMeta` / `WorldTickDeltaBase` 输出结构说明；Draft contract 明确要求不要输出 `runtimeDeltaRefs`、`sourcePath`、`sourceStage`、完整 `visibility` 或 `timeDeltaBasis`。
+- Outline Brief 的 `briefId` 改为本地生成；模型多写 `briefId` 或完整 reference envelope metadata 会被剥离，未知引用、旧 `plotArcFuelRefs`、GM-only player-facing ref 仍 hard fail。
+- Story Outline Regenerator 新增 draft compiler：LLM raw output 只需提供 same-turn 语义修订草稿、narration handoff、future-only revision summary 和 safety conclusion；`patchId`、`handoffId`、`proposalId`、review/non-persistence boundary 与 runtime refs 由本地生成或从输入映射。Fixture/canonical adapter validation 仍保留。
+- 验证通过：`npm.cmd run typecheck`；`npx.cmd vitest run src/lib/rpg-world-tick-interaction.test.ts src/lib/rpg-action-resolver.test.ts src/lib/rpg-outline-brief.test.ts src/lib/rpg-narration-generator.test.ts src/lib/rpg-story-outline-regenerator.test.ts --exclude='**/*.real-llm.test.ts'`（5 files / 89 tests）；`npm.cmd run build:runtime`。`build:runtime` 仍提示既有 Vite `inlineDynamicImports` deprecated warning。
+- 本轮未放松 Runtime Update Proposal / Runtime Update Validation / Pending Persistence / Apply 的 hard persistence boundary；未新增 legacy/default 兼容、旧路径保留、broken JSON repair、retry repair、自动写回或写回 fallback；未执行 `git commit` 或 `git push`。
+
+## 2026-06-14 - RPG Outline Brief Plot-arc Fuel 本地生成
+
+- 修复 runtime trace `rpg-runtime-trace-rpg-action-1-mqdu55xh.json` 暴露的 Outline Brief 失败：LLM 输出 `plotArcFuelRefs[0].path = wiki/plot-arcs/第五次圣杯战争-圣杯战争.md`，该路径不在本轮 `plotArcTensionFuel` allowlist，也不在实际 `wiki/plot-arcs/` 目录中，导致 compiler 在引用校验阶段 hard fail。
+- `OutlineBriefDraft.tensionBriefInput` 不再接受 `plotArcFuelRefs`；模型只通过 `tensionLineUpdateCandidate.sourceFuelIds` 从 “Plot-arc 张力燃料” 的 `fuelId` 原样选择 fuel。
+- `outline-brief-draft-compiler` 现在由本地 deterministic resolver 根据 `sourceFuelIds` 和 `input.plotArcTensionFuel` 生成 canonical `tensionBriefInput.plotArcFuel` 引用 envelope；生成字段固定为 tensionLine / outlineControl / gm_only，不做路径猜测、文件系统查找、legacy/default 兼容或旧路径保留。
+- 未知 `sourceFuelIds` 继续 hard fail；旧 `plotArcFuelRefs` 被列为 forbidden draft key，出现时会以协议污染错误拒绝，而不是忽略或修复。
+- 更新 Outline Brief prompt contract 和测试覆盖：prompt 不再包含 `"plotArcFuelRefs"`，测试覆盖本地 fuel 生成、无效 draft path 不影响生成、旧字段拒绝、未知 fuel id 拒绝。
+- 验证通过：`npx.cmd vitest run src/lib/rpg-outline-brief.test.ts --exclude='**/*.real-llm.test.ts'`（1 file / 24 tests），`npm.cmd run typecheck`，`npm.cmd run build:runtime`。`build:runtime` 仍提示既有 Vite `inlineDynamicImports` deprecated warning。
+- 本轮未放松 canonical validator、未新增 parser repair / retry repair / fallback、未做 recall/input-builder 的 plot-arc fuel 收集策略变更、未执行 `git commit` 或 `git push`。
+
+## 2026-06-14 - RPG Runtime Persistence Boundary Consolidation
+
+- 完成 `docs/RPG_RUNTIME_FORMATTING_REDUCTION_ASSESSMENT.md` 推荐后续阶段中的 Phase G：Runtime Update Proposal / Runtime Update Validation / Pending Update Persistence / Apply Write Policy 现在通过共享 deterministic persistence boundary 串联，非写回 soft semantic output 不能直接进入 pending 或写 wiki。
+- 新增 `src/lib/rpg-runtime/persistence-boundary.ts`，提供 `validateRpgRuntimePersistenceBoundary()` 与 `summarizeRpgRuntimePersistenceBoundary()`；该 gate 统一复用 runtime target policy、runtime update write/knowledge validation、pending eligibility ids 和 review-only audit item tracking。
+- `runRpgRuntimeTurnFlow()` 现在先生成 proposal audit，再通过共享 gate 产出 accepted / rejected / warnings / pendingEligibleUpdateIds，`pending_update_persistence` 只对 gate accepted updates 调用 `createPendingRpgUpdates()`；turn journal 和 debug trace 会记录 proposal/accepted/rejected/pending counts、issue codes、warning codes、review-only audit ids。
+- `runtime_update_apply stage_pending` 改为走同一个 shared gate，不再维护一份局部 target-policy + validation 拼接逻辑；`apply_pending` 仍是最终文件系统写门，继续只应用 `accepted` pending updates，并重查 target policy 与项目 `wiki/` 路径包含关系。
+- skipped deltas、outline revision review items、pacing proposals、journal entries、proposal groups、`TurnSemanticHandoff`、World Tick handoff、Narration output 都只作为 audit/review/input 材料，不能自动提升为 accepted wiki fact 或 pending update。
+- 新增 `src/lib/rpg-runtime-persistence-boundary.test.ts`，并更新 controller / validation-boundary / runtime panel mock 覆盖 persistence boundary summary；验证通过：`npm.cmd run typecheck`，Phase G focused vitest（8 files / 91 tests），`npm.cmd run build:runtime`。`build:runtime` 仍提示既有 Vite `inlineDynamicImports` deprecated warning。
+- 本轮未放松 canonical validators、未新增 fallback / parser repair / retry sanitizer / legacy/default 兼容、旧 full-canonical prompt fallback、旧路径保留或自动 apply 行为；未执行 `git commit` 或 `git push`。
+
+## 2026-06-14 - RPG Runtime Compact Handoff + Stage Compiler Slimming
+
+- 完成 `docs/RPG_RUNTIME_FORMATTING_REDUCTION_ASSESSMENT.md` 推荐后续阶段中的 Phase E / Phase F：非写回下游 LLM 阶段默认消费 compact `TurnSemanticHandoff`，Action Resolver / Narration Generator 改为轻量 draft + 本地 compiler + 严格 canonical validator。
+- Phase E：新增 `src/lib/rpg-runtime/turn-semantic-handoff.ts`，从 SubmittedAction、ActionResolution、WorldTickResult、WorldTickVisibleSelection、PostActionWorkingState 和 World Tick semantic handoff 生成 compact turn packet；区分 confirmed / attemptedOrBlocked / ongoing / possibleFuture、PC 可见 / PC 可推断 / 用户可见但 PC 未知 / GM-only control，并限制 list、summary、reference allowlist、warnings 与序列化体积。
+- Turn flow 已把 `turnSemanticHandoff` 写入 `RunRpgTurnResult`、`RpgTurnRecord`、runtime journal / controller / persistence-shared 结果；完整 canonical action/world/working-state 仍保留给本地 compiler、validator、debug audit 和 Runtime Update Proposal。
+- Recall Selector、Outline Brief、Narration Generator、触发式 Story Outline Regenerator prompt 现在使用 `TurnSemanticHandoff` 加各自阶段材料；不再在 prompt 中展开完整 canonical `ActionResolution`、`WorldTickResult` 或 `PostActionWorkingState`。
+- Phase F：新增 `ActionResolutionDraft` 编译路径，LLM 只输出语义行动解析、事件/结果摘要、风险/障碍、时间成本、轻量 refs 和 warnings；本地 compiler 生成 IDs、runtimeDeltaRefs、默认数组与 reference envelope 后继续调用严格 `validateActionResolution()`，且不会把 `attempted_not_confirmed` 静默提升为 `confirmed_happened`。
+- Phase F：新增 `TurnNarrationDraft` 编译路径，LLM 只输出 playerFacingText、可选 parallelLineText、tension/review handoff、自评枚举、option 文案/意图/风险和 warnings；本地 compiler 生成 narrationId、display policy、player knowledge boundary metadata、source refs、option IDs、option-only future status、references 和 narration meta 后继续调用 `validateTurnNarration()`。
+- Outline Brief 保留既有 draft/compiler flow，但 prompt 只给 compact handoff、recall 结果、visibility boundaries、outline/control slices、plot-arc fuel、hard constraints 和 capped known references；Story Outline Regenerator 本轮只确保 prompt path 使用 compact handoff，未重做其 compiler。
+- 新增 / 更新测试覆盖 handoff budget/list caps/reference allowlist、compact prompt 边界、Action Resolver draft compiler、Narration draft compiler、debug trace 和 orchestrator/controller flow；验证通过：`npm.cmd run typecheck`，`npm.cmd run build:runtime`，4-file Phase E/F 专项 vitest（6 tests），12-file runtime focused vitest（212 tests）。
+- 本轮未放松 canonical validators、未新增 legacy/default 兼容、旧 full-canonical prompt fallback、parser repair、retry sanitizer、旧路径保留或 wiki writeback/pending persistence 放宽；`build:runtime` 仍提示既有 Vite `inlineDynamicImports` deprecated warning；未执行 `git commit` 或 `git push`。
+
+## 2026-06-14 - RPG Runtime Soft/Hard Boundary + World Tick Containment
+
+- 完成 `docs/RPG_RUNTIME_FORMATTING_REDUCTION_ASSESSMENT.md` 推荐后续阶段中的 Phase C / Phase D：新增 validation-boundary policy，并把 World Tick draft 的可派生协议字段进一步收进本地 compiler。
+- Phase C：新增 `src/lib/rpg-runtime/validation-boundary.ts`，从 Phase B contract matrix 派生每个 runtime step 的 boundary mode、turn interrupt categories、warning/review categories、canonical validator role 和 derivable protocol 行为。
+- Boundary policy 明确 `action_resolver`、`world_tick`、`outline_brief`、`story_outline_regenerator`、`narration_generator` 是 soft semantic stages；`recall_selector` 是 allowlist selection；`runtime_update_proposal`、`runtime_update_validation`、`pending_update_persistence` 是 hard/deterministic persistence boundary。
+- Phase D：`WorldTickDraft` 编译路径现在把缺失数组、空数组、纯空白字符串数组统一视为“未声明 draft protocol”，由 compiler 使用本地默认值补齐；`affectedPaths: []` 会先编译成 canonical 非空路径，再进入严格 `validateWorldTickResult()`。
+- Canonical `WorldTickResult` 无 prompt input 解析仍保持严格：缺失或空 canonical `affectedPaths` 继续报错；非法 enum、forbidden output、wiki write、narration、nextActionOptions、Recall output、outline revision 权限仍 hard fail。
+- 新增 `WorldTickSemanticHandoff` builder，并在 `turn-orchestrator` 的 World Tick debug trace 中记录 compact semantic handoff；完整 `WorldTickResult` 仍保留在 turn record / controller / debug trace，本阶段没有替换后续 prompt 输入，Phase E 仍是后续工作。
+- 新增 / 更新测试：`src/lib/rpg-runtime-validation-boundary.test.ts`、`src/lib/rpg-world-tick-interaction.test.ts`、`src/lib/rpg-world-tick-working-state.test.ts`；验证通过：`npm.cmd run typecheck`，以及 `npx.cmd vitest run src/lib/rpg-world-tick-interaction.test.ts src/lib/rpg-world-tick-contract.test.ts src/lib/rpg-runtime-contract-classification.test.ts src/lib/rpg-runtime-validation-boundary.test.ts src/lib/rpg-world-tick-working-state.test.ts src/lib/rpg-turn-orchestrator.test.ts src/lib/rpg-runtime-debug-trace.test.ts --exclude='**/*.real-llm.test.ts'`（7 files / 54 tests）。
+- 本轮未放松 canonical validators、未新增 fallback / parser repair / retry sanitizer / legacy default 兼容、未改 wiki writeback / pending apply policy、未执行 Phase E 的全链路 compact prompt 替换；未执行 `git commit` 或 `git push`。
+
+## 2026-06-14 - RPG Runtime Formatting Audit + Contract Matrix
+
+- 完成 `docs/RPG_RUNTIME_FORMATTING_REDUCTION_ASSESSMENT.md` 推荐后续阶段中的 Phase A / Phase B：新增只读格式化成本审计层与 runtime contract classification matrix。
+- Phase A：新增 `src/lib/rpg-runtime/formatting-audit.ts`，可从现有 debug trace 生成 `runtimeFormattingAudit` 表，按 step 统计 input / prompt / raw output / parsed output / validation / handoff chars、top prompt sections、top input assembly contributors，并区分 `executed`、`failed`、`blocked_by_previous_failure`、`unknown_real_model_cost`、`synthetic`。
+- Phase A 明确 synthetic full-flow trace 只用于本地 prompt/input/handoff 结构体积测量，必须标注为 `synthetic`，不能当作真实模型表现、成本或质量数据；失败后的真实 pending step 不伪造 prompt/output 数字。
+- Phase B：新增 `src/lib/rpg-runtime/contract-classification.ts`，为 Action Resolver、World Tick、Recall Selector、Outline Brief、Story Outline Regenerator、Narration Generator、Runtime Update Proposal、Runtime Update Validation、Pending Persistence 建立字段分类矩阵和统一错误类别。
+- 矩阵将 `world_tick` 的 `affectedPaths`、runtime refs、source ids、visibility envelope、time basis、reference metadata、IDs、default arrays 记录为 `derivable_protocol`；本阶段仅分类和观测，不修改 compiler / validator 行为。
+- 新增说明文档 `docs/RPG_RUNTIME_FORMATTING_AUDIT_AND_CONTRACT_MATRIX_PLAN.md`；验证通过：`npm.cmd run typecheck`，以及 `npx.cmd vitest run src/lib/rpg-runtime-formatting-audit.test.ts src/lib/rpg-runtime-contract-classification.test.ts src/lib/rpg-runtime-debug-trace.test.ts src/lib/rpg-turn-orchestrator.test.ts src/lib/rpg-runtime-controller.test.ts --exclude='**/*.real-llm.test.ts'`（5 files / 47 tests）。
+- 本轮未修改 runtime prompts、parser、compiler、validator、orchestrator 执行顺序、wiki 写回、pending/apply policy、fallback、parser repair、retry、silent validator relaxation、legacy/default 兼容或旧路径保留；未执行 `git commit` 或 `git push`。
+
+## 2026-06-14 - RPG Runtime Formatting Reduction Assessment
+
+- 新增 `docs/RPG_RUNTIME_FORMATTING_REDUCTION_ASSESSMENT.md`，记录一次只读架构评估：本次 World Tick `affectedPaths: []` 失败被视为 runtime 中间阶段过度 canonical 化和协议严格性扩散的症状，而不是单点字段问题。
+- 评估结论：严格协议应主要集中在 `runtime_update_proposal -> pending validation -> apply/write policy` 等真实写回边界；Action Resolver、World Tick、Outline Brief、Narration 等非写回阶段更适合 soft semantic contract、短 handoff packet 和 deterministic compiler 补齐可派生字段。
+- 文档建议后续按 Phase A-G 执行：先做 failure-frontier formatting audit 和 contract classification matrix，再设计 soft/hard validation 边界，随后收窄 World Tick、引入 compact semantic handoff、逐阶段 compiler slimming，并最终把 hard persistence validation 收敛到写回边界。
+- 本轮只新增评估文档并更新状态日志，未修改 runtime 代码、prompt、parser、compiler、validator、orchestrator、wiki 写回、pending/apply 边界、fallback、repair sanitizer 或 legacy/default 兼容；未执行 `git commit` 或 `git push`。
+
+## 2026-06-14 - RPG Runtime Outline/Update Draft Compiler Phase 1/2
+
+- 完成 `docs/RPG_RUNTIME_DRAFT_COMPILER_REFACTOR_PLAN.md` 的 Phase 1 / Phase 2：`outline_brief` 与 `runtime_update_proposal` 现在都采用 `LLM semantic draft -> deterministic local compiler -> strict canonical validator`。
+- Phase 1：新增 `OutlineBriefDraft` 编译路径。LLM 只输出语义 brief、轻量 refs、pacing、campaign delta、impact report 和 warnings；本地 compiler 补齐 `sourceWorkingStateId`、完整 `OutlineBriefReference` envelope、`reportId` 与必要的 `regenerationRequest`，并继续调用 `validateOutlineBriefCompilerOutput()`。
+- Phase 2：新增 `RuntimeUpdateProposalDraft` 编译路径。LLM 只输出目标文件、策略、原因、内容、轻量 source refs/runtimeDeltaIds、happened status、confidence、risk notes 与 skipped delta 原因；本地 compiler 生成 proposal/group/skip IDs、`sourceDeltas`、visibility、knowledge metadata、reveal gates 和 validation hints，并继续调用 canonical validator 与 pending-stage validation。
+- `outline-brief-interaction` 与 `runtime-update-interaction` 的 prompt contract 已改为 draft contract，不再要求模型手写完整 canonical envelope；LLM raw string 路径只接受 draft，不做 canonical fallback 或 silent repair。
+- Debug trace 已更新：`outline_brief` 与 `runtime_update_proposal` 会记录 raw draft、parsed draft、compiled canonical summary 与 canonical validation result，便于区分 parse / draft validation / compiler / canonical validation 失败。
+- Import / staging 边界保持 canonical：`runtime-update-apply` 继续接受已经验收的 canonical `RuntimeUpdateProposalResult`，而不是把 pending import 改成 LLM draft parser。
+- 验证通过：`npm.cmd run typecheck`；`npx.cmd vitest run src/lib/rpg-outline-brief.test.ts src/lib/rpg-runtime-update-proposal.test.ts src/lib/rpg-runtime-controller.test.ts src/lib/rpg-runtime-debug-trace.test.ts src/lib/rpg-turn-orchestrator.test.ts src/lib/rpg-interactions.test.ts src/lib/rpg-import/runtime-update-apply.test.ts --exclude='**/*.real-llm.test.ts'`（7 files / 140 tests）；`npm.cmd run test:mocks`（138 files / 1738 tests）。
+- 本轮未新增 legacy/default 兼容、旧路径保留、parser repair、validator 放宽、协议吞错或自动补坏 JSON；未执行 `git commit` 或 `git push`。
+
+## 2026-06-14 - RPG Runtime Phase 0 Contract Audit Baseline
+
+- 完成 `docs/RPG_RUNTIME_DRAFT_COMPILER_REFACTOR_PLAN.md` 的 Phase 0 contract audit / trace baseline，并将审计结果内联写回该计划，作为后续 Phase 1+ 的参考入口；未新增单独审计文档。
+- 审计覆盖 `action_resolver`、`world_tick`、`recall_selector`、`outline_brief`、`story_outline_regenerator`、`narration_generator`、`runtime_update_proposal`，记录当前输出契约、parser/validator、trace 覆盖、失败模式、字段分类和是否适合 draft/compiler。
+- 可读真实 trace `rpg-runtime-trace-rpg-action-1-mqder6fw.json` 已记录为旧 contract 失败基线：`action_resolver` 成功，prompt 37,559 chars / raw output 3,868 chars；`world_tick` prompt 67,581 chars / raw output 4,687 chars，并在 validation 阶段失败于 `Invalid WorldTickResult.clockUpdates: must be an array.`；后续 runtime LLM 阶段因该失败保持 pending，无真实 prompt/output 数字。
+- Phase 0 结论：`world_tick` 已完成 draft/compiler；`recall_selector` 已是轻量 allowlist + deterministic reader；`outline_brief` 强烈适合并进入 Phase 1；`runtime_update_proposal` 强烈适合并进入 Phase 2；`narration_generator` 只做 metadata/reference 局部瘦身；`story_outline_regenerator` 后置；`action_resolver` 暂不整体改造，只评估 ID/reference 局部 compiler。
+- 本轮只修改项目文档，未修改 runtime 代码、prompt、parser、validator、orchestrator、wiki 写回、pending/review/apply 边界、fallback、parser repair、validator 默认补值、legacy/default 兼容或旧路径保留；未执行 `git commit` 或 `git push`。
+- 验证通过：`npx.cmd vitest run src/lib/rpg-action-resolver.test.ts src/lib/rpg-world-tick-interaction.test.ts src/lib/rpg-recall-selector.test.ts src/lib/rpg-outline-brief.test.ts src/lib/rpg-narration-generator.test.ts src/lib/rpg-runtime-update-proposal.test.ts src/lib/rpg-story-outline-regenerator.test.ts`（7 files / 130 tests）；`npm.cmd run typecheck`。
+
+## 2026-06-14 - RPG Runtime Draft/Compiler Refactor Plan
+
+- 新增 `docs/RPG_RUNTIME_DRAFT_COMPILER_REFACTOR_PLAN.md`，记录 World Tick 之后各 runtime LLM 阶段是否应采用 `Draft -> local compiler -> strict canonical validator` 的后续改造计划。
+- 计划明确：recall 瘦身减少的是 wiki 正文和召回噪声，不会自动压缩 Outline Brief 自己的 handoff 展开和 canonical 输出协议；Outline Brief prompt 仍庞大，是因为它继续消费 `postActionWorkingState`、`worldTickResult`、`recalledMaterials`、`outlineSlices`、`knownReferences` 等结构化输入，并要求模型手写完整 `OutlineBriefReference`。
+- 推荐优先级：先做 Phase 0 contract audit / trace baseline；Phase 1 改造 Outline Brief draft/compiler；Phase 2 改造 Runtime Update Proposal draft/compiler；之后再考虑 Narration metadata、Story Outline Regenerator 和 Action Resolver 的局部瘦身。
+- 计划边界明确：compiler 不是 fallback、repair sanitizer 或 validator 放宽；LLM draft 必须合法，本地 compiler 只做确定性协议补齐，最终仍调用现有严格 canonical validator。
+- 本轮只新增规划文档并更新状态日志，未修改 runtime 代码、prompt、validator、orchestrator、wiki 写入层、legacy/default 兼容、fallback 或旧路径保留；未执行 `git commit` 或 `git push`。
+
+## 2026-06-14 - RPG Runtime Recall Slimming + WorldTickDraft Contract
+
+- 完成 Stage 13-15 的首轮落地：新增 `.codex/stages/13-runtime-recall-slimming.md`、`.codex/stages/14-runtime-output-draft-contract.md`、`.codex/stages/15-runtime-e2e-evaluation.md`，后续可通过 `scripts/run-codex-stages.ps1 -From 13 -Until 15` 分阶段重跑。
+- Stage 13 召回瘦身：`rankedPages()` 现在过滤 0 分候选；tokenizer 会拆分 `canal-gate` / `runtime_delta` 这类 slug，但 scorer 改为 token 精确命中，不再用子串包含；runtime/action/world-tick/recall/quest/rule 等协议词已作为 stop words 处理。
+- Action Resolver / World Tick 的 query 构造不再把整份 `currentScene.content` 作为召回放大器，改用玩家行动、地点、在场实体、交互物、危险/时钟、pending reactions、affectedPaths 与显式 refs 等锚点。
+- World Tick 不再全量塞入 `relationships/runtime/*` 与 `plot-arcs/runtime/*`，这些 runtime overlay 现在也必须通过正相关排名或 affected path 进入 prompt；Recall Selector 不再自动包含所有 `/runtime/` 页。
+- Stage 14 输出协议瘦身：World Tick prompt 改为要求轻量 `WorldTickDraft`，本地 compiler 负责补 `tickId`、空数组、完整 visibility、`runtimeDeltaRefs`、`timeDeltaBasis`、`pacingUpdate` 与 `gapState` 默认 canonical 字段，最终仍走严格 `validateWorldTickResult()`。
+- 真实 debug trace 复核：`rpg-runtime-trace-rpg-action-1-mqder6fw.json` 的直接失败是旧 canonical `WorldTickResult` 缺少 `clockUpdates` 数组，报 `Invalid WorldTickResult.clockUpdates: must be an array.`；trace 中 `Saber/阿尔托莉雅/宝具/乖离剑/Fate` 类命中约 455 次，Action Resolver prompt 约 37.6k chars，World Tick prompt 约 67.6k chars，后续步骤因 World Tick validation 失败 pending。
+- 新增/调整回归覆盖：Action Resolver、World Tick input contract、Recall Selector handoff 均加入无关 Fate/runtime poison fixtures；World Tick interaction 覆盖 `WorldTickDraft` prompt 与 draft compiler，低信息 draft 可省略 `clockUpdates` 等空数组字段。
+- 验证通过：`npx.cmd vitest run src/lib/rpg-action-resolver.test.ts src/lib/rpg-world-tick-contract.test.ts src/lib/rpg-recall-selector-handoff.test.ts src/lib/rpg-world-tick-interaction.test.ts`（4 files / 46 tests）；`npx.cmd vitest run @tests` for all `src/lib/rpg-*.test.ts`（39 files / 457 tests）；`npm.cmd run typecheck`；`npm.cmd run build:runtime`。`build:runtime` 仍提示既有 Vite 8 `inlineDynamicImports` deprecated warning。
+- 本轮未修改 validator 语义为 silent fallback，未增加 legacy/default 兼容、旧路径保留、retry repair、parser sanitizer 或吞错；未执行 `git commit` 或 `git push`。
+
+## 2026-06-14 - RPG Story/Narration Prompt Contract 展开
+
+- 修复后续高风险 runtime LLM 阶段的 prompt/validator 漂移风险：`Story Outline Regenerator` 与 `Narration Generator` 输出契约原先仍保留 `ProvisionalOutlinePatch`、`OutlineRevisionProposal`、`RegenerationSafetyReport`、`TensionBrief`、`NarrationMeta` 等抽象类型占位。
+- 根因记录：这些阶段的 validator 已要求大量具体字段和固定布尔边界，但 prompt 没有完整展开字段，未来真实 LLM 输出可能像 `outline_brief` 一样按旧形状或猜测形状返回，导致首个必填字段校验失败。
+- 修复 `src/lib/rpg-interactions/runtime/story-outline-regenerator-interaction.ts`：新增本地输出契约行，展开 `provisionalOutlinePatch`、`narrationHandoff`、`nonPersistenceBoundary`、`outlineRevisionProposal`、`reviewBoundary` 和 `regenerationSafetyReport`。
+- 修复 `src/lib/rpg-interactions/runtime/narration-generator-interaction.ts`：新增本地输出契约行，展开 `tensionBrief`、`displayPolicy`、`narrationMeta`、`playerKnowledgeBoundary`、`provisionalPatchUsage`、`nextActionOptions` 和 narration source refs。
+- 增加 `src/lib/rpg-story-outline-regenerator.test.ts` 与 `src/lib/rpg-narration-generator.test.ts` 回归覆盖：prompt 必须包含展开字段且不再依赖裸类型占位；旧/欠规格输出会被 parser+validator 拒绝，不做 auto-repair。
+- 验证通过：`npx.cmd vitest run src/lib/rpg-story-outline-regenerator.test.ts src/lib/rpg-narration-generator.test.ts src/lib/rpg-interactions.test.ts`（3 files / 73 tests）；`npm.cmd run typecheck`；`npm.cmd run build:runtime`。`npm.cmd run build:runtime` 仍提示既有 Vite 8 `inlineDynamicImports` deprecated warning。
+- 本轮未修改 runtime 阶段顺序、TypeScript 输出类型、validator 语义、orchestrator、wiki 写入层、pending persistence、legacy/default 兼容、fallback、字段映射、默认值填充、retry repair 或 parser sanitizer；未执行 `git commit` 或 `git push`。
+
+## 2026-06-14 - RPG Outline Brief Prompt Contract 修复
+
+- 修复 `outline_brief` runtime 报错：debug trace 显示 LLM 4 输出旧形状 `playerFacingBrief.allowedKnowledge/narrativeFocus/grantsPcKnowledge/lineTarget`，但 `validateOutlineBriefCompilerOutput()` 当前要求 `playerFacingBrief.summary/currentSceneFocus/visibilityScope/knowledgeScope/...`，因此在 `playerFacingBrief.summary` 首个必填字段处失败。
+- 根因记录：`outline-brief-interaction.ts` 的允许输出结构只写了 `PlayerFacingBrief`、`ParallelLineBrief`、`TensionBriefInput` 等抽象类型占位，未把当前 validator 接受的 JSON 字段展开给 LLM。
+- 修复 `src/lib/rpg-interactions/runtime/outline-brief-interaction.ts`：展开 `playerFacingBrief`、`parallelLineBrief`、`tensionBriefInput`、`pacingDirective`、`campaignDeltaRequirement` 和 `outlineImpactReport.reportId` 的返回契约，使 prompt contract 与 `OutlineBriefCompilerOutput` validator 对齐。
+- 增加 `src/lib/rpg-outline-brief.test.ts` 回归覆盖：prompt 必须包含展开字段且不再依赖裸类型占位；trace 旧形状输出会被 `parseRpgOutlineBriefOutput()` 拒绝，不做 auto-repair。
+- 验证通过：`npx.cmd vitest run src/lib/rpg-outline-brief.test.ts src/lib/rpg-interactions.test.ts`（2 files / 67 tests）；`npm.cmd run typecheck`；`npm.cmd run build:runtime`。`npm.cmd run build:runtime` 仍提示既有 Vite 8 `inlineDynamicImports` deprecated warning。
+- 本轮未修改 runtime 阶段顺序、`OutlineBriefCompilerOutput` 类型、validator 语义、wiki 写入层、legacy/default 兼容、fallback、字段映射、默认值填充或 parser sanitizer；未执行 `git commit` 或 `git push`。
+
+## 2026-06-14 - RPG Runtime HTTP Backstop Timer Cleanup
+
+- 修复 `streamChat()` HTTP/API provider 分支的 30 分钟 backstop timer 生命周期：正常流结束、HTTP error、空 body、fetch/network error、stream reader error、reasoning-only diagnostic、caller abort 和真实 timeout 路径都会清理 timer，并移除外部 abort listener。
+- 根因记录：Action Resolver 等 runtime LLM 交互发生业务错误后，Node worker 已写出 debug trace 并准备返回 `{ ok: false, error }`，但 `streamChat()` 未清理的 30 分钟 `setTimeout` 会让 Node 进程保持存活，Rust `rpg_runtime_run_turn` 继续等待子进程退出，前端 `invoke()` 不 settle，Runtime Panel 顶部就持续显示“正在执行回合……”。
+- 修复后业务错误应立即穿透到 Tauri invoke / Runtime Panel，现有 `RpgRuntimePanel` catch 路径会设置 `runtimeError` 并把 `isSubmitting` 置回 `false`；本轮未改 Rust worker timeout、Node worker stdout/stderr 协议或 UI 结构。
+- 增加 `src/lib/llm-client.test.ts` fake-timer 回归覆盖：成功 SSE stream、HTTP error、空 response body、stream reader failure、真实 30 分钟 request timeout 均不会遗留 pending timer；真实 timeout 文案保持 `Request timed out after 30 min...`。
+- 验证通过：`npx.cmd vitest run src/lib/llm-client.test.ts`（1 file / 12 tests）；`npx.cmd vitest run src/components/rpg/rpg-runtime-panel.test.tsx src/lib/rpg-runtime/runtime-controller-client.test.ts src/lib/rpg-runtime/node-worker/run-turn-worker.test.ts`（3 files / 23 tests）；`npm.cmd run typecheck`。
+- 本轮只修“业务错误传播被 timer 卡住”，未修 Action Resolver prompt 过大或 JSON 截断，未新增 retry、自动补全 JSON、fallback、legacy/default 兼容、旧路径保留或协议 repair；未执行 `git commit` 或 `git push`。
+
+## 2026-06-14 - RPG Runtime Debug Trace 实时桥接
+
+- 完成 RPG runtime debug trace 的实时桥接：Node worker 在内部 trace store 每次 publish 时向 stderr 输出带 `__RPG_RUNTIME_TRACE_EVENT__` 前缀的 JSONL event，Rust command 逐行读取 stderr 并通过 `app.emit("rpg-runtime:{runId}:trace", payload)` 转发给前端。
+- `runRpgRuntimeTurnFlowClient()` 现在为每次 runtime turn 生成 `runId`，先监听对应 Tauri trace event，再调用 `rpg_runtime_run_turn`；收到 `{ runId, sequence, state }` 后通过 `debugTraceSink.importState()` 实时同步 `currentTrace` / `lastTrace`。
+- `RpgRuntimeDebugTraceSink` 新增 `importState()`，用于精确导入 worker snapshot；旧 `importTrace()` 保留为单 trace helper。Debug Console 继续使用 `currentTrace ?? selectedPersistedTrace ?? lastTrace`，因此运行中可以导出当前 snapshot，完成后可以导出最终 trace。
+- worker stdout 最终响应协议已收窄为 `{ ok: true, result } | { ok: false, error }`，不再携带完整 `debugTrace`；实时事件是 debug trace 的权威传输通道，完成态 trace 由最后一次事件进入前端 store。
+- Rust command 继续要求 stdout 为单个 JSON object；非 trace stderr 仍收集为诊断，非法 trace event 只记录诊断，不中断成功 runtime turn。
+- 验证通过：`npm.cmd run typecheck`；`npx.cmd vitest run src/lib/rpg-runtime-debug-trace.test.ts src/lib/rpg-runtime-controller.test.ts src/lib/rpg-turn-orchestrator.test.ts src/lib/rpg-interactions.test.ts src/lib/rpg-outline-brief.test.ts src/lib/rpg-narration-generator.test.ts src/lib/rpg-import/runtime-update-apply.test.ts src/components/rpg/rpg-runtime-panel.test.tsx src/lib/rpg-runtime/runtime-controller-client.test.ts src/lib/rpg-runtime/node-worker/run-turn-worker.test.ts`（10 files / 144 tests）；`npm.cmd run build:runtime`；`npx.cmd vite build`；`cargo test parse_worker`（7 Rust tests）。`npm.cmd run build:runtime` 仍提示既有 Vite 8 `inlineDynamicImports` deprecated warning；`npx.cmd vite build` 仍提示既有 chunk / ineffective dynamic import warnings。
+- 本轮未把 runtime 逻辑重写为 Rust，未新增旧 `default` / legacy 兼容、迁移、fallback、协议 repair、自动吞错或旧路径保留；未执行 `git commit` 或 `git push`。
+
+## 2026-06-14 - RPG Runtime Flow 后端 Worker Phase 1
+
+- 完成“ Tauri command + Node runtime worker ”第一阶段：前端 RPG runtime panel 默认不再直接执行 `runRpgRuntimeTurnFlow`，而是通过 `runRpgRuntimeTurnFlowClient()` 调用 Tauri command `rpg_runtime_run_turn`。
+- 新增 Node worker 入口 `src/lib/rpg-runtime/node-worker/run-turn-worker.ts`，在 Node 侧复用现有 TypeScript `runRpgRuntimeTurnFlow`、LLM HTTP adapters、debug trace store、turn journal 与 pending update persistence。
+- 新增 Rust command `src-tauri/src/commands/rpg_runtime.rs`，固定启动打包后的 `dist-runtime/rpg-runtime-worker.mjs`，向 stdin 写入单个 JSON payload，要求 stdout 为单个 JSON object，并处理 worker 非零退出、超时、非法 stdout、stderr 记录与 Node/worker 路径解析。
+- 新增独立 runtime bundle 配置 `vite.runtime.config.ts` 与 `npm run build:runtime`，Tauri dev/build 已纳入 worker 构建和资源打包；前端 debug trace store 新增 `importTrace()`，用于接收 worker 完整返回的 trace。
+- `src/lib/rpg-import/runtime-update-apply.ts` 已改用 browser-safe `write-policy-client`，并补齐 real-fs test helper 的 `writeFileAtomic`，前端 production build 不再出现 `node:fs/promises` / `node:path` externalized warning。
+- 第一阶段明确只支持 HTTP/API LLM providers；`claude-code` / `codex-cli` 在 worker 内返回明确 unsupported error，后续需补 Node-native CLI transport 或单独后端通道。
+- 验证通过：`npm.cmd run typecheck`；`npx.cmd vitest run src/lib/rpg-runtime-debug-trace.test.ts src/lib/rpg-runtime-controller.test.ts src/lib/rpg-turn-orchestrator.test.ts src/lib/rpg-interactions.test.ts src/lib/rpg-outline-brief.test.ts src/lib/rpg-narration-generator.test.ts src/lib/rpg-import/runtime-update-apply.test.ts src/components/rpg/rpg-runtime-panel.test.tsx src/lib/rpg-runtime/runtime-controller-client.test.ts src/lib/rpg-runtime/node-worker/run-turn-worker.test.ts`（10 files / 143 tests）；`npm.cmd run build:runtime`；`npx.cmd vite build`；`cargo test parse_worker_stdout`（4 Rust tests）。
+- `npm.cmd run build:runtime` 当前仍提示 Vite 8 的 `inlineDynamicImports` deprecated warning；worker bundle 生成成功，后续可在确认 Vite/Rolldown `codeSplitting: false` 配置形态后清理该 warning。
+- 本轮未将 runtime 逻辑重写为 Rust，未新增旧 `default` / legacy 兼容、迁移、fallback、协议 repair、自动吞错或旧路径保留；未执行 `git commit` 或 `git push`。
+
+## 2026-06-13 - RPG Narration Lens 语义收窄 Phase 5
+
+- 完成 `docs/RPG_OUTLINE_KNOWLEDGE_BOUNDARY_REDESIGN_PLAN.md` Phase 5：保留 `playerVisibleLine` / `parallelLine` / `tensionLine` 现有 JSON 协议字段名，只收窄为当前回合 runtime / narration lens target。
+- `RPG_RUNTIME_SHARED_SCHEMA_GUIDANCE` 现在明确：三线不是 outline ownership、不是三条平等主线、也不要求每轮同步推进；`playerVisibleLine` 可在开局或低信息回合很窄，`parallelLine` 不授予 PC knowledge，`tensionLine` 只是关系/情绪/伏笔/节奏压力信号。
+- World Tick prompt 现在要求按本轮 lens 分类 `worldDeltas`，允许 `parallelLine` / `tensionLine` 数组为空或仅作为审计/压力信号存在，不得为了三线平等推进而补造 delta。
+- Recall Selector 与 Runtime Update Proposal prompt 现在统一说明 `lineTarget` 是 narration lens target / fallback，不是大纲归属；Runtime Update 写回仍由 `visibility`、`knowledgeScope`、`knowledgeClaims`、`happenedStatus` 和 `targetPath` 决定。
+- 增加回归断言覆盖 shared schema guidance、World Tick prompt、Recall prompt、Runtime Update Proposal prompt 的 narration-lens 语义；既有 `parallelLineText` 不授予 PC knowledge、`tensionBrief` 非普通事件事实边界保持不变。
+- 验证通过：`npx.cmd vitest run src/lib/rpg-world-tick-interaction.test.ts src/lib/rpg-world-tick-contract.test.ts src/lib/rpg-recall-selector.test.ts src/lib/rpg-outline-brief.test.ts src/lib/rpg-narration-generator.test.ts src/lib/rpg-runtime-update-proposal.test.ts src/lib/rpg-wiki-schema.test.ts`（7 files / 125 tests）；`npm.cmd run typecheck`。
+- 本轮未重命名 `playerVisibleLine` / `parallelLine` / `tensionLine`，未新增 `pcSceneLens` / `userDramaticLens` / `tensionPressureLens`，未改变 runtime JSON shape、持久化结构、UI 展示字段、wiki 写入策略、legacy/default 兼容、fallback、auto-repair 或 parser sanitizer；未执行 `git commit` 或 `git push`。
+
+## 2026-06-13 - RPG Actor Knowledge + Runtime Writeback Boundary Phase 3/4
+
+- 完成 `docs/RPG_OUTLINE_KNOWLEDGE_BOUNDARY_REDESIGN_PLAN.md` Phase 3 / Phase 4：runtime 现在有 actor-level knowledge metadata，并在 Runtime Update Proposal 进入 pending 前执行 actor writeback boundary validation。
+- 新增共享 actor metadata primitives：`RpgKnowledgeActorRef`、`RpgBeliefState`、`RpgRevealState`；runtime envelope 新增 `RpgKnowledgeClaim` 与 `RpgRevealGateRef`。
+- `RecalledMaterial`、`OutlineSlice`、`OutlineBriefReference`、`NarrationSourceRef` 与 `RuntimeUpdateSourceDelta` 现在可携带 `knowledgeClaims`；`RuntimeUpdateSourceDelta` 必须携带 `knowledgeClaims`、`revealGateRefs`，并可携带 `revealState`。
+- 默认 actor claim 派生只保留无歧义路径：`wiki/player/known_information.md` -> `pc`，`wiki/outlines/*` -> `gm` holder / `pc` non-holder，`wiki/characters/runtime/<id>.md` -> `npc:<id>`，`wiki/factions/runtime/<id>.md` -> `faction:<id>`；`relationships/runtime/*`、`plot-arcs/*` 与普通 `events/*` 不会从粗粒度 `knowledgeScope` 自动猜 holder。
+- Recall Selector、Outline Brief、Narration Generator 与 Runtime Update Proposal validation 已接入 actor-ref / claim validators；`npc_known` 若声明 actor knowledge，必须带具体 `npc:<id>` / `faction:<id>` / `group:<id>` holder。
+- Runtime Update Proposal validation 现在拒绝：没有具体 holder 的 `npc_known`；NPC-only / user-only / GM-only claim 写入 `wiki/player/known_information.md`；把 `parallelLineText` 写成 PC knowledge；NPC knowledge 写入不匹配的 `characters/runtime/<id>.md`；没有 holder/non-holder 或 belief 差异的 relationship information-gap；缺少 `revealGateRefs` / `revealState` 的 reveal-progress 写回；`events/*.md` 同时授予 PC knowledge 且没有独立合法 PC knowledge proposal；普通 proposal 写 `wiki/outlines/main.md`。
+- Deterministic `validateRpgRuntimeUpdateProposals()` 已同步 actor-boundary 检查，因此不安全 proposal 不会进入 pending staging；既有 content pollution 检查仍保留。
+- 验证通过：`npm.cmd run typecheck`；`npx.cmd vitest run src/lib/rpg-actor-knowledge.test.ts src/lib/rpg-recall-selector.test.ts src/lib/rpg-recall-selector-handoff.test.ts src/lib/rpg-outline-brief.test.ts src/lib/rpg-narration-generator.test.ts src/lib/rpg-runtime-update-proposal.test.ts src/lib/rpg-runtime-update-validation.test.ts src/lib/rpg-interactions.test.ts src/lib/rpg-wiki-schema.test.ts src/lib/rpg-runtime-controller.test.ts`（10 files / 200 tests）。
+- 本轮未新增 legacy/default 兼容、迁移、fallback、auto-repair、sanitizer、retry fallback 或 `wiki/outlines/main.md` 自动写回；未执行 `git commit` 或 `git push`。
+
+## 2026-06-13 - RPG 大纲知识边界 Phase 1/2
+
+- 完成 `docs/RPG_OUTLINE_KNOWLEDGE_BOUNDARY_REDESIGN_PLAN.md` Phase 1：`docs/RPG_WIKI_SCHEMA.md` 与 `docs/LLMWIKIRPG_FINAL_ARCHITECTURE.md` 已明确 `playerVisibleLine` / `parallelLine` / `tensionLine` 是每轮 brief / narration 的输出 lens，不是大纲结构或三条平等推进主线。
+- 文档已明确 `wiki/outlines/main.md` 是 GM Truth / Control Layer，承载 GM-only truth、Act Structure、Reveal Gates、Branch Conditions 和 Must Not Contradict；`wiki/outlines/progress.md` 承载 Current Stage、Completed / Skipped / Delayed Beats、Active Reveal Gates、Current Information Boundary 和 Next Useful Beats。
+- 文档已明确 `wiki/player/known_information.md` 只接收 PC 已知、PC 合理推断和 PC 明确误解；`parallelLineText`、真实用户可见但 PC 未知内容、NPC 未传递知识和 GM-only truth 不能自动写入。
+- 文档已明确 NPC 当前知识、误解、秘密、目标和对 PC 的判断进入 `wiki/characters/runtime/*.md`；关系信息差、未说出口情绪、信任门槛和揭示后果进入 `wiki/relationships/runtime/*.md`；伏笔状态、reveal progress、未解决压力和禁止过早解决的剧情压力进入 `wiki/plot-arcs/runtime/*.md`。
+- 完成 Phase 2 最小 runtime 协议调整：`RecalledMaterial` / `OutlineSlice` 新增可选 `outlineControl` metadata，包含 `controlKind`、`gmSummary`、`playerSafeSummary`、`actorKnowledgeRefs`、`revealGateRefs`、`mustNotRevealTo` 和 `boundaryNote`。
+- `controlledOutlineMaterials()` 现在按 section 生成 `outlineControl`，并将 `lineTarget` 作为 narration lens fallback，而不是把 `outlines/main.md` / `outlines/progress.md` 默认解释为 `tensionLine` 本体。
+- `buildOutlineSlices()` 现在为 outline slices 产出 GM control / reveal gate / branch condition / hard constraint / progress marker 元数据，并生成对应 reveal / branch refs 与 reveal policies。
+- Outline Brief prompt 已明确 `outlineSlices` 是 GM control / reveal gate / progress marker slices，`lineTarget` 不是大纲轴；模型不得把 GM-only truth、delayed reveal、`parallelLineText` 或 user-visible-PC-unknown 内容写入 `playerFacingBrief.allowedKnowledge`，`parallelLineBrief.grantsPcKnowledge` 仍必须为 `false`。
+- Outline Brief validator 已增加输入来源级防护：即使模型把 delayed outline reveal 谎称为 `pc_visible` / `pc_known`，只要输入 outline slice 标记了 PC forbidden boundary，也会拒绝进入 `playerFacingBrief.allowedKnowledge`。
+- 验证通过：`npm.cmd run typecheck`；`npx.cmd vitest run src/lib/rpg-outline-brief.test.ts src/lib/rpg-interactions.test.ts`；`npx.cmd vitest run src/lib/rpg-narration-generator.test.ts src/lib/rpg-runtime-update-proposal.test.ts src/lib/rpg-story-outline-regenerator.test.ts`；`npx.cmd vitest run src/lib/rpg-wiki-schema.test.ts`。
+- 本轮未执行 Phase 3 actor-level knowledge 元数据、Phase 4 runtime update 写回边界重整或 Phase 5 字段重命名；未新增 legacy/default 兼容、迁移、fallback、自动修复或旧路径保留；未执行 `git commit` 或 `git push`。
+
+## 2026-06-13 - RPG 大纲知识边界重设计计划
+
+- 新增 `docs/RPG_OUTLINE_KNOWLEDGE_BOUNDARY_REDESIGN_PLAN.md`，记录当前大纲三线模型的设计冲突与后续调整计划。
+- 计划将 `playerVisibleLine` / `parallelLine` / `tensionLine` 从“大纲本体的三条平等推进线”降级为每轮 narration / brief 的临时 lens。
+- 新设计核心改为四层：GM Truth Layer、Actor Knowledge Layer、Reveal Gate Layer、Narration Lens Layer。
+- 计划明确 `wiki/outlines/main.md` 承载 GM 全剧透控制层，`wiki/outlines/progress.md` 承载当前阶段、当前信息边界、active reveal gates 与下一步可承接 beat。
+- 计划明确 `wiki/player/known_information.md` 只能接收 PC 已知、PC 推断或 PC 误解；真实用户可见但 PC 未知的 `parallelLineText` 不得自动写入玩家知识。
+- 本轮为文档计划落地，未修改 runtime 代码、prompt、validator、写回策略、UI、测试或 legacy/default 兼容逻辑；未执行 `git commit` 或 `git push`。
+
+## 2026-06-13 - RPG World Tick runtimeDeltaRefs 短引用契约修复
+
+- 强化 World Tick prompt contract：所有名为 `runtimeDeltaRefs` 的字段（顶层与所有嵌套 delta 字段）都必须输出 `RuntimeDeltaRef[]`，数组元素必须是完整对象。
+- prompt 现在明确禁止 `runtimeDeltaRefs: ["ref-1"]`、字符串 ID、路径字符串、短引用，以及指向顶层 `runtimeDeltaRefs` 的别名引用；多个 delta 共享同一 ref 时也必须在各自 `delta.runtimeDeltaRefs` 中完整展开对象。
+- 修正 World Tick validator 的 `RuntimeDeltaRef` 错误路径：顶层仍报 `WorldTickResult.runtimeDeltaRefs[index]`，嵌套 delta 现在报真实字段路径，例如 `WorldTickResult.worldDeltas.playerVisibleLine[0].runtimeDeltaRefs[0]`。
+- 增加回归测试覆盖 prompt 禁止短引用说明、嵌套 `runtimeDeltaRefs: ["ref-1"]` 解析失败、以及错误信息包含真实嵌套路径；合法顶层 `runtimeDeltaRefs` 对象数组仍通过。
+- 验证通过：`npx.cmd vitest run src/lib/rpg-world-tick-interaction.test.ts src/lib/rpg-world-tick-contract.test.ts`；`npx.cmd vitest run src/lib/rpg-interactions.test.ts`；`npm.cmd run typecheck`。
+- 本轮未放宽 validator，未添加 fallback、repair、sanitizer、自动补全、字符串短引用映射或 legacy/default 兼容；未执行 `git commit` 或 `git push`。
+
+## 2026-06-13 - RPG Runtime wildcard/pathPattern 输出边界修复
+
+- 修复 Runtime 后续阶段同源的 path 协议边界：Recall Selector、Outline Brief、Story Outline Regenerator、Runtime Update Proposal 的 prompt 现在明确禁止把 wildcard/glob/category/pathPattern、目录路径或类别路径写入模型输出中的 `path` / `sourcePath` / `targetPath`。
+- Recall Selector prompt 现在明确 `selectedItems[].path` 和 `exclusions[].path` 必须逐字等于 `retrievalIndex[].path`，`exclusions[].sectionIds` 必须来自对应 `RetrievalIndexEntry.availableSections`；类别级“不召回某类材料”的说明只能写入 `warnings`，不能写入 `exclusions`。
+- Outline Brief 与 Story Outline Regenerator prompt 现在明确所有引用 path/id 必须来自结构化输入、knownReferences 或 runtime refs，禁止输出 `wiki/sources/*.md` 这类 glob/category 引用。
+- Runtime Update Proposal prompt 现在明确 `allowedTargets[].pathPattern` 只是本地匹配规则，不是可原样输出的 `targetPath`；`proposedWikiUpdates[].targetPath` 必须是具体文件路径。
+- `validateRpgRuntimeUpdateTarget()` 现在在匹配规则前拒绝任何包含 `*` 的实际 `targetPath`，因此 `wiki/events/*.md` 不能再作为真实更新目标穿过 `wiki/events/*.md` 规则；合法具体路径如 `wiki/events/scene-001.md` 仍然可通过。
+- 增加回归测试覆盖 Recall Selector exclusion wildcard、warnings-only 类别级说明、Outline Brief wildcard reference、Story Outline Regenerator wildcard outline/visibility refs、Runtime Update wildcard targetPath 与合法 concrete event target。
+- 验证通过：`npx.cmd vitest run src/lib/rpg-recall-selector.test.ts src/lib/rpg-outline-brief.test.ts src/lib/rpg-story-outline-regenerator.test.ts src/lib/rpg-runtime-update-proposal.test.ts src/lib/rpg-interactions.test.ts`；`npm.cmd run typecheck`。
+- 本轮未放宽 validator、未添加 parser sanitizer、retry repair、自动删除非法 exclusions、fallback 或 legacy/default 兼容；未改变 runtime JSON 类型结构；未执行 `git commit` 或 `git push`。
+
+## 2026-06-13 - RPG World Tick 输出契约展开修复
+
+- 修复 World Tick prompt 只列顶层 `WorldTickResult` 类型名、未展开嵌套字段和枚举的问题；真实模型不再需要凭类型名猜测 `WorldTickWorldDelta`、`pacingUpdate`、`gapState` 等结构。
+- World Tick prompt 现在明确列出 `WorldTickVisibilityMeta`、输出 `RuntimeDeltaRef`、`WorldTickDeltaBase`、`WorldTickWorldDelta`、clock update、settled event、information broadcast、reaction queue、pacing update、gap state、reference、warning 的字段契约。
+- 明确 `knowledgeSourceKind` 只能使用 `seen`、`heard`、`told`、`inferred`、`documented`、`memory`、`parallel_line`、`misread`、`unknown`；动作导致的推断也使用 `inferred`，不新增动作来源别名。
+- 明确 `WorldTickWorldDelta` 不复用 `PlayerActionDelta` 的 `positionChanges`、`resourceChanges`、`inventoryChanges`、`conditionChanges`、`relationshipSignals`、`sceneChanges` 等字段；输出必须使用 `summary`、`sourcePlayerDeltaIds`、`sourceClockIds`、`knowledgeEffects`。
+- 明确 `gapState` 是单个 `WorldTickGapState` 对象，输出 `RuntimeDeltaRef.sourceStage` 必须为 `worldTick`，避免模型复制输入的 Action Resolver refs。
+- 增加 World Tick prompt 回归断言和非法枚举别名解析测试，确认 `inferred_from_action`、`happened` 等发明值仍作为协议错误暴露，而不是 fallback 归一化。
+- 验证通过：`npx.cmd vitest run src/lib/rpg-world-tick-interaction.test.ts src/lib/rpg-world-tick-contract.test.ts`；`npx.cmd vitest run src/lib/rpg-interactions.test.ts`；`npm.cmd run typecheck`；`npm.cmd run test:mocks`。
+- 本轮未放宽 validator、未添加 parser sanitizer/retry repair/fallback，未改 UI、wiki write、pending/apply、legacy/default 兼容逻辑；未执行 `git commit` 或 `git push`。
+
+## 2026-06-13 - RPG Runtime JSON 输出契约修复与审计
+
+- 修复 Action Resolver prompt 中会诱导模型输出非法 JSON 的 `string | undefined` / `number | undefined` 契约文本；可选字段现在明确要求无值时省略整个 key。
+- Action Resolver 的 JSON 规则现在明确：只允许严格 JSON，禁止输出 `undefined`，且 `ActionResolution` 不允许用 `null` 代替缺失值。
+- 对齐 Action Resolver prompt 的 `costs`、`obstacles`、`directResults`、`references`、`warnings` 字段说明，使其使用当前 validator 字段名。
+- 增加 runtime prompt 契约审计测试，覆盖 Action Resolver、World Tick、Recall Selector、Outline Brief、Story Outline Regenerator、Narration Generator、Runtime Update Proposal 的实际 `systemPrompt + userPrompt`。
+- Runtime Update Proposal 中的 `"pacingUpdateProposal": null` 仍作为明确契约保留；其余审计禁止 `| undefined`、`: undefined`、`undefined,` 等 JSON 值位置的 undefined 泄漏。
+- 未新增任何自动替换 `undefined`、吞掉非法 JSON 或放宽 parser/validator 的 fallback；非法 JSON 仍暴露为协议错误。
+- 验证通过：`npx.cmd vitest run src/lib/rpg-action-resolver.test.ts src/lib/rpg-interactions.test.ts`；`npm.cmd run typecheck`；`npm.cmd run test:mocks`。
+- 本轮未改 UI、runtime 流程、pending/apply、write policy、debug trace schema、legacy/default 兼容逻辑；未执行 `git commit` 或 `git push`。
+
+## 2026-06-13 - RPG Runtime 英文提示词中文化
+
+- 已完成 RPG runtime 链路中的定点中文化：覆盖 LLM runtime prompts、runtime debug section 标题、runtime UI 面板文案，以及相关 warning/error 自然语言提示。
+- 本轮只翻译自然语言展示/提示内容；`wiki/...` 路径、JSON 字段名、枚举值、step id、类型/接口名、trace/persistence 协议字段保持不变。
+- 已同步更新 `src/lib/rpg-interactions/runtime/` 下各 interaction 的 `system` / `user` prompt 正文，以及 `src/lib/rpg-runtime/` / `src/components/rpg/` 中 runtime debug、持久化、面板态提示的英文文案。
+- 已更新与中文化直接相关的运行时测试断言，覆盖 prompt 标题、debug 标题、runtime UI 文案和 warning/error 提示。
+- 验证通过：`npm.cmd run typecheck`；`npx.cmd vitest run src/lib/rpg-action-resolver.test.ts src/lib/rpg-world-tick-interaction.test.ts src/lib/rpg-recall-selector.test.ts src/lib/rpg-outline-brief.test.ts src/lib/rpg-narration-generator.test.ts src/lib/rpg-runtime-update-proposal.test.ts src/lib/rpg-story-outline-regenerator.test.ts src/lib/rpg-runtime-debug-trace.test.ts src/lib/rpg-interactions.test.ts src/lib/rpg-runtime-persistence.test.ts src/components/rpg/rpg-runtime-panel.test.tsx src/components/rpg/rpg-runtime-debug-console.test.tsx src/components/rpg/rpg-play-panel.test.tsx src/components/rpg/pending-rpg-updates-panel.test.tsx`。
+- 本轮未引入 legacy/default 兼容分支、迁移路径、旧路径保留或 fallback。
+
+## 2026-06-13 - RPG Runtime Debug Console Phase 5
+
+- Implemented Phase 5 from `docs/RPG_RUNTIME_DEBUG_CONSOLE_PLAN.md`: manual runtime debug trace JSON export plus opt-in recent-trace persistence.
+- Added `src/lib/rpg-runtime/debug-trace-export.ts` with versioned `{ version: 1, exportedAt, trace }` JSON serialization, safe `rpg-runtime-trace-${safeTraceId}.json` filenames, and recursive redaction for `apiKey`, `authorization`, `headers`, `secret`, `token`, and `password` without mutating the in-memory trace.
+- Added `src/lib/rpg-runtime/debug-trace-persistence-client.ts` for browser-safe Tauri-command persistence under `${normalizedProjectPath}/.llm-wiki/runtime/debug-traces/`, including save, load, retention pruning, and clear-saved behavior.
+- Updated `RpgRuntimeDebugConsole` with compact toolbar controls for `Export`, `Persist`, retention `5 / 10 / 20`, saved trace summaries, saved trace selection/export, and `Clear Saved`.
+- Updated `RpgRuntimePanel` to inject debug trace export/persistence helpers, keep persistence policy in current panel session state, load saved traces when Debug opens or the project changes, and save each completed `lastTrace` at most once only after the user enables `Persist`.
+- Debug trace persistence remains default-off. Persistence/export failures produce warnings and do not interrupt runtime turns.
+- `Clear` still clears only in-memory current/last traces; `Clear Saved` only deletes trace JSON files inside `.llm-wiki/runtime/debug-traces/`.
+- Phase 5 does not change runtime behavior, wiki write strategy, pending/review/apply boundaries, LLM prompts, parsers, provider tokenization, or raw-output/prompt retention. Debug trace data is never written to `wiki/`.
+- Validation passed: `npm.cmd run typecheck`; `npx.cmd vitest run src/lib/rpg-runtime-debug-trace.test.ts src/lib/rpg-runtime-debug-trace-export.test.ts src/lib/rpg-runtime-debug-trace-persistence-client.test.ts src/components/rpg/rpg-runtime-debug-console.test.tsx src/components/rpg/rpg-runtime-panel.test.tsx` (5 files, 36 tests); `npm.cmd run test:mocks` (135 files, 1702 tests).
+- No legacy/default fallback, migration path, old-path preservation, git commit, or git push was added.
+
+## 2026-06-13 - RPG Runtime Debug Console Phase 3-4
+
+- Implemented Phase 3 and Phase 4 from `docs/RPG_RUNTIME_DEBUG_CONSOLE_PLAN.md` for structured runtime prompt sections and richer trace evidence.
+- Updated `docs/RPG_RUNTIME_DEBUG_CONSOLE_PLAN.md` so its implementation-status section now treats Phase 3 and Phase 4 as completed and leaves only Phase 5 as unexecuted.
+- Extended `RpgInteractionPrompt` with optional `debugSections` and added `src/lib/rpg-interactions/prompt-debug.ts` so runtime prompt builders generate final prompt text and debug sections from the same section source values.
+- Added semantic prompt sections for `action_resolver`, `world_tick`, `recall_selector`, `outline_brief`, `story_outline_regenerator`, `narration_generator`, and `runtime_update_proposal`.
+- Updated runtime trace conversion so `prompt.debugSections` are converted in order to `RpgRuntimeDebugSection` through the existing runtime token estimator; non-structured prompts still show the previous coarse `System Prompt` / `User Prompt` sections.
+- Enhanced trace details with parsed-output summaries, separate validation success / warnings / parse or validation failure sections, richer handoff summaries, and `Wiki Inputs / Source Paths` evidence sections built from existing input/result references without rereading files.
+- Added handoff summaries for world tick visible selection / post-action working state, recall handoff and recalled materials, outline brief output, story outline regenerator narration handoff, narration turn result / record, runtime update proposal audit outputs, deterministic validation, and pending persistence.
+- Updated focused tests to verify semantic prompt sections, debug-section prompt recomposition, prompt-section chars / estimated tokens, wiki source-path evidence, and raw-output / validation-error retention on malformed narration or parse failure.
+- Validation passed: `npm.cmd run typecheck`; `npx.cmd vitest run src/lib/rpg-runtime-debug-trace.test.ts src/lib/rpg-turn-orchestrator.test.ts src/components/rpg/rpg-runtime-debug-console.test.tsx src/components/rpg/rpg-runtime-panel.test.tsx src/lib/rpg-runtime-controller.test.ts src/lib/rpg-action-resolver.test.ts src/lib/rpg-world-tick-interaction.test.ts src/lib/rpg-recall-selector.test.ts src/lib/rpg-outline-brief.test.ts src/lib/rpg-narration-generator.test.ts src/lib/rpg-runtime-update-proposal.test.ts` (11 files, 149 tests); `npx.cmd vitest run src/lib/rpg-story-outline-regenerator.test.ts` (1 file, 14 tests); `npm.cmd run test:mocks` passed on rerun (133 files, 1689 tests) after an initial isolated `ingest-queue.integration.test.ts` round-trip failure that passed when rerun directly.
+- No runtime behavior, wiki write strategy, pending/review/apply boundary, debug trace persistence policy, legacy/default fallback, migration path, git commit, or git push was changed.
+
+## 2026-06-12 - RPG Runtime Debug Console Plan Completion Status Sync
+
+- Updated `docs/RPG_RUNTIME_DEBUG_CONSOLE_PLAN.md` to record that Phase 1 and Phase 2 have been completed in the current implementation.
+- Added an implementation-status section summarizing the delivered trace model, in-memory store, token estimator, `debugTraceSink` wiring, covered runtime stages, Debug Console UI entry, validation results, and known browser-verification limitation.
+- Added status notes under Phase 1 and Phase 2 only. Phase 3, Phase 4, and Phase 5 plan content remains unmodified and should still be treated as not executed.
+- Documentation-only sync; no source code, runtime behavior, wiki write strategy, persistence policy, tests, legacy/default fallback, git commit, or git push was changed in this follow-up.
+
+## 2026-06-12 - RPG Runtime Debug Trace and Console Phase 1-2
+
+- Implemented Phase 1 and Phase 2 from `docs/RPG_RUNTIME_DEBUG_CONSOLE_PLAN.md`: browser-safe in-memory runtime debug trace, coarse prompt/raw-output capture, per-stage status/timing/token estimates, and a dedicated Debug Console UI.
+- Added `src/lib/rpg-runtime/debug-trace.ts` with `RpgRuntimeDebugTrace`, `RpgRuntimeDebugStep`, `RpgRuntimeDebugSection`, `RpgRuntimeDebugError`, `estimatePromptTokens()`, canonical runtime step definitions, and an in-memory trace store.
+- Extended RPG runtime adapters with optional raw-output methods and implemented them in the LLM adapters so real LLM calls can expose raw text to the orchestrator without changing normal adapter return behavior.
+- Instrumented `runRpgTurn()` and `runRpgRuntimeTurnFlow()` at the current first-level runtime stages: `action_resolver`, `world_tick`, `recall_selector`, `outline_brief`, optional/skipped `story_outline_regenerator`, `narration_generator`, `runtime_update_proposal`, deterministic `runtime_update_validation`, and `pending_update_persistence`.
+- Internal builders remain nested under the owning stage's `Input Assembly` / `Handoff` sections; no builder is exposed as its own top-level debug module.
+- Added `RpgRuntimeDebugConsole` under `src/components/rpg/` and a Play/Debug view switch in `RpgRuntimePanel`; the console reads the current running trace and retained last trace from session memory, with manual clear.
+- Captured coarse `systemPrompt` / `userPrompt`, raw output, parsed output, validation sections, warnings, failure summaries, and estimated token counts. Phase 3 structured prompt sub-section refactoring was not started.
+- Recorded implementation differences from the plan baseline: most pre-existing LLM adapters returned parsed objects only, so optional raw-output methods were added at the RPG adapter layer; pending queue save still happens in the runtime panel helper, so the trace records both controller-side staging/journal persistence and panel-side `savePendingUpdates` handoff under the same persistence step.
+- Validation passed: `npm.cmd run typecheck`; `npx.cmd vitest run src/lib/rpg-runtime-debug-trace.test.ts src/components/rpg/rpg-runtime-debug-console.test.tsx src/components/rpg/rpg-runtime-panel.test.tsx src/lib/rpg-runtime-controller.test.ts src/lib/rpg-turn-orchestrator.test.ts` (5 files, 52 tests); `npm.cmd run test:mocks` (133 files, 1688 tests).
+- Attempted local Browser verification after starting Vite at `http://127.0.0.1:1420/`, but the in-app browser runtime was blocked by the Windows sandbox process-creation boundary (`CreateProcessAsUserW` permission failure). No browser-level visual verification was completed.
+- No debug trace is written to `wiki/` or persisted to disk. No wiki write strategy, runtime output behavior, pending review/apply boundary, legacy/default fallback, git commit, or git push was changed.
+
+## 2026-06-12 - RPG Runtime Debug Console Plan Chinese Translation
+
+- Translated `docs/RPG_RUNTIME_DEBUG_CONSOLE_PLAN.md` into Chinese while preserving the original structure, code examples, phase breakdown, and acceptance criteria.
+- This was a documentation-only localization update for the runtime debug console plan; no source code, runtime behavior, tests, schema constants, legacy/default fallback, git commit, or git push was changed.
+
+## 2026-06-12 - RPG Runtime Debug Console Plan
+
+- Added `docs/RPG_RUNTIME_DEBUG_CONSOLE_PLAN.md` as a phased implementation plan for a dedicated Runtime Debug Console.
+- The plan combines live runtime step status with per-step prompt inspection, raw LLM output, parsed output, validation results, handoff summaries, timings, warnings, and estimated token counts.
+- Refined the planned first-level module boundary so internal input builders such as `buildActionResolverInputFromWiki()` appear inside the owning runtime stage's `Input Assembly` section instead of becoming separate top-level debug modules.
+- The plan records that the current codebase has no provider-specific LLM tokenizer and recommends a first-version mixed character/token estimator for debug display only.
+- The recommended first implementation stage is a minimal live trace plus dedicated debug console UI, followed by structured prompt sections, output/validation/handoff detail, and optional explicit trace export/persistence.
+- Documentation-only update; no source code, runtime behavior, schema constants, tests, legacy/default fallback, git commit, or git push was changed.
+
+## 2026-06-12 - Wiki Preview Edit/Done Save Reliability
+
+- Fixed the wiki preview editor save path so clicking `Done` now waits for the immediate save attempt before leaving edit mode.
+- `WikiEditor` now treats `onSave` as async-capable, reads the live Milkdown editor state through `getMarkdown()` for immediate saves, shows a saving state, and keeps the user in edit mode with an inline error if the immediate save fails.
+- Added `resolveWikiEditorSaveBody()` so immediate saves prefer the live Milkdown markdown getter and only fall back to the cached body before the editor instance is ready.
+- `PreviewPanel` now writes edited markdown via `writeFileAtomic` instead of the non-atomic write command, updates the loaded-content snapshot only after a successful write, and surfaces saving/saved/failed state in the preview header.
+- Delayed auto-save failures now update visible save state without leaving an unhandled promise rejection.
+- Added focused tests for immediate editor save-body resolution and preview save helper behavior: no-op detection, successful atomic persistence with store sync, and failure behavior that does not mark content as loaded.
+- Validation passed: `npx.cmd vitest run src/components/editor/wiki-editor-save.test.ts src/components/layout/preview-panel.test.ts` (2 files, 5 tests); `npm.cmd run typecheck`.
+- Attempted local browser verification by starting Vite at `http://127.0.0.1:1420/`, but the in-app browser connection failed at the local browser-process sandbox boundary (`CreateProcessAsUserW` permission failure); no browser-level click-through confirmation was completed.
+- No legacy/default fallback, git commit, or git push was added.
+
+## 2026-06-12 - RPG Runtime Browser-Safe Persistence/Apply
+
+- Fixed the RPG runtime panel browser boundary so default UI dependencies no longer import Node-only `runtime-persistence.ts` or `write-policy.ts`.
+- Added shared browser-safe runtime persistence parsing/types in `src/lib/rpg-runtime/runtime-persistence-shared.ts`.
+- Added `src/lib/rpg-runtime/runtime-persistence-client.ts` for Tauri-command persistence under `projectPath/.llm-wiki/runtime/`, including `pending-updates.json`, `turn-records.jsonl`, and `apply-results.jsonl`.
+- Added shared write-policy result/content helpers in `src/lib/rpg-runtime/write-policy-shared.ts`.
+- Added `src/lib/rpg-runtime/write-policy-client.ts` so Apply accepted updates writes through `@/commands/fs` instead of `node:fs` / `node:path`.
+- Kept `src/lib/rpg-runtime/runtime-persistence.ts` and `src/lib/rpg-runtime/write-policy.ts` as Node-only implementations for existing Node/Vitest and import/apply contexts.
+- Updated RPG panel/play component imports to use client/shared/leaf modules rather than browser runtime imports from the Node-capable runtime barrel.
+- Validation passed: `npx.cmd vitest run src/lib/rpg-runtime-persistence.test.ts src/components/rpg/rpg-runtime-panel.test.tsx` (2 files, 23 tests); `npx.cmd vitest run src/lib/rpg-runtime-persistence-client.test.ts src/lib/rpg-runtime-write-policy-client.test.ts` (2 files, 6 tests); `npm.cmd run typecheck`.
+- Boundary check: `rg --encoding utf-8 "node:path|node:fs|node:fs/promises" src/components src/lib/rpg-runtime -n` now only reports explicit Node-only runtime modules (`recall-selector-handoff.ts`, `runtime-persistence.ts`, `write-policy.ts`), not the RPG runtime panel client dependency path.
+- Attempted local browser smoke via Vite at `http://127.0.0.1:5173/`, but the in-app browser connection failed at the local sandbox/browser-process boundary; no page-level visual confirmation was completed.
+- No legacy/default fallback, git commit, or git push was added.
+
+## 2026-06-12 - Source Ingest Prompt Target Policy Sync
+
+- Updated `src/lib/rpg-interactions/source-ingest/` prompts so ordinary Source Ingest now follows the current `source_ingest` target policy at the prompt layer.
+- `buildSourceIngestTargetPolicyGuidance()` remains the authoritative Source Ingest target policy renderer. It now lists allowed FILE targets, fixed world slots, fixed player slots, and REVIEW-only material categories without presenting forbidden `wiki/.../**` globs as candidate FILE paths.
+- `buildRpgDirectoryBoundaryGuidance()` now expands only source_ingest-allowed directory semantics. `current-scene`, `outlines`, `rules`, `style`, `memory`, `quests`, and runtime overlay targets are no longer expanded as directory boundary / FILE target hints.
+- Stage 1 / chunk analysis prompts now route current-scene, rules/style/memory/outlines, quests, and runtime-overlay material to REVIEW with the recommended mode instead of repeating forbidden path lists.
+- Stage 2 generation prompts now treat project schema as naming/format guidance only; schema text cannot reopen forbidden Source Ingest targets or override the Source Ingest Target Policy.
+- Frontmatter type guidance is now source-ingest-specific and does not advertise `current-scene` as an ordinary Source Ingest type.
+- `domain-guidance.ts` was retained and corrected so Fate/stay night scene/route/ending/epilogue guidance does not create any ordinary Source Ingest permission to write live current-scene.
+- Validation passed: `npx.cmd vitest run src/lib/ingest.prompt.test.ts src/lib/rpg-interactions.test.ts src/lib/rpg-wiki-schema.test.ts` (3 files, 110 tests).
+- No legacy/default fallback, git commit, or git push was added.
+
+## 2026-06-12 - RPG Merge Prompt Schema Boundary Sync
+
+- Updated `src/lib/rpg-interactions/merge/merge-policy.ts` so page merge prompts now expose target path, merge policy, schema slot metadata, write policy, and the category/base-runtime boundary.
+- Merge policy now recognizes fixed `wiki/world/*.md` and fixed `wiki/player/*.md` slots from the code-readable schema, `wiki/current-scene/scene_state.md`, `wiki/events/*.md`, `wiki/quests/*.md`, `wiki/outlines/progress.md`, runtime overlays, base `relationships/*.md`, base `plot-arcs/*.md`, and base stable entity pages.
+- Old arbitrary `wiki/world/<custom>.md` and `wiki/player/<custom>.md` paths now receive conservative generic guidance instead of being encouraged as normal fixed-slot targets.
+- Base `relationships/*.md` and `plot-arcs/*.md` prompts now explicitly route runtime relationship / plot-arc changes to `relationships/runtime/` and `plot-arcs/runtime/`; runtime overlays now get their own accepted-campaign-change prompts.
+- `current-scene/scene_state.md` prompt now emphasizes overwrite-only latest snapshot behavior; `events` prompt rejects attempted-not-confirmed, possible-future, and candidate-action material.
+- Tests updated for the new fixed-slot/runtime-overlay prompt coverage and for fixed player-slot examples instead of old `wiki/player/status.md`.
+- Validation passed: `npx.cmd vitest run src/lib/rpg-merge-policy.test.ts` (1 file, 33 tests); `npx.cmd vitest run src/lib/rpg-merge-policy.test.ts src/lib/rpg-merge-lint.test.ts src/lib/rpg-section-merge.test.ts src/lib/rpg-interactions.test.ts src/lib/page-merge.test.ts` (5 files, 117 tests); `npm.cmd run typecheck`.
+- No legacy/default fallback, git commit, or git push was added.
+
+## 2026-06-12 - RPG Schema Page Section Detail Sync
+
+- Updated `docs/RPG_WIKI_SCHEMA.md` so directory descriptions now name concrete page-level section kinds instead of only broad directory-level extraction categories.
+- Clarified fixed slot contracts for `world/`, `player/`, `outlines/`, `style/`, and `rules`, including the separate responsibilities of `outlines/main.md` and `outlines/progress.md`.
+- Added recommended section kinds for `sources`, `characters`, `locations`, `factions`, `items`, `plot-arcs`, `events`, `current-scene`, and `relationships`, including base/runtime overlay boundaries where relevant.
+- Documentation-only update; no source code, runtime behavior, schema constants, tests, legacy/default fallback, git commit, or git push was changed.
+
 ## 2026-06-12 - Runtime Review Fixes
 
 - Fixed Recall Selector validation so selected item visibility / knowledge scopes must match the retrieval index entry, selected sections must match their section scope boundary, returned recall budgets cannot exceed the local input budget, selected item / section counts are capped by the input budget, and `fullPage` is rejected when `input.recallPolicy.allowFullPageRead` is false.
@@ -1484,10 +1994,22 @@
 
 ## Last Executed Stage
 
+- 2026-06-14 `RPG Runtime Persistence Boundary Consolidation`: Phase G 已完成；Runtime controller 与 `runtime_update_apply stage_pending` 共用 `validateRpgRuntimePersistenceBoundary()`，pending 只从 gate accepted updates 生成，debug trace / turn journal 记录 persistence boundary summary；`apply_pending` 仍是最终文件系统写门并重查 target policy / wiki path containment。
+- 2026-06-14 `RPG Runtime Compact Handoff + Stage Compiler Slimming`: Phase E/F 已完成；Recall Selector / Outline Brief / Narration Generator / triggered Story Outline Regenerator prompt 默认使用 compact `TurnSemanticHandoff`，Action Resolver 与 Narration Generator 使用轻量 draft + 本地 compiler + 严格 canonical validator；Runtime Update Proposal / validation / persistence 仍保持 canonical-complete hard boundary。
+- 2026-06-14 `RPG Runtime Recall Slimming + WorldTickDraft Contract`: Stage 13-15 prompt 已加入 `.codex/stages/`；召回 scorer 改为正分 token 精确命中并过滤 0 分候选；Action Resolver / World Tick / Recall Selector 的噪声召回已收窄；World Tick 改为轻量 `WorldTickDraft` + 本地 compiler + 严格 canonical validator；真实 debug trace 的 `clockUpdates` 缺失失败模式与 Fate 噪声已记录。
+- 2026-06-14 `RPG Runtime Debug Trace 实时桥接`: Node worker 通过 stderr JSONL 输出 trace snapshot，Rust command 转发 per-run Tauri event，前端 client 实时同步 `currentTrace` / `lastTrace`，最终 stdout response 不再携带完整 debug trace。
+- 2026-06-14 `RPG Runtime Flow 后端 Worker Phase 1`: 前端 RPG runtime turn submission 已改为调用 Tauri command，Rust command 管理固定 Node worker，Node worker 复用现有 TypeScript runtime flow 并一次性返回 result + debug trace。
+- 2026-06-13 `RPG 大纲知识边界 Phase 1/2`: 完成 schema / architecture 文档对齐，并在 Outline Brief 输入模型中引入 outline control metadata、GM control / reveal gate prompt 边界与 delayed reveal 防泄漏校验。
+- 2026-06-13 `RPG 大纲知识边界重设计计划`: 新增 `docs/RPG_OUTLINE_KNOWLEDGE_BOUNDARY_REDESIGN_PLAN.md`，冻结将三线降级为 narration lens、改以 GM truth / actor knowledge / reveal gate / narration lens 处理大纲与知识隔离的后续计划。
+- 2026-06-13 `RPG Runtime Debug Console / Prompt Review Fix`: synced the remaining Chinese prompt regression tests, fixed Debug Console header export to use the currently displayed persisted trace, and kept failed debug trace saves retryable by not marking failed trace ids as saved.
 - Stage 6.15 `Runtime Update Validation v1`: single-pass runtime update proposals now pass through deterministic path-aware validation before pending staging; rejected proposals are skipped from pending and recorded in warnings/journal audit data.
 
 ## Next Stage Recommendation
 
+- Runtime 格式化瘦身后下一步建议：用真实项目重新跑一轮完整 runtime turn，比较 Phase E/F 后各 prompt section char 贡献、Action Resolver / Narration raw output parse/compile 成功率、Runtime Update Proposal canonical 完整性；若仍偏大，优先继续瘦 PreActionSnapshot / reader 输入和 Story Outline Regenerator prompt，而不是放宽 validator 或增加 repair fallback。
+- Runtime 瘦身后下一步建议：用新的 Stage 13-15 prompt 对真实项目再跑一轮 runtime turn，比较新 trace 的 Action Resolver / World Tick prompt chars、无关 Fate 召回命中数、WorldTickDraft 编译成功率；若仍偏大，优先继续瘦 `PreActionSnapshot` reader，而不是放宽 validator 或增加 repair fallback。
+- Runtime 后端化后续建议：实时 step progress 已通过 Tauri event 桥接补齐；下一步优先补 `claude-code` / `codex-cli` 的 Node-native CLI transport 或明确的后端 CLI command，另可清理 Vite runtime bundle 的 `inlineDynamicImports` deprecated warning。
+- Continue `docs/RPG_OUTLINE_KNOWLEDGE_BOUNDARY_REDESIGN_PLAN.md` with Phase 3 when ready: introduce actor-level knowledge / belief / holder metadata so the runtime can represent “某 NPC 知道、PC 不知道、另一 NPC 误解” beyond the current coarse `npc_known` scope.
 - New recommendation from the 2026-06-09 interaction-consolidation assessment: run `docs/RPG_LLM_INTERACTION_CONSOLIDATION_PLAN.md` before adding additional model-facing features. This should consolidate RPG prompt builders, output protocols, parsers, target policies, validation, and adapters under `src/lib/rpg-interactions/` so Context Compiler v1 and later derivation/outline stages do not add more prompt islands.
 - For the runtime-oriented ingest quality track in `docs/RPG_RUNTIME_ORIENTED_INGEST_PLAN.md`, the listed work is now complete through `Relationship/Tension Deriver v0`; choose a new follow-up track or evaluation pass before further implementation.
 - Use `docs/LLMWIKIRPG_FINAL_ARCHITECTURE.md` as the target architecture.

@@ -8,6 +8,7 @@ import type {
   WorldTickSelectedVisibleDelta,
   WorldTickVisibleSelection,
 } from "./types"
+import type { RpgHappenedStatus } from "../rpg-wiki-schema"
 
 export interface SelectWorldTickVisibleContentInput {
   actionResolution: ActionResolution
@@ -17,6 +18,44 @@ export interface SelectWorldTickVisibleContentInput {
 export interface BuildPostActionWorkingStateInput extends SelectWorldTickVisibleContentInput {
   submittedAction: SubmittedAction
   visibleSelection?: WorldTickVisibleSelection
+}
+
+export interface WorldTickSemanticHandoffEntry {
+  source:
+    | "actionResolution.directResult"
+    | "worldTick.playerVisibleLine"
+    | "worldTick.parallelLine"
+    | "worldTick.tensionLine"
+    | "worldTick.clockUpdate"
+    | "worldTick.settledOngoingEvent"
+    | "worldTick.informationBroadcast"
+    | "worldTick.reactionQueue"
+    | "worldTick.pacingUpdate"
+    | "worldTick.gapState"
+  sourceId: string
+  summary: string
+  happenedStatus: RpgHappenedStatus
+  affectedPaths: string[]
+}
+
+export interface WorldTickSemanticHandoff {
+  submittedActionId: string
+  actionSummary: string
+  timeAdvanceSummary: string
+  confirmed: WorldTickSemanticHandoffEntry[]
+  ongoing: WorldTickSemanticHandoffEntry[]
+  possibleFuture: WorldTickSemanticHandoffEntry[]
+  pcVisible: WorldTickSemanticHandoffEntry[]
+  userVisiblePcUnknown: WorldTickSemanticHandoffEntry[]
+  tensionAndGap: WorldTickSemanticHandoffEntry[]
+  pacingSummary: string
+  candidatePaths: string[]
+  warnings: string[]
+}
+
+export interface BuildWorldTickSemanticHandoffInput extends BuildPostActionWorkingStateInput {
+  visibleSelection: WorldTickVisibleSelection
+  postActionWorkingState: PostActionWorkingState
 }
 
 export function selectWorldTickVisibleContent(
@@ -172,6 +211,105 @@ export function buildPostActionWorkingState(input: BuildPostActionWorkingStateIn
     ]),
     warnings,
   }
+}
+
+export function buildWorldTickSemanticHandoff(input: BuildWorldTickSemanticHandoffInput): WorldTickSemanticHandoff {
+  const entries = collectSemanticEntries(input)
+  const pcVisibleIds = new Set(input.visibleSelection.currentSceneVisibleCandidates.map((candidate) => candidate.sourceId))
+  const pcUnknownIds = new Set(input.visibleSelection.parallelLensCandidates.map((candidate) => candidate.sourceId))
+  const tensionIds = new Set(input.visibleSelection.tensionCandidates.map((candidate) => candidate.sourceId))
+
+  return {
+    submittedActionId: input.submittedAction.id,
+    actionSummary: input.actionResolution.eventDraft.summary,
+    timeAdvanceSummary: input.worldTickResult.timeAdvance.appliedSummary,
+    confirmed: entries.filter((entry) => entry.happenedStatus === "confirmed_happened"),
+    ongoing: entries.filter((entry) => entry.happenedStatus === "ongoing"),
+    possibleFuture: entries.filter((entry) =>
+      entry.happenedStatus === "possible_future" || entry.happenedStatus === "intention_only"
+    ),
+    pcVisible: entries.filter((entry) => pcVisibleIds.has(entry.sourceId)),
+    userVisiblePcUnknown: entries.filter((entry) => pcUnknownIds.has(entry.sourceId)),
+    tensionAndGap: entries.filter((entry) => tensionIds.has(entry.sourceId)),
+    pacingSummary: input.postActionWorkingState.campaignDelta,
+    candidatePaths: input.postActionWorkingState.references,
+    warnings: input.postActionWorkingState.warnings,
+  }
+}
+
+function collectSemanticEntries(input: SelectWorldTickVisibleContentInput): WorldTickSemanticHandoffEntry[] {
+  return [
+    ...input.actionResolution.directResults.map((result): WorldTickSemanticHandoffEntry => ({
+      source: "actionResolution.directResult",
+      sourceId: result.resultId,
+      summary: result.summary,
+      happenedStatus: result.happenedStatus,
+      affectedPaths: [...result.affectedRefs],
+    })),
+    ...input.worldTickResult.worldDeltas.playerVisibleLine.map((delta): WorldTickSemanticHandoffEntry => ({
+      source: "worldTick.playerVisibleLine",
+      sourceId: delta.deltaId,
+      summary: delta.summary,
+      happenedStatus: delta.happenedStatus,
+      affectedPaths: [...delta.affectedPaths],
+    })),
+    ...input.worldTickResult.worldDeltas.parallelLine.map((delta): WorldTickSemanticHandoffEntry => ({
+      source: "worldTick.parallelLine",
+      sourceId: delta.deltaId,
+      summary: delta.summary,
+      happenedStatus: delta.happenedStatus,
+      affectedPaths: [...delta.affectedPaths],
+    })),
+    ...input.worldTickResult.worldDeltas.tensionLine.map((delta): WorldTickSemanticHandoffEntry => ({
+      source: "worldTick.tensionLine",
+      sourceId: delta.deltaId,
+      summary: delta.summary,
+      happenedStatus: delta.happenedStatus,
+      affectedPaths: [...delta.affectedPaths],
+    })),
+    ...input.worldTickResult.clockUpdates.map((clock): WorldTickSemanticHandoffEntry => ({
+      source: "worldTick.clockUpdate",
+      sourceId: clock.clockId,
+      summary: clock.reason,
+      happenedStatus: clock.happenedStatus,
+      affectedPaths: [...clock.affectedPaths],
+    })),
+    ...input.worldTickResult.settledOngoingEvents.map((event): WorldTickSemanticHandoffEntry => ({
+      source: "worldTick.settledOngoingEvent",
+      sourceId: event.eventId,
+      summary: event.summary,
+      happenedStatus: event.happenedStatus,
+      affectedPaths: [...event.affectedPaths],
+    })),
+    ...input.worldTickResult.informationBroadcast.map((broadcast): WorldTickSemanticHandoffEntry => ({
+      source: "worldTick.informationBroadcast",
+      sourceId: broadcast.broadcastId,
+      summary: broadcast.informationSummary,
+      happenedStatus: broadcast.happenedStatus,
+      affectedPaths: [...broadcast.affectedPaths],
+    })),
+    ...input.worldTickResult.reactionQueue.map((reaction): WorldTickSemanticHandoffEntry => ({
+      source: "worldTick.reactionQueue",
+      sourceId: reaction.reactionId,
+      summary: reaction.summary,
+      happenedStatus: reaction.happenedStatus,
+      affectedPaths: [...reaction.affectedPaths],
+    })),
+    {
+      source: "worldTick.pacingUpdate",
+      sourceId: input.worldTickResult.pacingUpdate.updateId,
+      summary: input.worldTickResult.pacingUpdate.campaignDelta,
+      happenedStatus: input.worldTickResult.pacingUpdate.happenedStatus,
+      affectedPaths: [...input.worldTickResult.pacingUpdate.affectedPaths],
+    },
+    {
+      source: "worldTick.gapState",
+      sourceId: input.worldTickResult.gapState.gapSignalId,
+      summary: input.worldTickResult.gapState.summary,
+      happenedStatus: input.worldTickResult.gapState.happenedStatus,
+      affectedPaths: [...input.worldTickResult.gapState.affectedPaths],
+    },
+  ]
 }
 
 function mergeRuntimeDeltaRefs(refs: ActionResolution["runtimeDeltaRefs"]): ActionResolution["runtimeDeltaRefs"] {

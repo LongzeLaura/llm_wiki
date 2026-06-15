@@ -14,6 +14,7 @@ export interface CreateLlmRpgActionResolverAdapterInput {
 
 export interface LlmRpgActionResolverAdapterOptions {
   requestOverrides?: RequestOverrides
+  repairRequestOverrides?: RequestOverrides
 }
 
 export function createLlmRpgActionResolverAdapter(
@@ -26,6 +27,16 @@ export function createLlmRpgActionResolverAdapter(
       if (promptInput) return actionResolverInteractionSpec.parseOutput(output, promptInput)
       return parseRpgActionResolverOutput(output)
     },
+    async resolveActionRawOutput(prompt) {
+      return collectRpgActionResolverOutput(input, options, prompt)
+    },
+    async repairActionResolutionRawOutput(prompt) {
+      return collectRpgActionResolverOutput(input, options, prompt, {
+        temperature: 0,
+        max_tokens: 1800,
+        ...options.repairRequestOverrides,
+      })
+    },
   }
 }
 
@@ -33,6 +44,7 @@ async function collectRpgActionResolverOutput(
   input: CreateLlmRpgActionResolverAdapterInput,
   options: LlmRpgActionResolverAdapterOptions,
   prompt: RpgActionResolverPrompt,
+  requestOverrides: RequestOverrides | undefined = options.requestOverrides,
 ): Promise<string> {
   let output = ""
   let streamError: Error | undefined
@@ -54,7 +66,7 @@ async function collectRpgActionResolverOutput(
         },
       },
       input.signal,
-      options.requestOverrides,
+      requestOverrides,
     )
   } catch (error) {
     if (input.signal?.aborted) {

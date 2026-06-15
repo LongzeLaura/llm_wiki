@@ -87,188 +87,206 @@ export async function streamChat(
   let combinedSignal = signal
   let timeoutController: AbortController | undefined
   let timeoutFired = false
+  let timeoutId: ReturnType<typeof setTimeout> | undefined
+  let signalAbortHandler: (() => void) | undefined
+
+  const clearBackstopTimeout = () => {
+    if (timeoutId !== undefined) {
+      clearTimeout(timeoutId)
+      timeoutId = undefined
+    }
+  }
 
   if (typeof AbortSignal.timeout === "function") {
     timeoutController = new AbortController()
-    const timeoutId = setTimeout(() => {
+    timeoutId = setTimeout(() => {
       timeoutFired = true
+      timeoutId = undefined
       timeoutController?.abort()
     }, timeoutMs)
 
     if (signal) {
-      signal.addEventListener("abort", () => {
-        clearTimeout(timeoutId)
+      signalAbortHandler = () => {
+        clearBackstopTimeout()
         timeoutController?.abort()
-      })
+      }
+      signal.addEventListener("abort", signalAbortHandler, { once: true })
     }
     combinedSignal = timeoutController.signal
   }
 
-  let response: Response
   try {
-    const body = providerConfig.buildBody(messages, requestOverrides)
-    const httpFetch = await getHttpFetch()
-    response = await httpFetch(providerConfig.url, {
-      method: "POST",
-      headers: providerConfig.headers,
-      body: JSON.stringify(body),
-      signal: combinedSignal,
-    })
-  } catch (err) {
-    if (signal?.aborted) {
-      onDone()
-      return
-    }
-    if (err instanceof Error && err.name === "AbortError") {
-      // Backstop timeout aborted the request (we tracked this via
-      // timeoutFired); treat it as a real timeout rather than a cancel.
-      if (timeoutFired) {
-        onError(new Error(`Request timed out after ${Math.round(timeoutMs / 60000)} min. Try a faster model or a smaller context.`))
-        return
-      }
-      onDone()
-      return
-    }
-    if (isFetchNetworkError(err)) {
-      if (timeoutFired) {
-        onError(new Error(`Request timed out after ${Math.round(timeoutMs / 60000)} min. Try a faster model or a smaller context.`))
-        return
-      }
-      // Fast fetch failure: DNS, TLS handshake, connection refused,
-      // wrong endpoint, CORS preflight rejection, etc. All webviews
-      // collapse this class of failure into an opaque error — point
-      // users at the likely cause (endpoint / key / connectivity).
-      onError(new Error(`Network error reaching ${providerConfig.url}. Check endpoint URL, API key, and connectivity.`))
-      return
-    }
-    onError(err instanceof Error ? err : new Error(String(err)))
-    return
-  }
-
-  if (!response.ok) {
-    let errorDetail = `HTTP ${response.status}: ${response.statusText}`
+    let response: Response
     try {
-      const body = await response.text()
-      if (body) errorDetail += ` — ${body}`
-    } catch {
-      // ignore body read failure
-    }
-    if (
-      response.status === 404 &&
-      (config.provider === "azure" ||
-        (config.provider === "custom" && isAzureOpenAiEndpoint(config.customEndpoint)))
-    ) {
-      onError(
-        new Error(
-          `${errorDetail} — Azure 404 usually means the deployment name is wrong. ` +
-            `Set Model to your Azure deployment name (not the model SKU), ` +
-            `and Endpoint to https://<resource>.openai.azure.com ` +
-            `or .../openai/deployments/<deployment-name>.`,
-        ),
-      )
+      const body = providerConfig.buildBody(messages, requestOverrides)
+      const httpFetch = await getHttpFetch()
+      response = await httpFetch(providerConfig.url, {
+        method: "POST",
+        headers: providerConfig.headers,
+        body: JSON.stringify(body),
+        signal: combinedSignal,
+      })
+    } catch (err) {
+      if (signal?.aborted) {
+        onDone()
+        return
+      }
+      if (err instanceof Error && err.name === "AbortError") {
+        // Backstop timeout aborted the request (we tracked this via
+        // timeoutFired); treat it as a real timeout rather than a cancel.
+        if (timeoutFired) {
+          onError(new Error(`Request timed out after ${Math.round(timeoutMs / 60000)} min. Try a faster model or a smaller context.`))
+          return
+        }
+        onDone()
+        return
+      }
+      if (isFetchNetworkError(err)) {
+        if (timeoutFired) {
+          onError(new Error(`Request timed out after ${Math.round(timeoutMs / 60000)} min. Try a faster model or a smaller context.`))
+          return
+        }
+        // Fast fetch failure: DNS, TLS handshake, connection refused,
+        // wrong endpoint, CORS preflight rejection, etc. All webviews
+        // collapse this class of failure into an opaque error — point
+        // users at the likely cause (endpoint / key / connectivity).
+        onError(new Error(`Network error reaching ${providerConfig.url}. Check endpoint URL, API key, and connectivity.`))
+        return
+      }
+      onError(err instanceof Error ? err : new Error(String(err)))
       return
     }
-    onError(new Error(errorDetail))
-    return
-  }
 
-  if (!response.body) {
-    onError(new Error("Response body is null"))
-    return
-  }
-
-  const reader = response.body.getReader()
-  let lineBuffer = ""
-
-  // Diagnostic counters. Some OpenAI-compatible endpoints stream
-  // chain-of-thought through a `reasoning_content` (DeepSeek-R1,
-  // Kimi K2.x) or `reasoning` (Qwen-flavored deployments) field
-  // and only put the actual answer in `delta.content` after
-  // thinking ends. Misbehaving endpoints sometimes emit kilobytes
-  // of reasoning and end the stream with no content at all,
-  // leaving the user with a silent empty analysis. We track the
-  // two channels separately so the stream-end path can tell the
-  // difference between "model said nothing" and "model thought
-  // out loud but never produced an answer". See reasoning-
-  // detector.ts.
-  let contentCharsEmitted = 0
-  let reasoningCharsObserved = 0
-  const recordToken = (text: string) => {
-    contentCharsEmitted += text.length
-    onToken(text)
-  }
-  const recordReasoning = (line: string) => {
-    const reasoningParts = extractReasoningTextFromLine(line)
-    for (const part of reasoningParts) {
-      callbacks.onReasoningToken?.(part)
+    if (!response.ok) {
+      let errorDetail = `HTTP ${response.status}: ${response.statusText}`
+      try {
+        const body = await response.text()
+        if (body) errorDetail += ` — ${body}`
+      } catch {
+        // ignore body read failure
+      }
+      if (
+        response.status === 404 &&
+        (config.provider === "azure" ||
+          (config.provider === "custom" && isAzureOpenAiEndpoint(config.customEndpoint)))
+      ) {
+        onError(
+          new Error(
+            `${errorDetail} — Azure 404 usually means the deployment name is wrong. ` +
+              `Set Model to your Azure deployment name (not the model SKU), ` +
+              `and Endpoint to https://<resource>.openai.azure.com ` +
+              `or .../openai/deployments/<deployment-name>.`,
+          ),
+        )
+        return
+      }
+      onError(new Error(errorDetail))
+      return
     }
-  }
 
-  try {
-    while (true) {
-      const { done, value } = await reader.read()
+    if (!response.body) {
+      onError(new Error("Response body is null"))
+      return
+    }
 
-      if (done) {
-        if (lineBuffer.trim()) {
-          const trimmed = lineBuffer.trim()
+    const reader = response.body.getReader()
+    let lineBuffer = ""
+
+    // Diagnostic counters. Some OpenAI-compatible endpoints stream
+    // chain-of-thought through a `reasoning_content` (DeepSeek-R1,
+    // Kimi K2.x) or `reasoning` (Qwen-flavored deployments) field
+    // and only put the actual answer in `delta.content` after
+    // thinking ends. Misbehaving endpoints sometimes emit kilobytes
+    // of reasoning and end the stream with no content at all,
+    // leaving the user with a silent empty analysis. We track the
+    // two channels separately so the stream-end path can tell the
+    // difference between "model said nothing" and "model thought
+    // out loud but never produced an answer". See reasoning-
+    // detector.ts.
+    let contentCharsEmitted = 0
+    let reasoningCharsObserved = 0
+    const recordToken = (text: string) => {
+      contentCharsEmitted += text.length
+      onToken(text)
+    }
+    const recordReasoning = (line: string) => {
+      const reasoningParts = extractReasoningTextFromLine(line)
+      for (const part of reasoningParts) {
+        callbacks.onReasoningToken?.(part)
+      }
+    }
+
+    try {
+      while (true) {
+        const { done, value } = await reader.read()
+
+        if (done) {
+          if (lineBuffer.trim()) {
+            const trimmed = lineBuffer.trim()
+            reasoningCharsObserved += countReasoningCharsInLine(trimmed)
+            recordReasoning(trimmed)
+            const token = providerConfig.parseStream(trimmed)
+            if (token !== null) recordToken(token)
+          }
+          break
+        }
+
+        const [lines, remaining] = parseLines(value, lineBuffer)
+        lineBuffer = remaining
+
+        for (const line of lines) {
+          const trimmed = line.trim()
+          if (!trimmed) continue
           reasoningCharsObserved += countReasoningCharsInLine(trimmed)
           recordReasoning(trimmed)
           const token = providerConfig.parseStream(trimmed)
           if (token !== null) recordToken(token)
         }
-        break
       }
 
-      const [lines, remaining] = parseLines(value, lineBuffer)
-      lineBuffer = remaining
-
-      for (const line of lines) {
-        const trimmed = line.trim()
-        if (!trimmed) continue
-        reasoningCharsObserved += countReasoningCharsInLine(trimmed)
-        recordReasoning(trimmed)
-        const token = providerConfig.parseStream(trimmed)
-        if (token !== null) recordToken(token)
+      // Stream ended cleanly. If the model produced thinking tokens
+      // but no actual answer, surface that as a clear diagnostic
+      // instead of letting the caller silently see "" (which usually
+      // surfaces several layers up as "analysis not available" with
+      // no clue why). Threshold guards against single-stray-byte
+      // false positives from spurious empty `reasoning:""` deltas.
+      const REASONING_DIAGNOSTIC_THRESHOLD = 200
+      if (
+        contentCharsEmitted === 0 &&
+        reasoningCharsObserved >= REASONING_DIAGNOSTIC_THRESHOLD
+      ) {
+        onError(
+          new Error(
+            `Model produced ${reasoningCharsObserved.toLocaleString()} characters of reasoning / chain-of-thought, but no actual response content. ` +
+            `This usually means the endpoint hit a thinking-token limit, the model didn't transition from thinking to answering, ` +
+            `or the endpoint is misbehaving (the official Anthropic / OpenAI APIs don't have this issue). ` +
+            `Try a shorter input, increase max_tokens, or switch to a different model in Settings.`,
+          ),
+        )
+        return
       }
-    }
 
-    // Stream ended cleanly. If the model produced thinking tokens
-    // but no actual answer, surface that as a clear diagnostic
-    // instead of letting the caller silently see "" (which usually
-    // surfaces several layers up as "analysis not available" with
-    // no clue why). Threshold guards against single-stray-byte
-    // false positives from spurious empty `reasoning:""` deltas.
-    const REASONING_DIAGNOSTIC_THRESHOLD = 200
-    if (
-      contentCharsEmitted === 0 &&
-      reasoningCharsObserved >= REASONING_DIAGNOSTIC_THRESHOLD
-    ) {
-      onError(
-        new Error(
-          `Model produced ${reasoningCharsObserved.toLocaleString()} characters of reasoning / chain-of-thought, but no actual response content. ` +
-          `This usually means the endpoint hit a thinking-token limit, the model didn't transition from thinking to answering, ` +
-          `or the endpoint is misbehaving (the official Anthropic / OpenAI APIs don't have this issue). ` +
-          `Try a shorter input, increase max_tokens, or switch to a different model in Settings.`,
-        ),
-      )
-      return
-    }
-
-    onDone()
-  } catch (err) {
-    if (err instanceof Error && (err.name === "AbortError" || (signal?.aborted))) {
       onDone()
-      return
+    } catch (err) {
+      if (err instanceof Error && (err.name === "AbortError" || (signal?.aborted))) {
+        onDone()
+        return
+      }
+      if (isFetchNetworkError(err)) {
+        // Stream reader threw a network error mid-response (connection
+        // dropped, server closed early, network blip). Same message
+        // regardless of whether the webview is WebKit or Chromium.
+        onError(new Error("Connection lost during streaming. Try again."))
+        return
+      }
+      onError(err instanceof Error ? err : new Error(String(err)))
+    } finally {
+      reader.releaseLock()
     }
-    if (isFetchNetworkError(err)) {
-      // Stream reader threw a network error mid-response (connection
-      // dropped, server closed early, network blip). Same message
-      // regardless of whether the webview is WebKit or Chromium.
-      onError(new Error("Connection lost during streaming. Try again."))
-      return
-    }
-    onError(err instanceof Error ? err : new Error(String(err)))
   } finally {
-    reader.releaseLock()
+    clearBackstopTimeout()
+    if (signal && signalAbortHandler) {
+      signal.removeEventListener("abort", signalAbortHandler)
+    }
   }
 }

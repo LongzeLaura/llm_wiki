@@ -10,6 +10,14 @@ export interface RpgStoryOutlineRegeneratorAdapter {
     prompt: RpgStoryOutlineRegeneratorPrompt,
     promptInput: StoryOutlineRegeneratorInput,
   ): Promise<StoryOutlineRegeneratorOutput>
+  regenerateOutlineRawOutput?(
+    prompt: RpgStoryOutlineRegeneratorPrompt,
+    promptInput: StoryOutlineRegeneratorInput,
+  ): Promise<string>
+  repairStoryOutlineRegeneratorRawOutput?(
+    prompt: RpgStoryOutlineRegeneratorPrompt,
+    promptInput: StoryOutlineRegeneratorInput,
+  ): Promise<string>
 }
 
 export function createFixtureStoryOutlineRegeneratorAdapter(

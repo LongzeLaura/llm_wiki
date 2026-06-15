@@ -1,9 +1,11 @@
 import type { RpgInteractionPrompt } from "../interaction-spec"
 import type { BuildRuntimeUpdateInteractionInput, RuntimeUpdateInteractionResult } from "./runtime-update-interaction"
 import { runtimeUpdateInteractionSpec } from "./runtime-update-interaction"
+import { validateRuntimeUpdateProposalResult } from "./runtime-update-proposal-validation"
 
 export interface RpgRuntimeUpdateInteractionAdapter {
   generateUpdateProposal(prompt: RpgInteractionPrompt): Promise<string>
+  repairUpdateProposalRawOutput?(prompt: RpgInteractionPrompt): Promise<string>
 }
 
 export interface RpgRuntimeUpdateProposalAdapter {
@@ -27,8 +29,8 @@ export function createFixtureRuntimeUpdateProposalAdapter(
     async generateRuntimeUpdateProposal(input) {
       const prompt = runtimeUpdateInteractionSpec.buildPrompt(input)
       void prompt
-      const rawOutput = typeof output === "string" ? output : JSON.stringify(output)
-      return runtimeUpdateInteractionSpec.parseOutput(rawOutput, input)
+      if (typeof output !== "string") return validateRuntimeUpdateProposalResult(output, input)
+      return runtimeUpdateInteractionSpec.parseOutput(output, input)
     },
   }
 }

@@ -82,6 +82,25 @@ export type RpgKnowledgeScope =
   | "user_only"
   | "gm_only"
   | "unknown_to_pc"
+export type RpgKnowledgeActorRef =
+  | "pc"
+  | "user"
+  | "gm"
+  | `npc:${string}`
+  | `faction:${string}`
+  | `group:${string}`
+export type RpgBeliefState =
+  | "known"
+  | "suspected"
+  | "inferred"
+  | "misunderstood"
+  | "unknown"
+export type RpgRevealState =
+  | "hidden"
+  | "hinted"
+  | "partially_revealed"
+  | "revealed"
+  | "forbidden"
 export type RpgKnowledgeSourceKind =
   | "seen"
   | "heard"
@@ -139,6 +158,8 @@ export interface RpgRuntimeSharedSchemaGuidance {
   usePurposes: readonly RpgUsePurpose[]
   visibilityScopes: readonly RpgVisibilityScope[]
   knowledgeScopes: readonly RpgKnowledgeScope[]
+  beliefStates: readonly RpgBeliefState[]
+  revealStates: readonly RpgRevealState[]
   knowledgeSourceKinds: readonly RpgKnowledgeSourceKind[]
   happenedStatuses: readonly RpgHappenedStatus[]
   deltaSourceStages: readonly RpgRuntimeDeltaSourceStage[]
@@ -293,7 +314,7 @@ export const RPG_WIKI_SCHEMA = [
       { name: "abilities", description: "Abilities, skills, constraints, and current usable powers." },
       { name: "inventory", description: "Equipment, backpack contents, resources, and important possessions." },
       { name: "state", description: "Current location, condition, goals, promises, permissions, and consequences caused by the player." },
-      { name: "knowledge", description: "Information the player knows, and asymmetric information relevant to play." },
+      { name: "knowledge", description: "Only PC-known, PC-inferred, suspected, or explicitly misunderstood information. GM-only truth, NPC-only knowledge, parallelLineText, and user-visible-PC-unknown material must not be written here automatically." },
     ],
     exclude: [
       "Raw player utterance log",
@@ -301,9 +322,10 @@ export const RPG_WIKI_SCHEMA = [
       "Original/canon characters unless the source explicitly says they are the current RPG player character",
       "Original protagonists, POV characters, or game-controllable characters treated as player by default",
       "Unaccepted plans that have not affected story state",
+      "GM-only outline truth, delayed reveals, NPC-only knowledge, parallelLineText, or user-visible-PC-unknown material treated as PC knowledge",
     ],
     updateStrategy: "merge",
-    recommendedGranularity: "Use one main player page first, optionally split profile, abilities, inventory, goals, and known information.",
+    recommendedGranularity: "Use the fixed player slots: player.md, abilities.md, inventory.md, goals.md, and known_information.md. known_information.md is only for PC knowledge, PC inference/suspicion, and PC misunderstanding.",
   }),
   defineSchema("locations", {
     extractionGoal: "Capture important or repeatedly referenced base places, scenes, spatial relationships, stable access conditions, and source-supported location facts. Static ingest writes these stable facts to `wiki/locations/`; runtime agents should write temporary danger, occupants, damage, clues, access changes, or current atmosphere to `wiki/locations/runtime/` overlays. After character, event, and relationship extraction, do a secondary scan for plot-relevant locations that were only mentioned indirectly.",
@@ -345,15 +367,15 @@ export const RPG_WIKI_SCHEMA = [
     recommendedGranularity: "One base page per important item; ordinary items may be grouped into inventory pages. Static ingest should update the base page; runtime/current campaign state should be placed in the matching `wiki/items/runtime/` overlay.",
   }),
   defineSchema("plot-arcs", {
-    extractionGoal: "Maintain story structure, unresolved questions, conflicts, foreshadowing, constraints, and possible development. Multi-event routes, storyline overviews, and long-span timelines belong here unless they are deliberately split into discrete events.",
+    extractionGoal: "Maintain story structure, unresolved questions, conflicts, foreshadowing, reveal progress, constraints, and possible development. Multi-event routes, storyline overviews, and long-span timelines belong here unless they are deliberately split into discrete events.",
     fields: [
       { name: "arcName", description: "Name and type of the plot line." },
       { name: "stage", description: "Current narrative stage and already established key nodes." },
-      { name: "openQuestions", description: "Unresolved mysteries, foreshadowing, and pending conflicts." },
+      { name: "openQuestions", description: "Unresolved mysteries, foreshadowing, reveal progress, and pending conflicts." },
       { name: "dependencies", description: "Key characters, locations, items, factions, and conditions needed to advance." },
-      { name: "constraints", description: "Narrative constraints and recommended next developments." },
+      { name: "constraints", description: "Narrative constraints, forbidden early resolutions, and recommended next developments." },
     ],
-    exclude: ["Every happened event detail", "Confirmed timeline facts without plot relevance", "Future suggestions written as if already happened"],
+    exclude: ["Every happened event detail", "Confirmed timeline facts without plot relevance", "Future suggestions written as if already happened", "GM-only reveals or unchosen options written as confirmed events"],
     updateStrategy: "merge",
     recommendedGranularity: "One page per important main arc, side arc, route, relationship arc, mystery, conflict, or other multi-event narrative structure.",
   }),
@@ -397,13 +419,13 @@ export const RPG_WIKI_SCHEMA = [
     recommendedGranularity: "The runtime apply path uses the exact single scene snapshot file current-scene/scene_state.md. Ordinary ingest must route source-described scenes, endings, epilogues, and summaries to events, plot-arcs, locations, characters, relationships, player, world, or sources instead of current-scene.",
   }),
   defineSchema("relationships", {
-    extractionGoal: "Track relationship state, trust, tension, conflict, dependency, misunderstandings, and relationship changes.",
+    extractionGoal: "Track relationship state, trust, tension, conflict, dependency, misunderstandings, information gaps, unspoken emotions, trust gates, reveal consequences, and relationship changes.",
     fields: [
       { name: "parties", description: "Relationship participants or group." },
       { name: "type", description: "Alliance, rivalry, romance, teacher-student, master-servant, suspicion, protection, or similar." },
-      { name: "state", description: "Current trust, intimacy, conflict, dependency, misunderstandings, and unspoken feelings." },
+      { name: "state", description: "Current trust, intimacy, conflict, dependency, misunderstandings, information gaps, unspoken feelings, and reveal consequences." },
       { name: "history", description: "Important shared experiences and relationship-change nodes." },
-      { name: "constraints", description: "Future directions and changes that require buildup or must not happen abruptly." },
+      { name: "constraints", description: "Future directions, trust thresholds, reveal consequences, and changes that require buildup or must not happen abruptly." },
     ],
     exclude: ["Duplicate full character profiles", "One-off interactions with no relationship impact", "Event transcript details better stored in events"],
     updateStrategy: "merge",
@@ -794,6 +816,22 @@ const RPG_RUNTIME_KNOWLEDGE_SCOPES = [
   "unknown_to_pc",
 ] as const satisfies readonly RpgKnowledgeScope[]
 
+const RPG_RUNTIME_BELIEF_STATES = [
+  "known",
+  "suspected",
+  "inferred",
+  "misunderstood",
+  "unknown",
+] as const satisfies readonly RpgBeliefState[]
+
+const RPG_RUNTIME_REVEAL_STATES = [
+  "hidden",
+  "hinted",
+  "partially_revealed",
+  "revealed",
+  "forbidden",
+] as const satisfies readonly RpgRevealState[]
+
 const RPG_RUNTIME_KNOWLEDGE_SOURCE_KINDS = [
   "seen",
   "heard",
@@ -860,6 +898,8 @@ export const RPG_RUNTIME_SHARED_SCHEMA_GUIDANCE = {
   usePurposes: RPG_RUNTIME_USE_PURPOSES,
   visibilityScopes: RPG_RUNTIME_VISIBILITY_SCOPES,
   knowledgeScopes: RPG_RUNTIME_KNOWLEDGE_SCOPES,
+  beliefStates: RPG_RUNTIME_BELIEF_STATES,
+  revealStates: RPG_RUNTIME_REVEAL_STATES,
   knowledgeSourceKinds: RPG_RUNTIME_KNOWLEDGE_SOURCE_KINDS,
   happenedStatuses: RPG_RUNTIME_HAPPENED_STATUSES,
   deltaSourceStages: RPG_RUNTIME_DELTA_SOURCE_STAGES,
@@ -868,6 +908,10 @@ export const RPG_RUNTIME_SHARED_SCHEMA_GUIDANCE = {
   reviewItemKinds: RPG_REVIEW_ITEM_KINDS,
   guidance: [
     "Keep NarrativeLine separate from UsePurpose so outlineControl, ruleCheck, recall, narration, and writeback do not masquerade as story lines.",
+    "playerVisibleLine, parallelLine, and tensionLine are current-turn runtime/narration lens targets kept for the JSON protocol; they are not outline ownership, not equal story axes, and not a requirement to advance three story lines in parallel.",
+    "playerVisibleLine means the PC can currently see, hear, know, misunderstand, or reasonably infer it; this lens may be narrow at campaign start or in low-information turns.",
+    "parallelLine means the real user or GM may see it while the PC does not know it; display through this lens never grants PC knowledge.",
+    "tensionLine means relationship, emotion, foreshadowing, pacing, or plot-pressure signal for handoff/review; it is not an ordinary event fact by itself.",
     "Use VisibilityScope, KnowledgeScope, and KnowledgeSourceKind together whenever runtime output may affect player knowledge or offscreen visibility.",
     "Treat HappenedStatus as the event writeback gate; only confirmed_happened can create events/ facts.",
     "Attach RuntimeDeltaRef to reusable runtime changes so later writeback can trace structured deltas instead of reverse-engineering facts from prose.",
@@ -888,7 +932,7 @@ export const RPG_RUNTIME_DELTA_REF_FIELDS = [
   { name: "sourceStage", description: "Stage that produced the delta: actionResolution, worldTick, recallSelection, outlineBrief, outlineRegeneration, turnNarration, or consistencyValidation." },
   { name: "sourcePath", description: "Path or record pointer for the turn record, journal entry, `.llm-wiki/runtime/` metadata, or wiki source that supports this delta." },
   { name: "summary", description: "Brief human-readable summary of the runtime change." },
-  { name: "narrativeLine", description: "Narrative line affected by the delta: playerVisibleLine, parallelLine, or tensionLine." },
+  { name: "narrativeLine", description: "Current-turn narration lens target affected by the delta: playerVisibleLine, parallelLine, or tensionLine. This is not outline ownership or a parallel story axis." },
   { name: "usePurpose", description: "Why the delta is being consumed: actionResolution, worldTick, recall, outlineControl, ruleCheck, narration, writeback, reviewOnly, or journalOnly." },
   { name: "happenedStatus", description: "Whether the delta is attempted_not_confirmed, confirmed_happened, ongoing, blocked, failed, possible_future, intention_only, or misunderstanding." },
 ] as const satisfies readonly RpgWikiFieldDefinition[]
@@ -907,7 +951,7 @@ export const RPG_CLOCK_STATE_FIELDS = [
   { name: "clockId", description: "Stable id for a countdown, pressure clock, pacing clock, or ongoing timed process." },
   { name: "clockKind", description: "Countdown, pacingDebt, worldClock, relationshipPressure, investigationClock, combatClock, or equivalent controlled kind." },
   { name: "state", description: "Current visible state, progress, threshold, paused/triggered status, and next-turn summary." },
-  { name: "narrativeLine", description: "Line that owns or primarily exposes the clock: playerVisibleLine, parallelLine, or tensionLine." },
+  { name: "narrativeLine", description: "Current-turn lens that primarily exposes the clock: playerVisibleLine, parallelLine, or tensionLine; this does not make the clock an outline axis." },
   { name: "visibilityScope", description: "Who can perceive or use the clock state." },
   { name: "sourceDeltas", description: "RuntimeDeltaRef ids that changed the clock this turn." },
 ] as const satisfies readonly RpgWikiFieldDefinition[]
@@ -916,6 +960,8 @@ export const RPG_WORLD_TICK_SCHEMA_GUIDANCE = [
   "World Tick consumes ActionResolution and ActionResolution.playerActionDelta directly; playerActionDelta is the canonical player-action-only delta.",
   "World Tick must not re-adjudicate player action success, reinterpret directResults into player facts, write wiki files, create player-facing narration, generate nextActionOptions, run Recall Selector, run Outline Brief, or connect itself to the orchestrator in this contract stage.",
   "World Tick advances only the resolved timeDelta interval: world clocks/countdowns, ongoing events, information broadcasts, NPC reactions, pacing pressure, and preliminary gap signals.",
+  "World Tick still returns worldDeltas.playerVisibleLine, worldDeltas.parallelLine, and worldDeltas.tensionLine for the current JSON protocol, but those arrays are current-turn runtime/narration lens buckets, not equal outline axes or synchronized story lines.",
+  "A low-information turn may have a narrow playerVisibleLine and empty parallelLine or tensionLine arrays; do not invent material just to keep all three lens buckets active.",
   "Parallel-line display is not PC knowledge; every world delta, broadcast, reaction, clock update, and gap signal needs visibility, knowledge, happenedStatus, affectedPaths, and RuntimeDeltaRef metadata.",
   "possible_future, intention_only, and attempted_not_confirmed remain non-event statuses and must not be promoted into confirmed events.",
   "current-scene stores only the next-turn clock/countdown/pacing summary; long-lived clock authority belongs in runtime overlays or the corresponding state layer after pending/review/apply.",
@@ -996,12 +1042,14 @@ export const RPG_WORLD_TICK_GAP_SIGNAL_FIELDS = [
 export const RPG_OUTLINE_BRIEF_COMPILER_GUIDANCE = [
   "Outline-aware Brief Compiler is LLM 4 / Step 14: it compiles a short narration brief and detects outline impact; it does not generate player prose, nextActionOptions, wiki writes, runtime update proposals, outline revisions, or provisional outline patches.",
   "outline beat, reveal, and branch condition refs must carry stable ids plus path and sectionId; natural headings are only display labels.",
-  "Each outline slice should expose dependency, invalidation, line target, and reveal policy metadata before it can influence narration guidance.",
+  "Each outline slice should expose outlineControl metadata such as controlKind, gmSummary, playerSafeSummary, mustNotRevealTo, dependency, invalidation, line target lens fallback, and reveal policy metadata before it can influence narration guidance.",
+  "playerVisibleLine, parallelLine, and tensionLine are narration lens outputs for this turn, not equal outline axes and not a requirement to advance three story lines in parallel.",
+  "lineTarget on outline or recall material is only a narration lens fallback; GM control / reveal gate semantics come from outlineControl and visibility/knowledge boundaries.",
   "OutlineImpactLevel uses the rubric none, minor, branch, major_rewrite_required; only major_rewrite_required can request Story Outline Regenerator input.",
-  "playerFacingBrief is limited to PC-visible or PC-inferred material and must not convert GM-only, hidden, parallelLine-only, or user_visible_pc_unknown material into PC knowledge.",
+  "playerFacingBrief is limited to PC-visible or PC-inferred material and must not convert GM-only truth, delayed reveals, hidden, parallelLine-only, parallelLineText, or user_visible_pc_unknown material into PC knowledge.",
   "parallelLineBrief can describe user-visible or GM-only parallel-line pressure, but it must explicitly not grant PC knowledge.",
   "tensionBriefInput is the handoff for relationship pressure, long-running emotional tension, pacing pressure, and plot-arc fuel; it is not player-facing prose.",
-  "tensionLine is the long-running relationship/emotional/dramatic pressure line; plot-arcs/runtime material can fuel it without becoming an event or accepted wiki fact.",
+  "tensionLine is a pressure lens for this turn; plot-arcs/runtime material can fuel it without becoming an event, PC knowledge, or accepted wiki fact.",
   "recalledMaterials are the deterministic Recall Selector handoff, not complete outline authority and not accepted wiki facts.",
 ] as const
 
@@ -1180,7 +1228,7 @@ export const RPG_RUNTIME_UPDATE_PROPOSAL_INPUT_SCHEMA = [
 
 export const RPG_RUNTIME_UPDATE_PROPOSAL_RESULT_SCHEMA = [
   { name: "RuntimeUpdateProposalResult", description: "Runtime-only LLM 6 result wrapper for review/pending proposal material; it is not an apply command." },
-  { name: "proposedWikiUpdates", description: "Ordinary runtime wiki update proposals only; each must include sourceDeltas, lineTarget, visibility, knowledgeScope, happenedStatus, confidence, and validationHints." },
+  { name: "proposedWikiUpdates", description: "Ordinary runtime wiki update proposals only; each must include sourceDeltas, lineTarget, visibility, knowledgeScope, happenedStatus, confidence, validationHints, and actor-level source delta metadata." },
   { name: "outlineRevisionReviewItems", description: "Independent outline revision review items derived from outlineRevisionProposal; they are not ProposedWikiUpdate entries and cannot auto-write wiki/outlines/main.md." },
   { name: "journalEntries", description: "Audit or runtime journal additions; journal entries do not imply wiki writes." },
   { name: "skippedDeltas", description: "Structured list of runtime deltas intentionally skipped from ordinary wiki update with explicit reasons." },
@@ -1198,7 +1246,7 @@ export const RPG_PROPOSED_WIKI_UPDATE_RUNTIME_FIELDS = [
   { name: "sourceTurnId", description: "Turn id that produced the source deltas." },
   { name: "references", description: "Wiki path, sectionId, outline ref, runtime ref, or source ref evidence; references support audit but do not authorize writeback alone." },
   { name: "sourceDeltas", description: "Structured runtime delta evidence from actionResolution, worldTickResult, postActionWorkingState, turnNarration, consistencyValidation, or outline handoff; this has priority over generatedNarrative." },
-  { name: "lineTarget", description: "NarrativeLine target such as playerVisibleLine, parallelLine, or tensionLine." },
+  { name: "lineTarget", description: "Current-turn narration lens target such as playerVisibleLine, parallelLine, or tensionLine; not outline ownership or a required story axis." },
   { name: "visibility", description: "VisibilityScope such as pc_visible, pc_inferred, user_visible_pc_unknown, gm_only, or hidden; parallelLineText and user_visible_pc_unknown cannot automatically enter PC knowledge." },
   { name: "knowledgeScope", description: "KnowledgeScope such as pc_known, pc_misunderstanding, npc_known, user_only, gm_only, or unknown_to_pc; player known information accepts only PC known or explicit misunderstanding." },
   { name: "happenedStatus", description: "HappenedStatus for the update; events require confirmed_happened and attempted_not_confirmed cannot become confirmed event." },
@@ -1212,9 +1260,12 @@ export const RPG_RUNTIME_UPDATE_SOURCE_DELTA_FIELDS = [
   { name: "sourcePath", description: "JSON pointer, runtime path, turn record field, or known path to the source delta." },
   { name: "sourceField", description: "Specific source field such as playerActionDelta, directResults, clockUpdates, informationBroadcast, tensionBrief, narrationMeta, playerFacingText, or parallelLineText." },
   { name: "summary", description: "Short factual summary of the delta; do not replace structured metadata with prose only." },
-  { name: "lineTarget", description: "playerVisibleLine, parallelLine, or tensionLine source line." },
+  { name: "lineTarget", description: "playerVisibleLine, parallelLine, or tensionLine source lens for this turn; it is not a persistent outline line." },
   { name: "visibility", description: "VisibilityScope carried by the source delta." },
   { name: "knowledgeScope", description: "KnowledgeScope carried by the source delta." },
+  { name: "knowledgeClaims", description: "Actor-level knowledge claims with claimId, summary, truthStatus, holders, nonHolders, and beliefStateByActor; npc_known requires concrete npc/faction/group holders." },
+  { name: "revealGateRefs", description: "Reveal gate ids associated with this source delta; required with revealState for reveal-progress writes." },
+  { name: "revealState", description: "Optional reveal state: hidden, hinted, partially_revealed, revealed, or forbidden." },
   { name: "happenedStatus", description: "HappenedStatus carried by the source delta; attempted_not_confirmed and possible_future are not confirmed events." },
   { name: "confidence", description: "Evidence confidence for this source delta." },
 ] as const satisfies readonly RpgWikiFieldDefinition[]
@@ -1272,6 +1323,7 @@ export const RPG_OUTLINE_REVISION_REVIEW_ITEM_SCHEMA = [
 export const RPG_RUNTIME_UPDATE_PROPOSAL_GUIDANCE = [
   "LLM 6 Schema Guidance only defines code-readable schema descriptions; it does not implement runtime types, JSON parser/validator, interaction prompt changes, pending staging, orchestrator wiring, writer/apply, or UI.",
   "RuntimeUpdateProposalInput must prioritize structured fact sources such as PostActionWorkingState, ActionResolution, WorldTickResult, TurnNarration, consistencyValidation, and outline handoff over generatedNarrative.",
+  "lineTarget values remain playerVisibleLine, parallelLine, and tensionLine for protocol stability, but they are current-turn narration lens targets, not outline axes or a requirement to keep all three story lines advancing.",
   "playerFacingText is display evidence only; structured turn delta and sourceDeltas are the primary fact boundary.",
   "parallelLineText and user_visible_pc_unknown may be visible to the real user but must not automatically enter wiki/player/known_information.md or PC knowledge.",
   "nextActionOptions are candidate future actions and are not facts unless selected, resolved, and confirmed by later structured deltas.",

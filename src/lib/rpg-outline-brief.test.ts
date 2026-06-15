@@ -55,45 +55,202 @@ describe("RPG Outline-aware Brief Compiler interaction", () => {
     const combined = `${prompt.systemPrompt}\n${prompt.userPrompt}`
 
     expect(outlineBriefInteractionSpec.kind).toBe("outline_brief")
-    expect(combined).toContain("Outline-aware Brief Compiler + Outline Impact Detector")
+    expect(combined).toContain("Outline Brief Draft Generator + Outline Impact Detector")
+    expect(combined).toContain("输出是 OutlineBriefDraft")
+    expect(combined).toContain("不要输出 briefId")
     expect(combined).toContain("LLM 4 / Step 14")
-    expect(combined).toContain("recalledMaterials are the Recall Selector filtered handoff")
-    expect(combined).toContain("not complete outline authority")
-    expect(combined).toContain("Return only strict JSON")
-    expect(combined).toContain("outlineAwareNarrationBrief")
+    expect(combined).toContain("recalledMaterials 是 Recall Selector 过滤后的 handoff")
+    expect(combined).toContain("不是完整的大纲权威来源")
+    expect(combined).toContain("outlineSlices 是 GM control / reveal gate / progress marker 切片")
+    expect(combined).toContain("lineTarget 只是 narration lens fallback")
+    expect(combined).toContain("先读取 outlineControl.controlKind")
+    expect(combined).toContain("delayed reveal")
+    expect(combined).toContain("playerFacingBrief.allowedKnowledge 只能包含 PC 当前可见")
+    expect(combined).toContain("仅返回严格 JSON")
+    expect(combined).toContain("allowedKnowledgeRefs")
     expect(combined).toContain("outlineImpactReport")
-    expect(combined).toContain("regenerationRequest")
+    expect(combined).toContain("不要输出 outlineAwareNarrationBrief")
     expect(combined).toContain("warnings")
-    expect(combined).toContain("Do not generate player-facing narrative prose")
-    expect(combined).toContain("Do not generate nextActionOptions")
-    expect(combined).toContain("Do not write wiki")
-    expect(combined).toContain("Do not generate runtime update proposal output")
-    expect(combined).toContain("Do not generate outlineRevision")
+    expect(combined).toContain("不要生成面向玩家的叙事正文")
+    expect(combined).toContain("不要生成 nextActionOptions")
+    expect(combined).toContain("不要写 wiki")
+    expect(combined).toContain("不要生成 runtime update proposal 输出")
+    expect(combined).toContain("不要生成 outlineRevision")
     expect(combined).toContain("provisionalOutlinePatch")
     expect(combined).toContain("Do not trigger Story Outline Regenerator")
-    expect(combined).toContain("Do not turn GM-only")
-    expect(combined).toContain("user_visible_pc_unknown material into PC knowledge")
-    expect(combined).toContain("Do not directly read files")
-    expect(combined).toContain("Do not change ActionResolution")
-    expect(combined).toContain("WorldTickResult")
-    expect(combined).toContain("PostActionWorkingState")
+    expect(combined).toContain("不要把 GM-only")
+    expect(combined).toContain("user_visible_pc_unknown 材料转成 PC 已知")
+    expect(combined).toContain("不要直接读取文件")
+    expect(combined).toContain("不要改写 TurnSemanticHandoff")
+    expect(combined).toContain("TurnSemanticHandoff")
     expect(combined).toContain("RecallSelection")
+    expect(combined).toContain("knownReferences")
+    expect(combined).toContain("recalledMaterials、recallSelection、outlineSlices")
+    expect(combined).toContain("mustNotRevealTo 包含 pc")
+    expect(combined).toContain("wildcard/glob/category/pathPattern")
+    expect(combined).toContain("wiki/sources/*.md")
+    expect(combined).toContain('"playerFacingBrief": {')
+    expect(combined).toContain('"summary": string')
+    expect(combined).toContain('"currentSceneFocus": string')
+    expect(combined).toContain('"allowedKnowledgeRefs"')
+    expect(combined).toContain('"allowedParallelRefs"')
+    expect(combined).toContain('"displayPolicy": "user_visible_pc_unknown" | "gm_only" | "hidden"')
+    expect(combined).toContain('"affected": {')
+    expect(combined).toContain('"lines": ("playerVisibleLine" | "parallelLine" | "tensionLine")[]')
+    expect(combined).toContain('"beats": (stableId string or { "stableId": string })[]')
+    expect(combined).toContain('"plotArcs": (stableId string or { "stableId": string })[]')
+    expect(combined).toContain("sourceFuelIds 只能从下方 “Plot-arc 张力燃料” 的 fuelId 原样选择")
+    expect(combined).toContain("plotArcFuel 由本地 compiler 根据 sourceFuelIds 确定性生成")
+    expect(combined).not.toContain('"plotArcFuelRefs"')
+    expect(combined).not.toContain('"briefId": string')
+    expect(combined).not.toContain('"reportId": string')
+    expect(combined).not.toContain('"playerFacingBrief": PlayerFacingBrief')
+    expect(combined).not.toContain('"parallelLineBrief": ParallelLineBrief')
+    expect(combined).not.toContain('"tensionBriefInput": TensionBriefInput')
+    expect(prompt.debugSections?.map((section) => section.title)).toEqual(
+      expect.arrayContaining([
+        "系统固定提示词",
+        "输入边界",
+        "TurnSemanticHandoff",
+        "RecallSelection",
+        "recalledMaterials",
+        "节奏状态",
+        "可见性边界",
+        "大纲切片",
+        "Plot-arc 张力燃料",
+        "硬约束元数据",
+        "已知引用",
+        "返回契约",
+      ]),
+    )
+    expectPromptDebugSectionsRecompose(prompt)
   })
 
-  it("parses bare OutlineBriefCompilerOutput JSON", () => {
+  it("parses bare OutlineBriefDraft JSON into canonical output", () => {
     const input = sampleOutlineBriefInput()
-    const output = sampleOutlineBriefOutput()
+    const output = sampleOutlineBriefDraft()
 
-    expect(parseRpgOutlineBriefOutput(JSON.stringify(output), input)).toEqual(output)
+    expect(parseRpgOutlineBriefOutput(JSON.stringify(output), input)).toMatchObject({
+      outlineAwareNarrationBrief: {
+        briefId: output.briefId,
+        playerFacingBrief: expect.objectContaining({ summary: output.playerFacingBrief.summary }),
+      },
+      outlineImpactReport: expect.objectContaining({ impactLevel: output.outlineImpactReport.impactLevel }),
+    })
   })
 
-  it("parses fenced OutlineBriefCompilerOutput JSON", () => {
+  it("parses fenced OutlineBriefDraft JSON into canonical output", () => {
     const input = sampleOutlineBriefInput()
-    const output = sampleOutlineBriefOutput()
+    const output = sampleOutlineBriefDraft()
 
     expect(
       parseRpgOutlineBriefOutput(["```json", JSON.stringify(output, null, 2), "```"].join("\n"), input),
-    ).toEqual(output)
+    ).toMatchObject({
+      outlineAwareNarrationBrief: {
+        briefId: output.briefId,
+      },
+    })
+  })
+
+  it("derives briefId and reference metadata locally", () => {
+    const input = sampleOutlineBriefInput()
+    const output = JSON.parse(JSON.stringify(sampleOutlineBriefDraft())) as Record<string, unknown>
+    delete output.briefId
+    ;(output.playerFacingBrief as Record<string, unknown>).visibilityScope = "gm_only"
+
+    const compiled = parseRpgOutlineBriefOutput(JSON.stringify(output), input)
+
+    expect(compiled.outlineAwareNarrationBrief.briefId).toBe("outline-brief-act-outline")
+    expect(compiled.outlineAwareNarrationBrief.playerFacingBrief.visibilityScope).toBe("pc_visible")
+  })
+
+  it("derives plot-arc fuel references from sourceFuelIds instead of draft paths", () => {
+    const input = sampleOutlineBriefInput()
+    const output = JSON.parse(JSON.stringify(sampleOutlineBriefDraft())) as ReturnType<typeof sampleOutlineBriefDraft> & {
+      tensionBriefInput: { tensionLineUpdateCandidate: { path?: string } }
+    }
+    output.tensionBriefInput.tensionLineUpdateCandidate.path = "wiki/plot-arcs/does-not-exist.md"
+
+    expect(parseRpgOutlineBriefOutput(JSON.stringify(output), input).outlineAwareNarrationBrief.tensionBriefInput).toMatchObject({
+      tensionLineUpdateCandidate: {
+        sourceFuelIds: ["fuel.canal_gate_tension"],
+      },
+      plotArcFuel: [tensionReference()],
+    })
+  })
+
+  it("rejects legacy plotArcFuelRefs in OutlineBriefDraft", () => {
+    const input = sampleOutlineBriefInput()
+    const output = JSON.parse(JSON.stringify(sampleOutlineBriefDraft())) as ReturnType<typeof sampleOutlineBriefDraft> & {
+      tensionBriefInput: { plotArcFuelRefs?: unknown[] }
+    }
+    output.tensionBriefInput.plotArcFuelRefs = [
+      {
+        path: "wiki/plot-arcs/does-not-exist.md",
+        sectionId: "plotArc.tension_fuel",
+        stableId: "fuel.canal_gate_tension",
+        reason: "Legacy draft field must not be accepted.",
+      },
+    ]
+
+    expect(() => parseRpgOutlineBriefOutput(JSON.stringify(output), input)).toThrow(/plotArcFuelRefs/i)
+  })
+
+  it("rejects unknown plot-arc sourceFuelIds", () => {
+    const input = sampleOutlineBriefInput()
+    const output = JSON.parse(JSON.stringify(sampleOutlineBriefDraft())) as {
+      tensionBriefInput: { tensionLineUpdateCandidate: { sourceFuelIds: string[] } }
+    }
+    output.tensionBriefInput.tensionLineUpdateCandidate.sourceFuelIds = ["fuel.unknown"]
+
+    expect(() => parseRpgOutlineBriefOutput(JSON.stringify(output), input)).toThrow(
+      /sourceFuelIds\[0\].*fuel id is not known from plotArcTensionFuel/i,
+    )
+  })
+
+  it("rejects the legacy Outline Brief shape without auto-repair", () => {
+    const input = sampleOutlineBriefInput()
+    const legacyOutput = {
+      outlineAwareNarrationBrief: {
+        briefId: "outline-brief-act-outline",
+        sourceWorkingStateId: "post-action-working-state-act-outline",
+        playerFacingBrief: {
+          allowedKnowledge: ["The fainted man is breathing weakly."],
+          narrativeFocus: "Check the fainted man without revealing hidden outline truth.",
+          grantsPcKnowledge: true,
+          lineTarget: "playerVisibleLine",
+        },
+        parallelLineBrief: {
+          narrativeFocus: "",
+          grantsPcKnowledge: false,
+          lineTarget: "parallelLine",
+        },
+        tensionBriefInput: ["The situation remains suspicious."],
+        revealPolicies: [],
+        forbiddenNarrationBoundary: [],
+        pacingDirective: {
+          action: "maintain",
+          previousDebt: "low",
+          nextDebt: "low",
+          pressureChange: "unchanged",
+          compensationNeeded: false,
+        },
+        campaignDeltaRequirement: "none",
+        references: [],
+      },
+      outlineImpactReport: {
+        impactLevel: "none",
+        affected: { lines: [], beats: [], reveals: [], branchConditions: [], plotArcs: [], tensionLine: [] },
+        invalidatedAssumptions: [],
+        reason: "No outline impact.",
+        requiresRegeneration: false,
+      },
+      warnings: [],
+    }
+
+    expect(() => parseRpgOutlineBriefOutput(JSON.stringify(legacyOutput), input)).toThrow(
+      /forbidden canonical key|playerFacingBrief\.summary/i,
+    )
   })
 
   it("accepts a legal output with parallel-line material that does not grant PC knowledge", () => {
@@ -185,6 +342,24 @@ describe("RPG Outline-aware Brief Compiler interaction", () => {
     expect(() => validateOutlineBriefCompilerOutput(output, sampleOutlineBriefInput())).toThrow(/PC knowledge|user/i)
   })
 
+  it("rejects delayed main outline reveal slices inside playerFacingBrief.allowedKnowledge", () => {
+    const input = sampleOutlineBriefInput()
+    input.outlineSlices.push(delayedMainOutlineSlice())
+    const output = cloneOutput()
+    output.outlineAwareNarrationBrief.playerFacingBrief.allowedKnowledge.push({
+      path: "wiki/outlines/main.md",
+      sectionId: "outlineMain.delayed_reveals",
+      stableId: "reveal.gate_patron",
+      lineTarget: "playerVisibleLine",
+      usePurpose: "outlineControl",
+      visibilityScope: "pc_visible",
+      knowledgeScope: "pc_known",
+      reason: "This delayed reveal is not PC knowledge even if the output claims it is safe.",
+    })
+
+    expect(() => validateOutlineBriefCompilerOutput(output, input)).toThrow(/delayed outline control|GM-only/i)
+  })
+
   it("rejects parallelLineBrief that grants PC knowledge", () => {
     const output = cloneOutput()
     ;(output.outlineAwareNarrationBrief.parallelLineBrief as unknown as Record<string, unknown>).grantsPcKnowledge = true
@@ -196,6 +371,10 @@ describe("RPG Outline-aware Brief Compiler interaction", () => {
     const unknownPath = cloneOutput()
     unknownPath.outlineAwareNarrationBrief.references[0].path = "wiki/outlines/unknown.md"
     expect(() => validateOutlineBriefCompilerOutput(unknownPath, sampleOutlineBriefInput())).toThrow(/path/i)
+
+    const wildcardPath = cloneOutput()
+    wildcardPath.outlineAwareNarrationBrief.references[0].path = "wiki/sources/*.md"
+    expect(() => validateOutlineBriefCompilerOutput(wildcardPath, sampleOutlineBriefInput())).toThrow(/path/i)
 
     const unknownSection = cloneOutput()
     unknownSection.outlineAwareNarrationBrief.references[0].sectionId = "outline.unknown_section"
@@ -212,7 +391,7 @@ describe("RPG Outline-aware Brief Compiler interaction", () => {
 
   it("creates an LLM adapter that streams output and validates the parsed JSON", async () => {
     const input = sampleOutlineBriefInput()
-    const output = sampleOutlineBriefOutput()
+    const output = sampleOutlineBriefDraft()
     const prompt = buildOutlineBriefPrompt(input)
     const rawOutput = ["```json\n", JSON.stringify(output), "\n```"].join("")
     const signal = new AbortController().signal
@@ -226,7 +405,9 @@ describe("RPG Outline-aware Brief Compiler interaction", () => {
 
     const adapter = createLlmRpgOutlineBriefAdapter({ llmConfig: sampleLlmConfig(), signal }, { requestOverrides })
 
-    await expect(adapter.compileOutlineBrief(prompt, input)).resolves.toEqual(output)
+    await expect(adapter.compileOutlineBrief(prompt, input)).resolves.toMatchObject({
+      outlineAwareNarrationBrief: { briefId: output.briefId },
+    })
     expect(streamChatMock).toHaveBeenCalledWith(
       sampleLlmConfig(),
       [
@@ -388,6 +569,36 @@ describe("RPG Outline-aware Brief Compiler interaction", () => {
         }),
       ]),
     )
+    expect(input.outlineSlices).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          path: "wiki/outlines/main.md",
+          sectionId: "outlineMain.delayed_reveals",
+          lineTarget: "playerVisibleLine",
+          outlineControl: expect.objectContaining({
+            controlKind: "reveal_gate",
+            mustNotRevealTo: ["pc"],
+          }),
+        }),
+        expect.objectContaining({
+          path: "wiki/outlines/main.md",
+          sectionId: "outlineMain.act_structure",
+          outlineControl: expect.objectContaining({
+            controlKind: "act_structure",
+          }),
+        }),
+        expect.objectContaining({
+          path: "wiki/outlines/progress.md",
+          sectionId: "outlineProgress.current_stage",
+          outlineControl: expect.objectContaining({
+            controlKind: "progress_marker",
+          }),
+        }),
+      ]),
+    )
+    expect(
+      input.outlineSlices.find((slice) => slice.sectionId === "outlineMain.delayed_reveals")?.lineTargets[0]?.guidance,
+    ).toContain("lineTarget is only a narration lens fallback")
     expect(input.plotArcTensionFuel).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
@@ -448,7 +659,7 @@ describe("RPG Outline-aware Brief Compiler interaction", () => {
 
     expect(runtimeApply).toContain("outlineAwareNarrationBrief")
     expect(runtimeApply).not.toContain("outline_brief")
-    expect(runtimePanel).toContain("createOutlineBriefCompilerAdapter")
+    expect(runtimePanel).toContain("runRpgRuntimeTurnFlowClient")
     expect(runtimePanel).not.toContain("outline_brief")
     expect(RPG_SCHEMA_SLOTS).toHaveLength(22)
     expect(RPG_SCHEMA_SLOTS.map((slot) => slot.slotId)).not.toContain("runtime")
@@ -518,6 +729,17 @@ function sampleOutlineBriefInput(): OutlineBriefCompilerInput {
         lineTarget: "tensionLine",
         visibilityScope: "gm_only",
         knowledgeScope: "gm_only",
+        outlineControl: {
+          controlKind: "reveal_gate",
+          gmSummary: "The next useful beat is decoding the gate without revealing the patron.",
+          playerSafeSummary:
+            "A GM-only reveal boundary is active; use only non-spoiler pressure, hints, or pacing without disclosing the truth.",
+          actorKnowledgeRefs: ["gm"],
+          revealGateRefs: ["gate.wiki-outlines-progress-md-outlineprogress-adjacent-beats"],
+          mustNotRevealTo: ["pc"],
+          boundaryNote:
+            "Treat this as GM control / reveal-gate material first; decide any narration lens only after applying visibility and knowledge boundaries.",
+        },
         summary: "The next useful beat is decoding the gate without revealing the patron.",
         beatRefs: [
           {
@@ -630,6 +852,140 @@ function sampleOutlineBriefInput(): OutlineBriefCompilerInput {
       },
     ],
   }
+}
+
+function delayedMainOutlineSlice(): OutlineBriefCompilerInput["outlineSlices"][number] {
+  return {
+    sliceId: "outline-slice-main-delayed-reveals",
+    path: "wiki/outlines/main.md",
+    sectionId: "outlineMain.delayed_reveals",
+    title: "main: outlineMain.delayed_reveals",
+    lineTarget: "playerVisibleLine",
+    visibilityScope: "gm_only",
+    knowledgeScope: "gm_only",
+    outlineControl: {
+      controlKind: "reveal_gate",
+      gmSummary: "The gate patron should remain hidden until the sigil is decoded.",
+      playerSafeSummary:
+        "A GM-only reveal boundary is active; use only non-spoiler pressure, hints, or pacing without disclosing the truth.",
+      actorKnowledgeRefs: ["gm"],
+      revealGateRefs: ["gate.wiki-outlines-main-md-outlinemain-delayed-reveals"],
+      mustNotRevealTo: ["pc"],
+      boundaryNote:
+        "Treat this as GM control / reveal-gate material first; decide any narration lens only after applying visibility and knowledge boundaries.",
+    },
+    summary: "The gate patron should remain hidden until the sigil is decoded.",
+    beatRefs: [
+      {
+        ...stableRef("beat.delayed_gate_patron", "wiki/outlines/main.md", "outlineMain.delayed_reveals"),
+        lineTarget: "playerVisibleLine",
+        refType: "beat",
+        beatStatus: "planned",
+      },
+    ],
+    revealRefs: [
+      {
+        ...stableRef("reveal.gate_patron", "wiki/outlines/main.md", "outlineMain.delayed_reveals"),
+        lineTarget: "playerVisibleLine",
+        refType: "reveal",
+        revealPolicy: "delay",
+        revealTiming: "Only after the sigil is decoded.",
+      },
+    ],
+    branchConditionRefs: [],
+    dependencies: [],
+    lineTargets: [
+      {
+        lineTarget: "playerVisibleLine",
+        allowedStableIds: ["beat.delayed_gate_patron"],
+        forbiddenStableIds: ["reveal.gate_patron"],
+        guidance: "lineTarget is only a narration lens fallback, not the outline structure.",
+      },
+    ],
+    revealPolicies: [
+      {
+        directiveId: "policy.reveal.gate_patron",
+        stableId: "reveal.gate_patron",
+        policy: "delay",
+        lineTarget: "playerVisibleLine",
+        reason: "The patron is not PC knowledge.",
+      },
+    ],
+    invalidationNotes: [],
+  }
+}
+
+function sampleOutlineBriefDraft() {
+  return {
+    briefId: "outline-brief-act-outline",
+    playerFacingBrief: {
+      summary: "Keep the scene on Mira's visible sigil read, the warming key, and patrol pressure.",
+      currentSceneFocus: "Mira warns which edge of the sigil is safe while the patrol nears.",
+      allowedKnowledgeRefs: [
+        {
+          path: "wiki/current-scene/scene_state.md",
+          sectionId: "currentScene.visible_deltas",
+          runtimeDeltaId: "patrol-countdown-advance",
+          reason: "Use selected visible scene deltas.",
+        },
+      ],
+      immediateReactions: ["Mira warns the player not to touch the cracked edge."],
+      clueDirections: ["The safe edge can be tested without naming the patron."],
+      mustNotRevealStableIds: ["reveal.gate_patron"],
+    },
+    parallelLineBrief: {
+      summary: "The Harbor Watch order may be held as parallel pressure without informing the PC.",
+      allowedParallelRefs: [
+        {
+          path: "wiki/factions/runtime/harbor-watch.md",
+          sectionId: "factionRuntime.current_order",
+          runtimeDeltaId: "watch-captain-order",
+          reason: "Use only as parallel-line pressure.",
+        },
+      ],
+      parallelBeatFocus: ["A captain orders a delayed lower-canal sweep."],
+      displayPolicy: "user_visible_pc_unknown",
+    },
+    tensionBriefInput: {
+      summary: "Advance tension through Mira's fragile trust and the patrol clock.",
+      tensionLineUpdateCandidate: {
+        summary: "Mira's trust rises because the player waited for her expertise.",
+        sourceFuelIds: ["fuel.canal_gate_tension"],
+        targetPlotArcIds: ["plotArc.canal_gate"],
+        updateKind: "advance",
+        reason: "The action produced relationship pressure without resolving the reveal.",
+      },
+      relationshipPressure: ["Mira notices the player defers to her expertise under time pressure."],
+      shouldAdvance: true,
+    },
+    pacingDirective: {
+      intent: "medium",
+      reason: "The scene has pressure and should move through the warning, not stall.",
+      requiredMovement: ["Move the patrol clock or force a key-use decision."],
+      avoidStagnation: true,
+    },
+    campaignDeltaRequirement: {
+      required: true,
+      minimumDelta: "meaningful",
+      reason: "The turn should change the gate decision pressure.",
+      candidateSources: ["patrol-countdown-advance", "fuel.canal_gate_tension"],
+    },
+    outlineImpactReport: {
+      impactLevel: "minor",
+      affected: {
+        lines: ["playerVisibleLine", "tensionLine"],
+        beats: ["beat.decode_gate"],
+        reveals: ["reveal.gate_patron"],
+        branchConditions: ["branch.waited_for_mira"],
+        plotArcs: ["plotArc.canal_gate"],
+        tensionLine: ["fuel.canal_gate_tension"],
+      },
+      invalidatedAssumptions: [],
+      reason: "The wait advances pressure but does not break reveal order.",
+      requiresRegeneration: false,
+    },
+    warnings: [],
+  } as const
 }
 
 function sampleOutlineBriefOutput(): OutlineBriefCompilerOutput {
@@ -901,6 +1257,16 @@ function sampleLlmConfig(): LlmConfig {
     customEndpoint: "",
     maxContextSize: 10000,
   }
+}
+
+function expectPromptDebugSectionsRecompose(prompt: ReturnType<typeof buildOutlineBriefPrompt>): void {
+  const sections = prompt.debugSections ?? []
+  expect(sections.filter((section) => section.promptRole === "system").map((section) => section.content).join("\n\n")).toBe(
+    prompt.systemPrompt,
+  )
+  expect(sections.filter((section) => section.promptRole === "user").map((section) => section.content).join("\n\n")).toBe(
+    prompt.userPrompt,
+  )
 }
 
 async function writeOutlineBriefFixture(projectPath: string): Promise<void> {

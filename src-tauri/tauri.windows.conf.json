@@ -1,5 +1,5 @@
 {
   "bundle": {
-    "resources": ["pdfium/pdfium.dll"]
+    "resources": ["pdfium/pdfium.dll", "../dist-runtime/rpg-runtime-worker.mjs"]
   }
 }

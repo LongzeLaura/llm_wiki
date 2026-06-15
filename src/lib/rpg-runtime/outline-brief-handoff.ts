@@ -7,18 +7,30 @@ import type {
   OutlineVisibilityBoundary,
   PlotArcTensionFuel,
   PostActionWorkingState,
+  RpgRevealGateRef,
+  RpgOutlineControlKind,
+  RpgOutlineControlMetadata,
   RecalledMaterial,
   RecallSelection,
+  TurnSemanticHandoff,
   WorldTickResult,
   WorldTickVisibleSelection,
 } from "./types"
-import type { RpgKnowledgeScope, RpgRuntimeDeltaRef, RpgVisibilityScope } from "../rpg-wiki-schema"
+import type {
+  RpgKnowledgeActorRef,
+  RpgKnowledgeScope,
+  RpgNarrativeLine,
+  RpgRuntimeDeltaRef,
+  RpgVisibilityScope,
+} from "../rpg-wiki-schema"
+import { defaultKnowledgeClaimsForPath } from "./actor-knowledge"
 
 export interface BuildOutlineBriefCompilerInputFromTurnStateInput {
   actionResolution: ActionResolution
   worldTickResult: WorldTickResult
   visibleSelection: WorldTickVisibleSelection
   postActionWorkingState: PostActionWorkingState
+  turnSemanticHandoff?: TurnSemanticHandoff
   recallSelection: RecallSelection
   recalledMaterials: RecalledMaterial[]
 }
@@ -33,6 +45,7 @@ export function buildOutlineBriefCompilerInputFromTurnState(
   ])
 
   return {
+    turnSemanticHandoff: input.turnSemanticHandoff,
     postActionWorkingState: input.postActionWorkingState,
     actionResolution: input.actionResolution,
     worldTickResult: input.worldTickResult,
@@ -97,7 +110,35 @@ function buildOutlineSlices(recalledMaterials: readonly RecalledMaterial[]): Out
       const sliceId = `outline-slice.${slug(material.path)}.${slug(section.sectionId)}.${index + 1}`
       const stableId = `${sliceId}.beat`
       const revealStableId = `${sliceId}.reveal`
-      const hasReveal = looksLikeRevealOrForbidden(section.content, section.sectionId)
+      const branchStableId = `${sliceId}.branch`
+      const outlineControl =
+        material.outlineControl ??
+        createOutlineControlMetadata({
+          path: material.path,
+          sectionId: section.sectionId,
+          content: section.content,
+          fallback: section.expectedUse || material.expectedUse,
+        })
+      const hasReveal =
+        outlineControl.controlKind === "reveal_gate" ||
+        outlineControl.controlKind === "hard_constraint" ||
+        looksLikeRevealOrForbidden(section.content, section.sectionId)
+      const hasBranchCondition = outlineControl.controlKind === "branch_condition"
+      const revealPolicy = revealPolicyForOutlineControl(outlineControl.controlKind, material.visibilityScope)
+      const knowledgeClaims = material.knowledgeClaims ?? defaultKnowledgeClaimsForPath({
+        path: material.path,
+        visibilityScope: material.visibilityScope,
+        knowledgeScope: material.knowledgeScope,
+        summary: outlineControl.gmSummary,
+      })
+      const revealGateMetadata: RpgRevealGateRef[] = outlineControl.revealGateRefs.map((gateId) => ({
+        gateId,
+        truthId: `${revealStableId}.truth`,
+        revealState: revealPolicy === "allowed_now" ? "hinted" as const : "hidden" as const,
+        allowedAudience: revealPolicy === "allowed_now" || revealPolicy === "hint_only" ? (["pc"] as RpgKnowledgeActorRef[]) : [],
+        blockedAudience: outlineControl.mustNotRevealTo,
+        reason: outlineControl.boundaryNote,
+      }))
 
       slices.push({
         sliceId,
@@ -107,14 +148,17 @@ function buildOutlineSlices(recalledMaterials: readonly RecalledMaterial[]): Out
         lineTarget: material.lineTarget,
         visibilityScope: material.visibilityScope,
         knowledgeScope: material.knowledgeScope,
-        summary: summarizeSection(section.content, section.expectedUse || material.expectedUse),
+        outlineControl,
+        knowledgeClaims,
+        revealGateMetadata,
+        summary: outlineControl.gmSummary,
         beatRefs: [
           {
             refId: `${stableId}.ref`,
             path: material.path,
             sectionId: section.sectionId,
             stableId,
-            summary: summarizeSection(section.content, "Outline beat selected by Recall Selector."),
+            summary: outlineControl.gmSummary,
             lineTarget: material.lineTarget,
             visibilityScope: material.visibilityScope,
             knowledgeScope: material.knowledgeScope,
@@ -129,24 +173,43 @@ function buildOutlineSlices(recalledMaterials: readonly RecalledMaterial[]): Out
                 path: material.path,
                 sectionId: section.sectionId,
                 stableId: revealStableId,
-                summary: summarizeSection(section.content, "Reveal policy selected by Recall Selector."),
+                summary: outlineControl.gmSummary,
                 lineTarget: material.lineTarget,
                 visibilityScope: material.visibilityScope,
                 knowledgeScope: material.knowledgeScope,
                 refType: "reveal",
-                revealPolicy: material.visibilityScope === "pc_visible" ? "hint_only" : "delay",
+                revealPolicy,
                 revealTiming: "Only when the filtered outline brief allows it.",
               },
             ]
           : [],
-        branchConditionRefs: [],
+        branchConditionRefs: hasBranchCondition
+          ? [
+              {
+                refId: `${branchStableId}.ref`,
+                path: material.path,
+                sectionId: section.sectionId,
+                stableId: branchStableId,
+                summary: outlineControl.gmSummary,
+                lineTarget: material.lineTarget,
+                visibilityScope: material.visibilityScope,
+                knowledgeScope: material.knowledgeScope,
+                refType: "branchCondition",
+                conditionStatus: "watching",
+              },
+            ]
+          : [],
         dependencies: [],
         lineTargets: [
           {
             lineTarget: material.lineTarget,
             allowedStableIds: [stableId],
             forbiddenStableIds: hasReveal ? [revealStableId] : [],
-            guidance: material.expectedUse || "Use this outline slice only through the filtered narration brief.",
+            guidance: [
+              material.expectedUse || "Use this outline slice only through the filtered narration brief.",
+              `outlineControl.controlKind=${outlineControl.controlKind}. lineTarget is only a narration lens fallback, not the outline structure or a required story axis.`,
+              outlineControl.boundaryNote,
+            ].join(" "),
           },
         ],
         revealPolicies: hasReveal
@@ -154,9 +217,9 @@ function buildOutlineSlices(recalledMaterials: readonly RecalledMaterial[]): Out
               {
                 directiveId: `policy.${revealStableId}`,
                 stableId: revealStableId,
-                policy: material.visibilityScope === "pc_visible" ? "hint_only" : "delay",
+                policy: revealPolicy,
                 lineTarget: material.lineTarget,
-                reason: "First-version deterministic reveal policy derived from recalled outline material.",
+                reason: `First-version deterministic reveal policy derived from ${outlineControl.controlKind} outline control material.`,
               },
             ]
           : [],
@@ -193,6 +256,98 @@ function buildPlotArcTensionFuel(recalledMaterials: readonly RecalledMaterial[])
   }
 
   return fuel
+}
+
+export function createOutlineControlMetadata(input: {
+  path: string
+  sectionId: string
+  content: string
+  fallback: string
+}): RpgOutlineControlMetadata {
+  const controlKind = outlineControlKindForSection(input.path, input.sectionId, input.content)
+  const gmSummary = summarizeSection(input.content, input.fallback)
+  const hasRevealBoundary =
+    controlKind === "reveal_gate" ||
+    controlKind === "hard_constraint" ||
+    looksLikeRevealOrForbidden(input.content, input.sectionId)
+  const revealGateRefs = hasRevealBoundary ? [`gate.${slug(input.path)}.${slug(input.sectionId)}`] : []
+  const mustNotRevealTo =
+    hasRevealBoundary || controlKind === "gm_truth" || controlKind === "branch_condition" ? (["pc"] as const) : []
+
+  return {
+    controlKind,
+    gmSummary,
+    playerSafeSummary: playerSafeSummaryForOutlineControl(controlKind, hasRevealBoundary, gmSummary),
+    actorKnowledgeRefs: ["gm"],
+    revealGateRefs,
+    mustNotRevealTo: [...mustNotRevealTo],
+    boundaryNote:
+      "Treat this as GM control / reveal-gate material first; decide any narration lens only after applying visibility and knowledge boundaries.",
+  }
+}
+
+export function lineTargetForOutlineControlKind(controlKind: RpgOutlineControlKind): RpgNarrativeLine {
+  switch (controlKind) {
+    case "gm_truth":
+      return "parallelLine"
+    case "reveal_gate":
+    case "hard_constraint":
+    case "progress_marker":
+      return "playerVisibleLine"
+    case "act_structure":
+    case "branch_condition":
+      return "tensionLine"
+  }
+}
+
+function outlineControlKindForSection(
+  path: string,
+  sectionId: string,
+  content: string,
+): RpgOutlineControlKind {
+  const sectionText = `${path}\n${sectionId}`.toLowerCase()
+  const contentText = content.toLowerCase()
+  if (/branch|分支/.test(sectionText)) return "branch_condition"
+  if (/must[_ -]?not|hard[_ -]?constraint|constraint|forbid|forbidden|不可|禁止|硬约束/.test(sectionText)) {
+    return "hard_constraint"
+  }
+  if (/reveal|delayed|delay|information[_ -]?boundary|揭示|透露|信息边界/.test(sectionText)) {
+    return "reveal_gate"
+  }
+  if (/act[_ -]?structure|幕|章节结构/.test(sectionText)) return "act_structure"
+  if (path.endsWith("/progress.md") || /^outlineprogress\./i.test(sectionId)) return "progress_marker"
+  if (/branch|分支/.test(contentText)) return "branch_condition"
+  if (/must not|forbid|forbidden|不可|禁止|硬约束/.test(contentText)) return "hard_constraint"
+  if (/reveal|delayed|delay|揭示|透露/.test(contentText)) return "reveal_gate"
+  return "gm_truth"
+}
+
+function playerSafeSummaryForOutlineControl(
+  controlKind: RpgOutlineControlKind,
+  hasRevealBoundary: boolean,
+  gmSummary: string,
+): string {
+  if (hasRevealBoundary) {
+    return "A GM-only reveal boundary is active; use only non-spoiler pressure, hints, or pacing without disclosing the truth."
+  }
+  if (controlKind === "gm_truth") {
+    return "GM-only truth is available for consistency checks only; do not disclose it as PC knowledge."
+  }
+  if (controlKind === "branch_condition") {
+    return "A branch condition is being watched; mention only visible consequences that the PC can observe or infer."
+  }
+  return gmSummary
+}
+
+function revealPolicyForOutlineControl(
+  controlKind: RpgOutlineControlKind,
+  visibilityScope: RpgVisibilityScope,
+): "allowed_now" | "hint_only" | "delay" | "forbid" | "parallel_only" | "gm_only" {
+  if (controlKind === "hard_constraint") return "forbid"
+  if (controlKind === "gm_truth") return "gm_only"
+  if (visibilityScope === "pc_visible" || visibilityScope === "pc_inferred") return "hint_only"
+  if (visibilityScope === "user_visible_pc_unknown") return "parallel_only"
+  return "delay"
 }
 
 function buildHardConstraints(recalledMaterials: readonly RecalledMaterial[]): OutlineHardConstraint[] {

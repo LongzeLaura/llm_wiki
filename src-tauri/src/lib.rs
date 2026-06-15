@@ -115,6 +115,7 @@ pub fn run() {
             commands::project::create_project,
             commands::project::open_project,
             commands::project::open_project_folder,
+            commands::rpg_runtime::rpg_runtime_run_turn,
             commands::search::search_project,
             clip_server_status,
             api_server_status,

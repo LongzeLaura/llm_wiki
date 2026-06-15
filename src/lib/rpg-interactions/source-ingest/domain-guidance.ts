@@ -22,12 +22,14 @@ export function buildDomainSpecificGuidance(input: DomainGuidanceInput): string 
     "Detected Fate/stay night style source markers. Apply this only as source/domain guidance; it is not part of the generic RPG contract.",
     "- Keep route-specific, ending-specific, and epilogue states separate instead of merging them into one universal present state.",
     "- Treat Holy Grail War material as setting or plot structure unless the source describes a discrete happened event.",
-    "- A live current-scene page still requires explicit RPG session/current-scene framing; domain scene summaries alone are not enough.",
+    "- Domain scene summaries, route material, ending material, and epilogue material must stay in source-ingest allowed targets such as events, plot-arcs, locations, characters, relationships, or sources.",
+    "- Live current-scene belongs to campaign_setup_import or runtime_update_apply and should be REVIEW in ordinary Source Ingest.",
     // 领域专属提示
     // 检测到 Fate/stay night 风格的来源标记。这里只能把它当作来源/领域提示使用；它不属于通用 RPG 合约的一部分。
     // 请将路线专属、结局专属和尾声状态分开处理，不要把它们合并成一个通用的“当前状态”。
     // 除非来源明确描述的是一个已经发生的离散事件，否则请把圣杯战争相关内容视为设定或剧情结构。
-    // 现场的 current-scene 页面仍然需要明确的 RPG session/current-scene 语境；仅有领域内的场景摘要是不够的。
+    // 领域场景摘要、路线、结局和尾声材料必须停留在普通 source-ingest 允许的目标中。
+    // 实时 current-scene 属于 campaign_setup_import 或 runtime_update_apply；普通 Source Ingest 中应进入 REVIEW。
   ].join("\n")
 }
 

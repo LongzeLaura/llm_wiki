@@ -10,6 +10,14 @@ export interface RpgOutlineBriefAdapter {
     prompt: RpgOutlineBriefPrompt,
     promptInput: OutlineBriefCompilerInput,
   ): Promise<OutlineBriefCompilerOutput>
+  compileOutlineBriefRawOutput?(
+    prompt: RpgOutlineBriefPrompt,
+    promptInput: OutlineBriefCompilerInput,
+  ): Promise<string>
+  repairOutlineBriefRawOutput?(
+    prompt: RpgOutlineBriefPrompt,
+    promptInput: OutlineBriefCompilerInput,
+  ): Promise<string>
 }
 
 export function createFixtureOutlineBriefAdapter(

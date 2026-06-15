@@ -7,11 +7,17 @@ import type {
   RecallSelection,
   SubmittedAction,
   TurnNarration,
+  TurnSemanticHandoff,
   WorldTickResult,
   WorldTickVisibleSelection,
   WorldTickVisibilityMeta,
 } from "./rpg-runtime/types"
-import { buildPostActionWorkingState, selectWorldTickVisibleContent } from "./rpg-runtime/world-tick-working-state"
+import { buildTurnSemanticHandoff } from "./rpg-runtime/turn-semantic-handoff"
+import {
+  buildPostActionWorkingState,
+  buildWorldTickSemanticHandoff,
+  selectWorldTickVisibleContent,
+} from "./rpg-runtime/world-tick-working-state"
 
 export function sampleActionResolution(
   action: SubmittedAction = {
@@ -328,6 +334,35 @@ export function samplePostActionWorkingState(
   })
 }
 
+export function sampleTurnSemanticHandoff(
+  submittedAction: SubmittedAction,
+  actionResolution: ActionResolution,
+  worldTickResult: WorldTickResult,
+  visibleSelection: WorldTickVisibleSelection = sampleVisibleSelection(actionResolution, worldTickResult),
+  postActionWorkingState: PostActionWorkingState = samplePostActionWorkingState(
+    submittedAction,
+    actionResolution,
+    worldTickResult,
+    visibleSelection,
+  ),
+): TurnSemanticHandoff {
+  const worldTickSemanticHandoff = buildWorldTickSemanticHandoff({
+    submittedAction,
+    actionResolution,
+    worldTickResult,
+    visibleSelection,
+    postActionWorkingState,
+  })
+  return buildTurnSemanticHandoff({
+    submittedAction,
+    actionResolution,
+    worldTickResult,
+    visibleSelection,
+    postActionWorkingState,
+    worldTickSemanticHandoff,
+  })
+}
+
 export function sampleRecallSelection(
   sourceWorkingStateId = "post-action-working-state-act-1",
   path = "wiki/current-scene/scene_state.md",
@@ -537,6 +572,13 @@ export function sampleTurnRecordRuntimeParts(
     worldTickResult,
     visibleSelection,
     postActionWorkingState,
+    turnSemanticHandoff: sampleTurnSemanticHandoff(
+      submittedAction,
+      actionResolution,
+      worldTickResult,
+      visibleSelection,
+      postActionWorkingState,
+    ),
     recallSelection: options.recallSelection ?? sampleRecallSelection(),
     recalledMaterials: options.recalledMaterials ?? [],
     outlineAwareNarrationBrief: outlineBriefOutput.outlineAwareNarrationBrief,

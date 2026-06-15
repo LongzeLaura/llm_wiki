@@ -10,10 +10,13 @@ import type {
   RegenerationSafetyReport,
   RegenerationRequest,
   SubmittedAction,
+  TurnSemanticHandoff,
   TurnNarration,
   WorldTickResult,
   WorldTickVisibleSelection,
 } from "./types"
+import { buildTurnSemanticHandoff } from "./turn-semantic-handoff"
+import { buildWorldTickSemanticHandoff } from "./world-tick-working-state"
 
 export type RpgActionIntent =
   | "investigate"
@@ -46,6 +49,7 @@ export interface RpgTurnRecord {
   worldTickResult: WorldTickResult
   visibleSelection: WorldTickVisibleSelection
   postActionWorkingState: PostActionWorkingState
+  turnSemanticHandoff?: TurnSemanticHandoff
   recallSelection: RecallSelection
   recalledMaterials: RecalledMaterial[]
   outlineAwareNarrationBrief: OutlineAwareNarrationBrief
@@ -65,6 +69,7 @@ export interface CreateRpgTurnRecordInput {
   worldTickResult: WorldTickResult
   visibleSelection: WorldTickVisibleSelection
   postActionWorkingState: PostActionWorkingState
+  turnSemanticHandoff: TurnSemanticHandoff
   recallSelection: RecallSelection
   recalledMaterials: RecalledMaterial[]
   outlineAwareNarrationBrief: OutlineAwareNarrationBrief
@@ -119,12 +124,27 @@ const ALLOWED_ACTION_INTENTS = new Set<RpgActionIntent>([
 const ALLOWED_RISK_LEVELS = new Set<RpgRiskLevel>(["low", "medium", "high"])
 
 export function createRpgTurnRecord(input: CreateRpgTurnRecordInput): RpgTurnRecord {
+  const turnSemanticHandoff = input.turnSemanticHandoff ?? buildTurnSemanticHandoff({
+    submittedAction: input.submittedAction,
+    actionResolution: input.actionResolution,
+    worldTickResult: input.worldTickResult,
+    visibleSelection: input.visibleSelection,
+    postActionWorkingState: input.postActionWorkingState,
+    worldTickSemanticHandoff: buildWorldTickSemanticHandoff({
+      submittedAction: input.submittedAction,
+      actionResolution: input.actionResolution,
+      worldTickResult: input.worldTickResult,
+      visibleSelection: input.visibleSelection,
+      postActionWorkingState: input.postActionWorkingState,
+    }),
+  })
   return {
     submittedAction: input.submittedAction,
     actionResolution: input.actionResolution,
     worldTickResult: input.worldTickResult,
     visibleSelection: input.visibleSelection,
     postActionWorkingState: input.postActionWorkingState,
+    turnSemanticHandoff,
     recallSelection: input.recallSelection,
     recalledMaterials: input.recalledMaterials,
     outlineAwareNarrationBrief: input.outlineAwareNarrationBrief,

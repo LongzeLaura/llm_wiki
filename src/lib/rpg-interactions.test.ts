@@ -3,12 +3,40 @@ import fs from "node:fs/promises"
 import { createTempProject, readFileRaw, writeFileRaw } from "@/test-helpers/fs-temp"
 import type { LlmConfig } from "@/stores/wiki-store"
 import { streamChat } from "./llm-client"
-import { buildRuntimeUpdateProposalInputFromTurnRecord, type RpgTurnRecord, type RuntimeUpdateProposalResult } from "./rpg-runtime"
 import {
+  buildRuntimeUpdateProposalInputFromTurnRecord,
+  type ActionResolverInput,
+  type NarrationGeneratorInput,
+  type NarrationSourceRef,
+  type OutlineBriefCompilerInput,
+  type PlayerKnowledgeBoundary,
+  type RecallBudget,
+  type RecallPolicy,
+  type RecallSelectorInput,
+  type RetrievalIndexEntry,
+  type RpgTurnRecord,
+  type StoryOutlineRegeneratorInput,
+  type SubmittedAction,
+  type WorldTickInput,
+} from "./rpg-runtime"
+import {
+  sampleActionResolution,
+  sampleMajorOutlineBriefOutput,
+  samplePostActionWorkingState,
+  sampleRecalledMaterials,
+  sampleRecallSelection,
   sampleTurnNarration,
   sampleTurnRecordRuntimeParts,
+  sampleVisibleSelection,
+  sampleWorldTickResult,
 } from "./rpg-runtime-test-fixtures"
 import {
+  buildActionResolverPrompt,
+  buildNarrationGeneratorPrompt,
+  buildOutlineBriefPrompt,
+  buildRecallSelectorPrompt,
+  buildStoryOutlineRegeneratorPrompt,
+  buildWorldTickPrompt,
   buildRpgAnalysisPrompt,
   buildRpgGenerationPrompt,
   campaignSetupImportContract,
@@ -277,7 +305,7 @@ describe("RPG Interaction Contract", () => {
 
     const runtimeInteractionFiles = await readTextFilesUnder("src/lib/rpg-interactions/runtime")
     const runtimeInteractionSource = runtimeInteractionFiles.join("\n")
-    expect(runtimeInteractionSource).toContain("You are the llmWikiRPG Runtime Update Proposal interaction")
+    expect(runtimeInteractionSource).toContain("你是 llmWikiRPG 在 19 步 runtime 流程中使用的 LLM 6 Runtime Update Proposal Draft 交互")
     expect(runtimeInteractionSource).not.toContain("You are the dedicated llmWikiRPG narration runtime")
     expect(runtimeInteractionSource).not.toContain("# RPG Narration Brief")
     expect(runtimeInteractionSource).not.toContain("RpgNarrationAdapter")
@@ -288,6 +316,57 @@ describe("RPG Interaction Contract", () => {
     expect(runtimeInteractionSource).toContain("createLlmRpgNarrationGeneratorAdapter")
     expect(runtimeInteractionSource).toContain("validateRpgRuntimeUpdateProposals")
     expect(runtimeInteractionSource).toContain("validateRpgRuntimeUpdateTarget")
+  })
+
+  it("guards runtime JSON prompt contracts against undefined value leakage", () => {
+    const runtimePrompts = [
+      ["Action Resolver", buildActionResolverPrompt(sampleRuntimeActionResolverInput())],
+      ["World Tick", buildWorldTickPrompt(sampleRuntimeWorldTickInput())],
+      ["Recall Selector", buildRecallSelectorPrompt(sampleRuntimeRecallSelectorInput())],
+      ["Outline Brief", buildOutlineBriefPrompt(sampleRuntimeOutlineBriefInput())],
+      ["Story Outline Regenerator", buildStoryOutlineRegeneratorPrompt(sampleRuntimeStoryRegeneratorInput())],
+      ["Narration Generator", buildNarrationGeneratorPrompt(sampleRuntimeNarrationGeneratorInput())],
+      [
+        "Runtime Update Proposal",
+        runtimeUpdateInteractionSpec.buildPrompt(buildRuntimeUpdateProposalInputFromTurnRecord(sampleTurnRecord())),
+      ],
+    ] as const
+
+    for (const [label, prompt] of runtimePrompts) {
+      expectNoUndefinedJsonContractLeak(label, `${prompt.systemPrompt}\n${prompt.userPrompt}`)
+    }
+
+    const runtimeUpdatePrompt = runtimePrompts.find(([label]) => label === "Runtime Update Proposal")?.[1]
+    if (!runtimeUpdatePrompt) throw new Error("missing Runtime Update Proposal prompt")
+    expect(`${runtimeUpdatePrompt.systemPrompt}\n${runtimeUpdatePrompt.userPrompt}`).toContain(
+      '"pacingUpdateProposal": null',
+    )
+  })
+
+  it("keeps slimmed soft-semantic runtime prompt contracts bounded", () => {
+    const actionPrompt = buildActionResolverPrompt(sampleRuntimeActionResolverInput())
+    const worldTickPrompt = buildWorldTickPrompt(sampleRuntimeWorldTickInput())
+    const narrationPrompt = buildNarrationGeneratorPrompt(sampleRuntimeNarrationGeneratorInput())
+
+    expect(promptChars(actionPrompt)).toBeLessThanOrEqual(26000)
+    expect(promptChars(worldTickPrompt)).toBeLessThanOrEqual(22000)
+    expect(promptChars(narrationPrompt)).toBeLessThanOrEqual(24000)
+
+    expect(actionPrompt.systemPrompt).toContain('"referencePaths": string[]')
+    expect(actionPrompt.systemPrompt).not.toContain('"references": [{')
+    expect(actionPrompt.systemPrompt).not.toContain('"code": string')
+
+    const worldTickSectionIds = worldTickPrompt.debugSections?.map((section) => section.sectionId) ?? []
+    expect(worldTickSectionIds).toContain("world-tick-action-brief")
+    expect(worldTickSectionIds).not.toContain("world-tick-action-resolution")
+    expect(worldTickSectionIds).not.toContain("world-tick-canonical-player-action-delta")
+    expect(worldTickSectionIds).not.toContain("world-tick-resolved-time-delta")
+    expect(worldTickPrompt.systemPrompt).not.toContain('"tickId"?: string')
+    expect(worldTickPrompt.systemPrompt).not.toContain("DraftReference")
+    expect(worldTickPrompt.systemPrompt).not.toContain("DraftWarning")
+
+    expect(narrationPrompt.systemPrompt).toContain('"narrationSelfReport"?:')
+    expect(narrationPrompt.systemPrompt).not.toContain('"likelyAffectedPaths": string[]')
   })
 
   it("builds source ingest analysis prompts through the interaction spec", () => {
@@ -541,45 +620,46 @@ describe("RPG Interaction Contract", () => {
     expect(combined).toContain("wiki/relationships/runtime/*.md")
     expect(combined).toContain("wiki/plot-arcs/runtime/*.md")
     expect(combined).toContain("wiki/outlines/progress.md")
-    expect(combined).toContain("structured current-turn sources")
+    expect(combined).toContain("主要事实来源是这些结构化的当前回合输入")
     expect(combined).toContain("PostActionWorkingState")
     expect(combined).toContain("ActionResolution")
     expect(combined).toContain("WorldTickResult")
     expect(combined).toContain("TurnNarration")
-    expect(combined).toContain("generatedNarrative and playerFacingText are display/evidence material")
+    expect(combined).toContain("generatedNarrative 和 playerFacingText 只是展示/证据材料")
     expect(combined).not.toContain("The factual source is strictly submittedAction + generatedNarrative + references")
     expect(combined).toContain("outlineAwareNarrationBrief")
     expect(combined).toContain("outlineImpactReport")
-    expect(combined).toContain("outlineRevisionProposal can only become independent outlineRevisionReviewItems")
-    expect(combined).toContain("attempted_not_confirmed cannot enter confirmed events")
-    expect(combined).toContain("parallelLineText and user_visible_pc_unknown material")
-    expect(combined).toContain("nextActionOptions are candidate future actions")
-    expect(combined).toContain("You may only propose updates")
-    expect(combined).toContain("Stable, manual, base, and legacy paths are forbidden")
-    expect(combined).toContain("This stage only parses JSON and performs structure/boundary checks")
-    expect(combined).toContain("events updates must contain only confirmed happened events")
-    expect(combined).toContain("current-scene must be a compact latest-moment snapshot only")
-    expect(combined).toContain("Cross-directory sync contract")
-    expect(combined).toContain("long-term state must not live only in current-scene")
-    expect(combined).toContain("First-version runtime sync does not auto-create missing updates")
-    expect(combined).toContain("relationships/runtime updates must record relationship deltas")
-    expect(combined).toContain("plot-arcs/runtime updates are for runtime story pressure")
-    expect(combined).toContain("player/goals.md is for PC subjective motives")
-    expect(combined).toContain("do not store quest progress, player TODO/checklists, candidate actions, or plot pressure there")
-    expect(combined).toContain("quests are game-recognized trackable objectives")
-    expect(combined).toContain("do not treat any goal, subjective wish, or player TODO/checklist as a quest")
-    expect(combined).toContain("never use them as player TODO/checklists or quest ledgers")
-    expect(combined).toContain("player/inventory.md is for current holdings")
-    expect(combined).toContain("item definitions and object-level runtime state belong in items/runtime/")
-    expect(combined).toContain("Forbidden runtime targets include base wiki/relationships/*.md")
+    expect(combined).toContain("outlineRevisionProposal 只能变成独立的 outlineRevisionReviewItems")
+    expect(combined).toContain("attempted_not_confirmed 不能进入已确认事件")
+    expect(combined).toContain("parallelLineText 和 user_visible_pc_unknown 材料")
+    expect(combined).toContain("nextActionOptions 是候选未来行动")
+    expect(combined).toContain("你只能提出更新建议")
+    expect(combined).toContain("stable、manual、base 和 legacy 路径一律禁止")
+    expect(combined).toContain("这个阶段只负责解析 JSON 并执行结构/边界检查")
+    expect(combined).toContain("events 更新只能包含已确认发生的事件")
+    expect(combined).toContain("current-scene 只能是紧凑的最新时刻快照")
+    expect(combined).toContain("跨目录同步契约")
+    expect(combined).toContain("长期状态不能只存在于 current-scene")
+    expect(combined).toContain("第一版 runtime sync 不会自动补造缺失更新")
+    expect(combined).toContain("relationships/runtime 更新必须记录关系 delta")
+    expect(combined).toContain("plot-arcs/runtime 更新用于 runtime 故事压力")
+    expect(combined).toContain("player/goals.md 用于 PC 主观动机")
+    expect(combined).toContain("不要在里面存 quest progress、玩家 TODO/清单、候选行动或剧情压力")
+    expect(combined).toContain("quests 是游戏认可的可追踪目标")
+    expect(combined).toContain("不要把任何 goal、主观愿望或玩家 TODO/清单当作 quest")
+    expect(combined).toContain("绝不能把它当成玩家 TODO/清单或 quest 台账")
+    expect(combined).toContain("player/inventory.md 只用于当前持有物")
+    expect(combined).toContain("物品定义和对象级 runtime 状态属于 items/runtime/")
+    expect(combined).toContain("禁止的 runtime 目标包括 base wiki/relationships/*.md")
     expect(combined).toContain("base wiki/plot-arcs/*.md")
     expect(combined).toContain("wiki/outlines/main.md")
-    expect(combined).toContain("Do not stage pending updates")
-    expect(combined).toContain("do not apply updates")
-    expect(combined).toContain("RuntimeUpdateProposalResult JSON")
+    expect(combined).toContain("不要暂存 pending updates")
+    expect(combined).toContain("不要应用更新")
+    expect(combined).toContain("RuntimeUpdateProposalDraft JSON")
     expect(combined).toContain("proposedWikiUpdates")
-    expect(combined).toContain("sourceDeltas, lineTarget, visibility, knowledgeScope, happenedStatus, confidence, and validationHints")
-    expect(combined).toContain("The only accepted output contract is structured JSON")
+    expect(combined).toContain("targetPath、strategy、reason、content、runtimeDeltaIds")
+    expect(combined).toContain("不要输出 sourceDeltas")
+    expect(combined).toContain("唯一可接受的输出契约是结构化 JSON")
     expect(combined).not.toContain("rpg-wiki-update")
     expect(combined).toContain("Ask Rin whether the sigil is a ward or a lure.")
     expect(combined).toContain("A cautious sigil read begins; the gate opening is not confirmed.")
@@ -602,7 +682,7 @@ describe("RPG Interaction Contract", () => {
         ].join("\n"),
         buildRuntimeUpdateProposalInputFromTurnRecord(turnRecord),
       ),
-    ).toThrow(/RuntimeUpdateProposalResult must be bare JSON or a fenced JSON block/)
+    ).toThrow(/RuntimeUpdateProposalDraft must be a JSON object/)
   })
 
   it("rejects empty runtime update proposal output", () => {
@@ -676,7 +756,7 @@ describe("RPG Interaction Contract", () => {
     const proposalInput = buildRuntimeUpdateProposalInputFromTurnRecord(turnRecord)
     runtimeUpdateInteractionSpec.buildPrompt(proposalInput)
     runtimeUpdateInteractionSpec.parseOutput(
-      JSON.stringify(sampleRuntimeUpdateProposalResult(turnRecord)),
+      JSON.stringify(sampleRuntimeUpdateProposalDraft()),
       proposalInput,
     )
     const after = await snapshotFiles(projectPath)
@@ -703,53 +783,389 @@ function sampleTurnRecord(): RpgTurnRecord {
   }
 }
 
-function sampleRuntimeUpdateProposalResult(turnRecord: RpgTurnRecord): RuntimeUpdateProposalResult {
+function sampleRuntimeUpdateProposalDraft() {
   return {
     proposedWikiUpdates: [
       {
-        id: "runtime-update-scene-turn-69",
         targetPath: "wiki/current-scene/scene_state.md",
         strategy: "overwrite",
-        reason: "Keep the scene aligned.",
-        content: "# Current Scene\n\nRin studies the ward beside the quiet gate.",
-        sourceTurnId: turnRecord.submittedAction.id,
-        references: ["wiki/current-scene/scene_state.md"],
-        sourceDeltas: [
+        reason: "Keep current scene aligned with the cautious sigil read.",
+        content: "# Current Scene\n\nRin is checking whether the sigil is a ward while the gate stays closed.",
+        runtimeDeltaIds: [],
+        sourceRefs: [
           {
-            deltaId: "source-delta-scene-turn-69",
-            sourceStage: "postActionWorkingState",
-            sourceField: "campaignDelta",
-            summary: "The current scene remains focused on Rin reading the ward.",
-            lineTarget: "playerVisibleLine",
-            visibility: "pc_visible",
-            knowledgeScope: "pc_known",
-            happenedStatus: "ongoing",
-            usePurpose: "writeback",
-            affectedPaths: ["wiki/current-scene/scene_state.md"],
-            runtimeDeltaRefs: turnRecord.postActionWorkingState.runtimeDeltaRefs,
+            path: "wiki/current-scene/scene_state.md",
+            reason: "Current scene source from this turn.",
           },
         ],
-        lineTarget: "playerVisibleLine",
-        visibility: "pc_visible",
-        knowledgeScope: "pc_known",
         happenedStatus: "ongoing",
         confidence: "high",
-        validationHints: [
-          {
-            hintId: "hint-scene-turn-69",
-            severity: "info",
-            code: "structured_source_delta",
-            message: "Structured proposal fixture for interaction tests.",
-          },
-        ],
+        riskNotes: [],
       },
     ],
     outlineRevisionReviewItems: [],
     journalEntries: [],
     skippedDeltas: [],
     pacingUpdateProposal: null,
-    proposalGroups: [],
     warnings: [],
+  }
+}
+
+function expectNoUndefinedJsonContractLeak(label: string, combinedPrompt: string): void {
+  expect(combinedPrompt, `${label} prompt must not expose TypeScript optional unions`).not.toContain("| undefined")
+  expect(combinedPrompt, `${label} prompt must not place undefined after a JSON colon`).not.toMatch(
+    /:\s*undefined\b/,
+  )
+  expect(combinedPrompt, `${label} prompt must not place undefined before a comma`).not.toMatch(/\bundefined\s*,/)
+  expect(combinedPrompt, `${label} prompt must not place undefined before JSON closers`).not.toMatch(
+    /\bundefined\s*[}\]]/,
+  )
+}
+
+function promptChars(prompt: { systemPrompt: string; userPrompt: string }): number {
+  return prompt.systemPrompt.length + prompt.userPrompt.length
+}
+
+function sampleRuntimeActionResolverInput(): ActionResolverInput {
+  return {
+    submittedAction: sampleSubmittedAction("act-audit-action"),
+    preActionSnapshot: {
+      currentScene: {
+        path: "wiki/current-scene/scene_state.md",
+        summary: "Iven and Mira stand before the canal gate.",
+        visibleSituation: "A cracked sigil glows beside the lock.",
+        presentCharacters: ["player:Iven", "character:Mira"],
+        interactableObjects: ["location:canal-gate-sigil"],
+        currentDangers: ["The Harbor Watch patrol may return."],
+        locationActionConditions: ["The sigil should be inspected before contact."],
+      },
+      player: {
+        stateSummary: "Iven is cautious and alert.",
+        abilities: ["Sense weak ward pressure."],
+        inventory: ["Brass lantern key"],
+        goals: ["Open the gate quietly."],
+        knownInformation: ["Mira recognizes canal ward marks."],
+        knownInformationPath: "wiki/player/known_information.md",
+        conditionNotes: [],
+      },
+      activeClocks: [],
+      countdowns: [],
+      pendingReactions: [],
+      pacingState: {
+        summary: "The scene is active and under light pressure.",
+      },
+      outlineProgress: {
+        progressPath: "wiki/outlines/progress.md",
+        currentBeat: "Decode the canal gate sigil.",
+        adjacentBeats: ["Open the quiet route."],
+        branchConditions: ["Forcing the gate alerts the Harbor Watch."],
+        progressSummary: "The scene is between investigation and route opening.",
+      },
+      rulesExcerpts: [],
+      references: ["wiki/current-scene/scene_state.md", "wiki/player/known_information.md"],
+    },
+    relevantRules: [],
+    fixedSlotRefs: [
+      {
+        path: "wiki/current-scene/scene_state.md",
+        role: "preActionSceneSnapshot",
+        summary: "Frozen current scene snapshot.",
+        required: true,
+      },
+      {
+        path: "wiki/player/known_information.md",
+        role: "playerKnowledgeBoundary",
+        summary: "PC knowledge boundary.",
+        required: true,
+      },
+    ],
+    recentTurnSummary: "Mira warned Iven not to touch the sigil too quickly.",
+    runtimeRefs: [],
+  }
+}
+
+function sampleRuntimeWorldTickInput(): WorldTickInput {
+  const submittedAction = sampleSubmittedAction("act-audit-world-tick")
+  const actionResolution = sampleActionResolution(submittedAction)
+
+  return {
+    submittedAction,
+    actionResolution,
+    playerActionDelta: actionResolution.playerActionDelta,
+    timeDelta: actionResolution.timeDelta,
+    preActionRefs: [],
+    postActionRefs: [],
+    activeClocks: [],
+    ongoingEvents: [],
+    pacingState: {
+      summary: "The gate scene is moving but still under pressure.",
+      pacingDebt: "low",
+      recentLowProgressTurnCount: 1,
+      expectedCampaignDelta: "Move the gate decision forward.",
+      stalledLines: [],
+      pressureNotes: [],
+      affectedPaths: ["wiki/current-scene/scene_state.md"],
+      runtimeDeltaRefs: [],
+    },
+    gapSignals: [],
+    visibilityPolicy: {
+      allowParallelLineDisplay: true,
+      pcKnowledgeBoundaryPath: "wiki/player/known_information.md",
+      requireVisibilityMeta: true,
+      parallelLineDoesNotGrantPcKnowledge: true,
+      notes: ["Parallel-line display is not PC knowledge."],
+    },
+    runtimeRefs: actionResolution.runtimeDeltaRefs,
+  }
+}
+
+function sampleRuntimeRecallSelectorInput(): RecallSelectorInput {
+  const parts = sampleRuntimeParts("act-audit-recall")
+
+  return {
+    postActionWorkingState: parts.postActionWorkingState,
+    actionResolution: parts.actionResolution,
+    worldTickResult: parts.worldTickResult,
+    visibleSelection: parts.visibleSelection,
+    pacingState: parts.postActionWorkingState.pacingState,
+    gapState: parts.postActionWorkingState.gapState,
+    retrievalIndex: sampleRuntimeRetrievalIndex(),
+    recallBudget: sampleRuntimeRecallBudget(),
+    recallPolicy: sampleRuntimeRecallPolicy(),
+  }
+}
+
+function sampleRuntimeOutlineBriefInput(): OutlineBriefCompilerInput {
+  const parts = sampleRuntimeParts("act-audit-outline")
+  const recallSelection = sampleRecallSelection(`post-action-working-state-${parts.submittedAction.id}`)
+  const recalledMaterials = sampleRecalledMaterials()
+
+  return {
+    postActionWorkingState: parts.postActionWorkingState,
+    actionResolution: parts.actionResolution,
+    worldTickResult: parts.worldTickResult,
+    visibleSelection: parts.visibleSelection,
+    recallSelection,
+    recalledMaterials,
+    pacingState: parts.postActionWorkingState.pacingState,
+    gapState: parts.postActionWorkingState.gapState,
+    reactionQueue: parts.worldTickResult.reactionQueue,
+    visibilityBoundaries: sampleRuntimeVisibilityBoundaries(),
+    outlineSlices: [],
+    plotArcTensionFuel: [],
+    hardConstraints: [],
+    runtimeRefs: [
+      ...parts.postActionWorkingState.runtimeDeltaRefs,
+      ...parts.actionResolution.runtimeDeltaRefs,
+      ...parts.worldTickResult.runtimeDeltaRefs,
+    ],
+    knownReferences: [
+      {
+        path: "wiki/current-scene/scene_state.md",
+        sectionId: "slot.current_scene",
+        reason: "Prompt audit current scene reference.",
+      },
+    ],
+  }
+}
+
+function sampleRuntimeStoryRegeneratorInput(): StoryOutlineRegeneratorInput {
+  const parts = sampleRuntimeParts("act-audit-regenerator")
+  const outlineBrief = sampleMajorOutlineBriefOutput(parts.submittedAction)
+  if (!outlineBrief.regenerationRequest) throw new Error("missing fixture regeneration request")
+  const runtimeRef = parts.worldTickResult.runtimeDeltaRefs[0] ?? parts.actionResolution.runtimeDeltaRefs[0]
+  if (!runtimeRef) throw new Error("missing fixture runtime ref")
+
+  return {
+    postActionWorkingState: parts.postActionWorkingState,
+    outlineImpactReport: outlineBrief.outlineImpactReport,
+    regenerationRequest: outlineBrief.regenerationRequest,
+    recalledMaterials: sampleRecalledMaterials(),
+    outlineSlices: [],
+    plotArcTensionFuel: [],
+    visibilityBoundaries: sampleRuntimeVisibilityBoundaries(),
+    hardConstraints: [],
+    confirmedFacts: [
+      {
+        factId: "fact.prompt-audit",
+        summary: "Mira's warning is visible and must be preserved.",
+        sourceRefs: outlineBrief.regenerationRequest.sourceRefs,
+        runtimeDeltaRefs: [runtimeRef],
+        happenedStatus: "confirmed_happened",
+        mustPreserve: true,
+      },
+    ],
+    forbiddenReveals: [
+      {
+        revealId: "reveal.gate_patron",
+        stableId: "reveal.gate_patron",
+        sourcePath: "wiki/outlines/progress.md",
+        sectionId: "outlineProgress.adjacent_beats",
+        lineTarget: "playerVisibleLine",
+        visibilityScope: "gm_only",
+        knowledgeScope: "gm_only",
+        reason: "The patron remains hidden for the prompt audit fixture.",
+      },
+    ],
+    runtimeRefs: [
+      ...parts.postActionWorkingState.runtimeDeltaRefs,
+      ...parts.actionResolution.runtimeDeltaRefs,
+      ...parts.worldTickResult.runtimeDeltaRefs,
+    ],
+    knownReferences: [
+      {
+        path: "wiki/outlines/progress.md",
+        sectionId: "outlineProgress.adjacent_beats",
+        stableId: "reveal.gate_patron",
+        reason: "Prompt audit outline reference.",
+      },
+    ],
+  }
+}
+
+function sampleRuntimeNarrationGeneratorInput(): NarrationGeneratorInput {
+  const submittedAction = sampleSubmittedAction("act-audit-narration")
+  const reference = sampleNarrationReference()
+  const recallSelection = sampleRecallSelection(`post-action-working-state-${submittedAction.id}`)
+  const recalledMaterials = sampleRecalledMaterials()
+  const runtimeParts = sampleTurnRecordRuntimeParts(submittedAction, {
+    recallSelection,
+    recalledMaterials,
+  })
+  const playerKnowledgeBoundary = samplePlayerKnowledgeBoundary(reference)
+
+  return {
+    postActionWorkingState: runtimeParts.postActionWorkingState,
+    actionResolution: runtimeParts.actionResolution,
+    worldTickResult: runtimeParts.worldTickResult,
+    visibleSelection: runtimeParts.visibleSelection,
+    outlineAwareNarrationBrief: runtimeParts.outlineAwareNarrationBrief,
+    recallSelection: runtimeParts.recallSelection,
+    recalledMaterials: runtimeParts.recalledMaterials,
+    styleBundle: {
+      bundleId: "style-bundle-prompt-audit",
+      toneRules: ["Keep narration grounded and concise."],
+      dictionRules: ["Use concrete sensory language."],
+      pacingRules: ["Move the scene through the visible warning."],
+      forbiddenStyleMoves: ["Do not turn style guidance into world facts."],
+      sourceRefs: [reference],
+      styleIsNotWorldFact: true,
+      styleIsNotPlotFact: true,
+    },
+    forbiddenNarrationConstraints: [],
+    playerKnowledgeBoundary,
+    references: [reference],
+    runtimeRefs: runtimeParts.worldTickResult.runtimeDeltaRefs,
+  }
+}
+
+function sampleRuntimeParts(id: string) {
+  const submittedAction = sampleSubmittedAction(id)
+  const actionResolution = sampleActionResolution(submittedAction)
+  const worldTickResult = sampleWorldTickResult(actionResolution)
+  const visibleSelection = sampleVisibleSelection(actionResolution, worldTickResult)
+  const postActionWorkingState = samplePostActionWorkingState(
+    submittedAction,
+    actionResolution,
+    worldTickResult,
+    visibleSelection,
+  )
+
+  return { submittedAction, actionResolution, worldTickResult, visibleSelection, postActionWorkingState }
+}
+
+function sampleSubmittedAction(id: string): SubmittedAction {
+  return {
+    id,
+    text: "Ask Mira to inspect the canal gate sigil.",
+    source: "freeform",
+  }
+}
+
+function sampleRuntimeRetrievalIndex(): RetrievalIndexEntry[] {
+  return [
+    {
+      path: "wiki/current-scene/scene_state.md",
+      title: "Current Scene",
+      categoryId: "current-scene",
+      summary: "Latest canal gate scene snapshot.",
+      lineTargets: ["playerVisibleLine"],
+      visibilityScope: "pc_visible",
+      knowledgeScope: "pc_known",
+      availableSections: [
+        {
+          sectionId: "slot.current_scene",
+          sectionRole: "current_visible_state",
+          heading: "Current Scene",
+          aliases: ["Scene State"],
+          lineTargets: ["playerVisibleLine"],
+          readModes: ["summary", "focusedSection"],
+          visibilityScope: "pc_visible",
+          knowledgeScope: "pc_known",
+          summary: "Visible current scene facts.",
+        },
+      ],
+      tags: ["scene"],
+    },
+  ]
+}
+
+function sampleRuntimeRecallBudget(): RecallBudget {
+  return {
+    maxItems: 4,
+    maxSections: 6,
+    maxEstimatedTokens: 2200,
+    preferredLineTargets: ["playerVisibleLine", "parallelLine", "tensionLine"],
+  }
+}
+
+function sampleRuntimeRecallPolicy(): RecallPolicy {
+  return {
+    allowFullPageRead: false,
+    requireStableSectionIds: true,
+    pcKnowledgeBoundaryPath: "wiki/player/known_information.md",
+    parallelLineDoesNotGrantPcKnowledge: true,
+    notes: ["Select by stable sectionId only."],
+  }
+}
+
+function sampleRuntimeVisibilityBoundaries(): OutlineBriefCompilerInput["visibilityBoundaries"] {
+  return [
+    {
+      boundaryId: "visibility.pc-known-only",
+      lineTarget: "playerVisibleLine",
+      visibilityScope: "pc_visible",
+      knowledgeScope: "pc_known",
+      grantsPcKnowledge: true,
+      sourcePath: "wiki/player/known_information.md",
+      sectionId: "slot.player_known_information",
+      reason: "Player-facing material must remain PC-known.",
+    },
+  ]
+}
+
+function sampleNarrationReference(): NarrationSourceRef {
+  return {
+    path: "wiki/current-scene/scene_state.md",
+    sectionId: "slot.current_scene",
+    runtimeDeltaId: "patrol-countdown-advance",
+    lineTarget: "playerVisibleLine",
+    usePurpose: "narration",
+    visibilityScope: "pc_visible",
+    knowledgeScope: "pc_known",
+    reason: "Ground the player-facing prompt audit narration.",
+  }
+}
+
+function samplePlayerKnowledgeBoundary(ref: NarrationSourceRef): PlayerKnowledgeBoundary {
+  return {
+    boundaryId: "player-knowledge-boundary-prompt-audit",
+    pcKnowledgePath: "wiki/player/known_information.md",
+    allowedKnowledgeRefs: [ref],
+    forbiddenVisibilityScopes: ["user_visible_pc_unknown", "gm_only", "hidden"],
+    parallelLineDoesNotGrantPcKnowledge: true,
+    showParallelLineDoesNotGrantPcKnowledge: true,
+    notes: ["Parallel-line display is not PC knowledge."],
   }
 }
 

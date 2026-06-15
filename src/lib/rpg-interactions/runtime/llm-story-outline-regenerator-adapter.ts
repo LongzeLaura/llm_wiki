@@ -13,6 +13,7 @@ export interface CreateLlmRpgStoryOutlineRegeneratorAdapterInput {
 
 export interface LlmRpgStoryOutlineRegeneratorAdapterOptions {
   requestOverrides?: RequestOverrides
+  repairRequestOverrides?: RequestOverrides
 }
 
 export function createLlmRpgStoryOutlineRegeneratorAdapter(
@@ -24,6 +25,16 @@ export function createLlmRpgStoryOutlineRegeneratorAdapter(
       const output = await collectRpgStoryOutlineRegeneratorOutput(input, options, prompt)
       return storyOutlineRegeneratorInteractionSpec.parseOutput(output, promptInput)
     },
+    async regenerateOutlineRawOutput(prompt) {
+      return collectRpgStoryOutlineRegeneratorOutput(input, options, prompt)
+    },
+    async repairStoryOutlineRegeneratorRawOutput(prompt) {
+      return collectRpgStoryOutlineRegeneratorOutput(input, options, prompt, {
+        temperature: 0,
+        max_tokens: 1800,
+        ...options.repairRequestOverrides,
+      })
+    },
   }
 }
 
@@ -31,6 +42,7 @@ async function collectRpgStoryOutlineRegeneratorOutput(
   input: CreateLlmRpgStoryOutlineRegeneratorAdapterInput,
   options: LlmRpgStoryOutlineRegeneratorAdapterOptions,
   prompt: RpgStoryOutlineRegeneratorPrompt,
+  requestOverrides: RequestOverrides | undefined = options.requestOverrides,
 ): Promise<string> {
   let output = ""
   let streamError: Error | undefined
@@ -52,7 +64,7 @@ async function collectRpgStoryOutlineRegeneratorOutput(
         },
       },
       input.signal,
-      options.requestOverrides,
+      requestOverrides,
     )
   } catch (error) {
     if (input.signal?.aborted) {

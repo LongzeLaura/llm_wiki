@@ -1,4 +1,5 @@
 export * from "./interaction-spec"
+export * from "./prompt-debug"
 export * from "./campaign-setup"
 export * from "./control-doc"
 export * from "./merge"

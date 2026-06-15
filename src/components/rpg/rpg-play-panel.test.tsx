@@ -6,7 +6,7 @@ import {
   RpgPlayPanel,
   TurnNarrativePanel,
 } from "@/components/rpg"
-import type { RpgActionOption } from "@/lib/rpg-runtime"
+import type { RpgActionOption } from "@/lib/rpg-runtime/turn-model"
 
 describe("RPG Play Panel v0 components", () => {
   it("exports Stage 4 RPG panel components from src/components/rpg", () => {
@@ -26,7 +26,7 @@ describe("RPG Play Panel v0 components", () => {
       />,
     )
 
-    expect(html).toContain("Current scene")
+    expect(html).toContain("当前场景")
     expect(html).toContain("Iven and Mira face a locked canal gate.")
   })
 
@@ -40,9 +40,9 @@ describe("RPG Play Panel v0 components", () => {
       />,
     )
 
-    expect(html).toContain("Last narrative")
+    expect(html).toContain("上一段叙事")
     expect(html).toContain("Mira traces the sigil")
-    expect(html).toContain("Future candidate actions")
+    expect(html).toContain("候选下一步行动")
     expect(html).not.toContain("Completed future action")
     expect(html).not.toContain("Wiki update")
   })
@@ -56,7 +56,7 @@ describe("RPG Play Panel v0 components", () => {
       />,
     )
 
-    expect(html).toContain("Future candidate actions")
+    expect(html).toContain("候选下一步行动")
     expect(html).toContain("Ask Mira what the cracked sigil means before touching it.")
     expect(html).toContain("Force the canal gate before the patrol returns.")
     expect(html).toContain("Wait in silence and watch the patrol route.")

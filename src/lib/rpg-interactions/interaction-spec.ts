@@ -19,6 +19,29 @@ export type RpgInteractionKind =
 export interface RpgInteractionPrompt {
   systemPrompt: string
   userPrompt: string
+  debugSections?: RpgPromptDebugSection[]
+}
+
+export type RpgPromptDebugSectionSourceKind =
+  | "fixed_prompt"
+  | "player_input"
+  | "wiki_file"
+  | "runtime_handoff"
+  | "llm_output"
+  | "local_input_builder"
+  | "local_result"
+  | "validation"
+
+export type RpgPromptDebugContentType = "text" | "json" | "markdown"
+
+export interface RpgPromptDebugSection {
+  sectionId: string
+  title: string
+  promptRole: "system" | "user"
+  sourceKind: RpgPromptDebugSectionSourceKind
+  sourceLabel: string
+  contentType: RpgPromptDebugContentType
+  content: string
 }
 
 export interface RpgInteractionSpec<TInput, TOutput> {

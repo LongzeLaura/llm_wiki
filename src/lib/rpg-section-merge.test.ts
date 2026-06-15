@@ -64,7 +64,7 @@ describe("mergeRpgSections", () => {
 
   it("replaces stale Current State on runtime-state pages with LLM or incoming state", () => {
     const llmState = merge("## Current State\n\n- Player is beside the sealed gate.", {
-      pagePath: "wiki/player/status.md",
+      pagePath: "wiki/player/player.md",
       existingBody: "## Current State\n\n- Player is still in the tavern.",
       incomingBody: "## Current State\n\n- Player is beside the canal.",
     })
@@ -72,7 +72,7 @@ describe("mergeRpgSections", () => {
     expect(llmState.content).not.toContain("still in the tavern")
 
     const incomingState = merge("## Runtime Capsule\n\n- Player state matters next turn.", {
-      pagePath: "wiki/player/status.md",
+      pagePath: "wiki/player/player.md",
       existingBody: "## Current State\n\n- Player is still in the tavern.",
       incomingBody: "## Current State\n\n- Player is beside the canal.",
     })

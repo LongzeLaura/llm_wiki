@@ -4,6 +4,8 @@ import { validateRecallSelection } from "./recall-selector-validation"
 
 export interface RpgRecallSelectorAdapter {
   selectRecall(prompt: RpgRecallSelectorPrompt, promptInput: RecallSelectorInput): Promise<RecallSelection>
+  selectRecallRawOutput?(prompt: RpgRecallSelectorPrompt, promptInput: RecallSelectorInput): Promise<string>
+  repairRecallRawOutput?(prompt: RpgRecallSelectorPrompt, promptInput: RecallSelectorInput): Promise<string>
 }
 
 export function createFixtureRecallSelectorAdapter(selection: RecallSelection): RpgRecallSelectorAdapter {

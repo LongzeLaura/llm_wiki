@@ -251,6 +251,19 @@ Markdown 仍然是事实来源。项目必须包含 `.llm-wiki/project.json`、`
 | 运行时状态层 | 当前回合状态、玩家状态、目标进度、已发生事件、当前场景 | `wiki/current-scene/`、`wiki/events/`、`wiki/player/`、`wiki/quests/`、runtime overlay | runtime agent |
 | 控制层 | 文风、规则、变量、用户记忆、主线大纲、运行约束 | `wiki/style/`、`wiki/rules/`、`wiki/memory/`、`wiki/outlines/` | 仅手动或显式用户动作 |
 
+大纲与知识边界按四层处理：
+
+- GM Truth / Control Layer：`wiki/outlines/main.md` 承载 GM-only truth、Act Structure、Reveal Gates、Branch Conditions、Must Not Contradict；它指导运行时，但不是已发生事件。
+- Actor Knowledge Layer：`wiki/player/known_information.md` 只接收 PC 已知、PC 推断和 PC 误解；NPC 当前知识、误解、秘密、目标和对 PC 的判断进入 `wiki/characters/runtime/*.md`，角色之间的信息差和揭示后果进入 `wiki/relationships/runtime/*.md`。
+- Reveal Gate Layer：`wiki/outlines/progress.md`、`wiki/plot-arcs/runtime/*.md` 和 `wiki/relationships/runtime/*.md` 记录 active reveal gates、reveal progress、当前信息边界、未解决压力和禁止过早解决的剧情压力。
+- Narration Lens Layer：`playerVisibleLine`、`parallelLine`、`tensionLine` 只是每轮 brief / narration 的输出 lens，不是大纲结构，也不是三条需要平等、同步、持续推进的主线。`parallelLineText` 或真实用户可见但 PC 未知的幕后镜头不能自动写入 PC knowledge。
+
+代码层已接入 actor metadata 协议：共享 schema 提供 `RpgKnowledgeActorRef`、`RpgBeliefState`、`RpgRevealState`，runtime handoff 使用 `RpgKnowledgeClaim` / `RpgRevealGateRef` 表达 holders、non-holders、belief state 与 reveal state。`visibilityScope` / `knowledgeScope` 仍是粗粒度摘要，不是旧协议 fallback；当模型声明 `npc_known` 或 Runtime Update Proposal 要写入 actor-boundary 目标时，必须提供具体 actor holder 与 claim metadata。
+
+Runtime Update Proposal 是写回边界的最后一层协议守门：`wiki/player/known_information.md` 只接受 PC 已知 / 推断 / 误解，`characters/runtime/<id>.md` 的 NPC knowledge 必须匹配 `npc:<id>`，`relationships/runtime/*.md` 信息差必须体现 actor belief split，`plot-arcs/runtime/*.md` / `outlines/progress.md` reveal progress 必须携带 gate/state metadata，`events/*.md` 仍只记录 confirmed happened。普通 runtime proposal 不能写 `wiki/outlines/main.md`，主线修订仍必须走独立 outline review item。
+
+因此，“GM 知道、PC 不知道、某 NPC 知道”的信息不会落在同一个文件：GM 完整真相在 `outlines/main.md`，PC 已知/推断/误解在 `player/known_information.md`，NPC 的知识或秘密在对应 `characters/runtime/*.md`，角色关系中的信息差在 `relationships/runtime/*.md`。未来可能、未选择选项和 GM-only reveal 不得写成 `events/`。
+
 对于混合目录，最终架构应避免在游玩过程中直接改写稳定来源页，而是使用运行时覆盖层：
 
 ```text
@@ -423,17 +436,18 @@ runtime agent 只能通过专用更新 API 写入，不能自由调用通用文�
 |---|---|---|
 | `wiki/current-scene/scene_state.md` | 覆盖 | 只保存最新即时场景 |
 | `wiki/events/` | 追加 / 创建 | 只记录确认发生的事件 |
-| `wiki/player/` | 合并 | 玩家状态、物品栏、知识、目标 |
+| `wiki/player/` | 合并 | 玩家状态、物品栏、目标；`known_information.md` 只写 PC 已知、PC 推断或 PC 误解 |
 | `wiki/quests/` | 合并 | 目标、任务、阻碍、完成状态和已接受的运行时目标变化 |
-| `wiki/relationships/` | 合并 | 关系状态和张力变化 |
-| `wiki/plot-arcs/` | 合并 | 未解问题、冲突压力、可能发展 |
-| `wiki/characters/runtime/` | 合并 | NPC 的当前战役状态覆盖层 |
+| `wiki/relationships/` | 合并 | 关系状态、张力变化、信息差、信任门槛和揭示后果 |
+| `wiki/plot-arcs/` | 合并 | 未解问题、伏笔状态、reveal progress、冲突压力、可能发展 |
+| `wiki/characters/runtime/` | 合并 | NPC 当前状态、知识、误解、秘密、目标和对 PC 的判断 |
 | `wiki/locations/runtime/` | 合并 | 当前地点状态覆盖层 |
 | `wiki/factions/runtime/` | 合并 | 当前势力立场 / 资源覆盖层 |
 | `wiki/items/runtime/` | 合并 | 当前持有者、状态、消耗情况 |
 | `wiki/world/`、`wiki/rules/`、`wiki/style/`、`wiki/sources/`、`wiki/memory/`、`wiki/outlines/`、base `wiki/characters/*.md` / `wiki/locations/*.md` / `wiki/factions/*.md` / `wiki/items/*.md` | 阻止 | 运行时不改写稳定、证据、控制、手动或 base 材料 |
 
 关键区别：runtime 可以改变这场游戏中的世界状态，但不能改写原始世界观。
+另一个关键区别：runtime 可以用 `outlines/main.md` 的 GM control / reveal gate 指导叙事节奏，但不能把 GM-only truth、delayed reveal、未选择选项或未来可能写成 `events/`，也不能把 `parallelLineText` 自动提升为 `player/known_information.md`。
 
 ### 6. 行动选项生成
 

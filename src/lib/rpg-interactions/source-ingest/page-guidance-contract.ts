@@ -1,8 +1,10 @@
 import {
   RPG_DIRECTORY_BOUNDARY_GUIDANCE,
-  getRpgSourceIngestForbiddenTarget,
+  RPG_FIXED_PLAYER_SLOT_PATHS,
+  RPG_FIXED_WORLD_SLOT_PATHS,
   getRpgSourceIngestTargetPolicy,
   getRpgWikiSchemaEntry,
+  isRpgSourceIngestAllowedTarget,
   type RpgDirectoryBoundaryGuidance,
 } from "@/lib/rpg-wiki-schema"
 import type { RpgCategoryId } from "@/lib/rpg-categories"
@@ -26,6 +28,16 @@ const RPG_GUIDANCE_CATEGORIES = [
 ] as const satisfies readonly RpgGuidanceCategoryId[]
 
 const MAX_SOURCE_PROFILE_CATEGORIES = 4
+
+const SOURCE_INGEST_REVIEW_ONLY_MATERIALS: Record<string, string> = {
+  "wiki/rules/**": "Rules/control material",
+  "wiki/style/**": "Global style material",
+  "wiki/memory/**": "Memory/context material",
+  "wiki/outlines/**": "Outline/GM control material",
+  "wiki/current-scene/**": "Live current-scene material",
+  "wiki/*/runtime/**": "Runtime overlay/update material",
+  "wiki/quests/**": "Quest ledger/objective-tracking material",
+}
 
 const VALID_EVENT_EXTRACTION_MODES = [
   "none",
@@ -74,8 +86,8 @@ export function buildMinimalRpgGenerationContract(summaryPath: string): string {
     // 中文：- 每条事实优先选择一个最合适的目录，并通过交叉链接关联，而不是在许多页面中重复同一事实。
     "- Do not write unsupported interpretation as canon fact.",
     // 中文：- 不要把没有来源支持的解释写成正史事实。
-    "- Ordinary ingest must not generate or update wiki/current-scene/scene_state.md; current-scene is maintained only by the RPG Play/Runtime apply flow.",
-    // 中文：- 普通 ingest 不得生成或更新 wiki/current-scene/scene_state.md；current-scene 只由 RPG Play/Runtime apply 链路维护。
+    "- Ordinary ingest must not generate or update live current-scene pages; current-scene is maintained only by campaign setup or RPG Play/Runtime apply flows.",
+    // 中文：- 普通 ingest 不得生成或更新实时 current-scene 页面；current-scene 只由 campaign setup 或 RPG Play/Runtime apply 链路维护。
     "- If source text describes a canon scene, route it to events, plot-arcs, locations, characters, relationships, or sources as appropriate; do not treat it as the live current scene.",
     // 中文：- 如果来源文本描述正史场景，应按需要路由到 events、plot-arcs、locations、characters、relationships 或 sources，不要当作 live current scene。
     "- For every non-source RPG page, place a ## Runtime Capsule near the top unless the page is only an index/log/overview or a source summary.",
@@ -110,26 +122,38 @@ export function buildMinimalRpgGenerationContract(summaryPath: string): string {
  * 为什么需要：D1 的边界需要同时约束 schema、Source Ingest prompt 和 runtime target 文案，避免多个手写版本漂移。
  */
 export function buildRpgDirectoryBoundaryGuidance(): string {
+  const formattedGuidance = RPG_DIRECTORY_BOUNDARY_GUIDANCE
+    .map(formatSourceIngestBoundaryGuidance)
+    .filter((entry): entry is string => Boolean(entry))
+
   return [
     "## RPG Directory Boundary Guidance",
-    "For Source Ingest, use these boundaries to avoid misroutes. They are not permissions to write other-mode targets.",
-    ...RPG_DIRECTORY_BOUNDARY_GUIDANCE.map(formatSourceIngestBoundaryGuidance),
+    "For Source Ingest, only source_ingest-allowed FILE target semantics are expanded below.",
+    "Other-mode control, live current-scene, quest ledger, and runtime-overlay material is REVIEW-only under the Source Ingest Target Policy and is intentionally not expanded here as FILE target guidance.",
+    ...formattedGuidance,
   ].join("\n")
 }
 
-function formatSourceIngestBoundaryGuidance(guidance: RpgDirectoryBoundaryGuidance): string {
-  const pathNotes = guidance.paths.map((path) => {
-    const forbidden = getRpgSourceIngestForbiddenTarget(path)
-    return forbidden
-      ? `${path} (Source Ingest: REVIEW only; recommended mode ${forbidden.recommendedMode})`
-      : `${path} (Source Ingest boundary)`
-  })
+function formatSourceIngestBoundaryGuidance(guidance: RpgDirectoryBoundaryGuidance): string | null {
+  const allowedPaths = guidance.paths.filter((path) => isRpgSourceIngestAllowedTarget(path))
+  if (allowedPaths.length === 0) return null
+
   return [
-    `- ${pathNotes.join(" / ")}`,
+    `- ${allowedPaths.join(" / ")} (Source Ingest FILE boundary)`,
     `  Use this meaning to classify facts: ${guidance.include.join(" ")}`,
     `  Do not miswrite as: ${guidance.exclude.join(" ")}`,
-    `  Granularity: ${guidance.recommendedGranularity}`,
+    `  Granularity: ${sourceIngestBoundaryGranularity(guidance, allowedPaths)}`,
   ].join("\n")
+}
+
+function sourceIngestBoundaryGranularity(
+  guidance: RpgDirectoryBoundaryGuidance,
+  allowedPaths: readonly string[],
+): string {
+  if (allowedPaths.length < guidance.paths.length) {
+    return "Use only the source_ingest-allowed base target shown here; route other-mode state/control material to REVIEW under the Source Ingest Target Policy."
+  }
+  return guidance.recommendedGranularity
 }
 
 export function buildSourceIngestTargetPolicyGuidance(): string {
@@ -137,13 +161,15 @@ export function buildSourceIngestTargetPolicyGuidance(): string {
   return [
     "## Source Ingest Target Policy",
     "Ordinary Source Ingest is a lossy compiler for source material, not a control document import, campaign bootstrap, or runtime apply flow.",
+    `Fixed world FILE slots: ${RPG_FIXED_WORLD_SLOT_PATHS.join(", ")}.`,
+    `Fixed player FILE slots: ${RPG_FIXED_PLAYER_SLOT_PATHS.join(", ")}. Use them only when the source explicitly declares the current RPG PC.`,
     "Allowed ordinary Source Ingest FILE targets:",
     ...policy.ordinaryTargets.map((target) => `- ${target}`),
     "Allowed structural FILE targets:",
     ...policy.structuralTargets.map((target) => `- ${target}`),
-    "Forbidden in ordinary Source Ingest; emit REVIEW/warning instead of FILE blocks:",
+    "REVIEW-only material in ordinary Source Ingest; do not emit FILE blocks for these categories:",
     ...policy.forbiddenTargets.map((target) =>
-      `- ${target.pathPattern}: ${target.reason} Recommended mode: ${target.recommendedMode}.`,
+      `- ${SOURCE_INGEST_REVIEW_ONLY_MATERIALS[target.pathPattern] ?? "Other-mode material"}: REVIEW only; recommended mode ${target.recommendedMode}. ${target.reason}`,
     ),
     "When input is a control document, style/rules/memory/outline note, opening-scene or player bootstrap pack, completed-turn record, current-scene update, or runtime overlay update, do not import it as ordinary source material. Emit REVIEW and name the recommended mode.",
   ].join("\n")
@@ -230,16 +256,16 @@ export function buildFocusedRpgPageGuidance(input: RpgPageGuidanceInput): string
     // 中文：不要把长剧情 / 路线复述压成一篇 wiki/events/ 页面；只有已确认的离散事件才进入 wiki/events/。
     "Unresolved conflicts, foreshadowing, possible developments, and progression conditions belong in wiki/plot-arcs/ or REVIEW.",
     // 中文：未解决冲突、伏笔、可能发展和推进条件应进入 wiki/plot-arcs/ 或 REVIEW。
-    "PC subjective goals may enter wiki/player/goals.md only for an explicitly declared current PC. Do not create wiki/quests/*.md in ordinary Source Ingest; treat quest-like material as REVIEW unless a later dedicated mode owns it.",
-    // 中文：PC 主观目标只有在来源明确声明当前 PC 时才可进入 wiki/player/goals.md。普通 Source Ingest 不创建 wiki/quests/*.md；任务式材料进入 REVIEW，除非后续专用 mode 拥有它。
+    "PC subjective goals may enter wiki/player/goals.md only for an explicitly declared current PC. Quest-like material is REVIEW-only in ordinary Source Ingest unless a later dedicated mode owns it.",
+    // 中文：PC 主观目标只有在来源明确声明当前 PC 时才可进入 wiki/player/goals.md。任务式材料在普通 Source Ingest 中进入 REVIEW，除非后续专用 mode 拥有它。
     "Plot pressure, unresolved conflict, foreshadowing, and possible development belong in wiki/plot-arcs/, not wiki/player/goals.md.",
     // 中文：剧情压力、未解决冲突、伏笔和可能发展进入 wiki/plot-arcs/，不要写入 wiki/player/goals.md。
     "Player TODO/checklists are REVIEW in ordinary Source Ingest unless they are true current-PC subjective goals for wiki/player/goals.md.",
     // 中文：玩家待办清单在普通 Source Ingest 中进入 REVIEW，除非它们确实是当前 PC 主观目标并写入 wiki/player/goals.md。
     "Global writing rules are control_doc_import material for REVIEW; character-specific voice, catchphrases, address habits, politeness level, and relationship-driven tone changes go to characters/ or relationships/.",
     // 中文：全局写作规则属于 control_doc_import 材料，应进入 REVIEW；角色专属语气、口癖、称呼习惯、礼貌等级和关系驱动的语气变化进入 characters/ 或 relationships/。
-    "Executable mechanics, limits, costs, checks, allowed/disallowed actions, and success/failure boundaries are control_doc_import material for REVIEW; world/ is fixed to basic_overview.md, history.md, common_sense.md, supernatural_presence.md, and social_structure.md for stable setting facts.",
-    // 中文：可执行机制、限制、代价、判定、行动边界和成败边界属于 control_doc_import 材料，应进入 REVIEW；world/ 固定为 basic_overview.md、history.md、common_sense.md、supernatural_presence.md 和 social_structure.md，用于稳定设定事实。
+    `Executable mechanics, limits, costs, checks, allowed/disallowed actions, and success/failure boundaries are control_doc_import material for REVIEW; world source-ingest facts must use fixed slots: ${RPG_FIXED_WORLD_SLOT_PATHS.join(", ")}.`,
+    // 中文：可执行机制、限制、代价、判定、行动边界和成败边界属于 control_doc_import 材料，应进入 REVIEW；world 来源事实必须使用固定 slot。
     "For structured signals scored 4-5, put the usable target-page material first in ## Runtime Capsule.",
     // 中文：结构化信号 4-5 分时，应优先把可用目标页材料放入 ## Runtime Capsule。
     "",
@@ -368,11 +394,17 @@ function buildRpgCategoryGuidance(category: RpgGuidanceCategoryId): string {
   // 中文：Schema：该目录的抽取目标、更新策略和推荐粒度。
 
   return [
-    `### ${category} (${schemaEntry?.path ?? `wiki/${category}`}/)`,
+    `### ${category} (${categoryPathLabel(category, schemaEntry?.path)})`,
     // 中文：### 目录名（对应的 wiki 路径）
     schemaLine,
     categoryContract(category),
   ].filter(Boolean).join("\n")
+}
+
+function categoryPathLabel(category: RpgGuidanceCategoryId, schemaPath?: string): string {
+  if (category === "player") return RPG_FIXED_PLAYER_SLOT_PATHS.join(", ")
+  if (category === "world") return RPG_FIXED_WORLD_SLOT_PATHS.join(", ")
+  return `${schemaPath ?? `wiki/${category}`}/`
 }
 
 /**
@@ -384,10 +416,10 @@ function categoryContract(category: RpgGuidanceCategoryId): string {
       return buildRpgCharacterPageContract()
     case "player":
       return [
-        "Player contract:",
+        `Player contract for fixed slots: ${RPG_FIXED_PLAYER_SLOT_PATHS.join(", ")}.`,
         // 中文：玩家角色合约：
-        "- Use wiki/player/ only for the current RPG player-created or explicitly declared player character.",
-        // 中文：- 仅当来源说明这是当前 RPG 中由玩家创建或明确声明的玩家角色时，才使用 wiki/player/。
+        "- Use these fixed player slots only for the current RPG player-created or explicitly declared player character.",
+        // 中文：- 仅当来源说明这是当前 RPG 中由玩家创建或明确声明的玩家角色时，才使用这些固定 player slot。
         "- Store current PC-facing state useful for the next turn: identity, abilities, inventory, subjective goals, knowledge, obligations, wounds, consequences, and accepted choices.",
         // 中文：- 存储下一回合有用的 PC 面向状态：身份、能力、物品、主观目标、知识、义务、伤势、后果和已接受选择。
         "- wiki/player/goals.md is for PC subjective goals, wishes, promises, and personal motives; do not put quest progress tables or plot pressure there.",
@@ -433,8 +465,8 @@ function categoryContract(category: RpgGuidanceCategoryId): string {
         // 中文：- 将关系页当作张力和杠杆，而不是重复人物传记。
         "- Prioritize trust, dependence, fear, guilt, attraction, control, misunderstanding, secrets, escalation/de-escalation triggers, and changes that need setup.",
         // 中文：- 优先写信任、依赖、恐惧、愧疚、吸引、控制、误解、秘密、升级/降级触发器，以及需要铺垫的变化。
-        "- Put pair-specific or relationship-driven tone changes here; keep general character voice in characters and global style in wiki/style/.",
-        // 中文：- 两人关系驱动的语气变化放在这里；一般角色声音在 characters，全局风格在 wiki/style/。
+        "- Put pair-specific or relationship-driven tone changes here; keep general character voice in characters and global style material in REVIEW/control-doc import.",
+        // 中文：- 两人关系驱动的语气变化放在这里；一般角色声音在 characters，全局风格材料进入 REVIEW / 控制文档导入。
         "- Mark inferred_for_play interpretation clearly.",
         // 中文：- 清楚标记 inferred_for_play 的解释。
         "- Do not duplicate full character profiles or one-off interactions with no relationship impact.",
@@ -487,8 +519,8 @@ function categoryContract(category: RpgGuidanceCategoryId): string {
         // 中文：世界观合约：
         "- Capture background, common knowledge, history, society, culture, geography, public perception, atmosphere, and stable setting facts.",
         // 中文：- 记录背景、常识、历史、社会、文化、地理、公共认知、氛围和稳定设定事实。
-        "- Do not bury executable mechanics, limits, resource costs, checks, allowed/disallowed actions, or success/failure boundaries in world; those belong in rules/ or REVIEW for a control import.",
-        // 中文：- 不要把可执行机制、限制、资源代价、判定、行动边界或成败边界塞入 world；这些属于 rules/ 或控制导入 REVIEW。
+        "- Do not bury executable mechanics, limits, resource costs, checks, allowed/disallowed actions, or success/failure boundaries in world; those are REVIEW/control-doc import material.",
+        // 中文：- 不要把可执行机制、限制、资源代价、判定、行动边界或成败边界塞入 world；这些属于 REVIEW / 控制文档导入材料。
         "- Avoid broad setting encyclopedia prose unless it changes common knowledge, access, risk, or player-facing context.",
         // 中文：- 避免宽泛百科散文，除非它改变常识、进入条件、风险或玩家面向上下文。
         "- Do not store character-specific state or discrete event transcripts here.",
@@ -534,8 +566,8 @@ function buildRpgCharacterPageContract(): string {
     // 中文：- Behavior Rules 应包含：如果玩家示弱通常如何；如果玩家逼问秘密通常如何；如果局势失控优先如何；他们不会做什么。
     "- Dialogue Style should cover sentence rhythm, politeness level, avoidance habits, typical short phrases, and forbidden writing style.",
     // 中文：- Dialogue Style 应覆盖句子节奏、礼貌等级、回避习惯、典型短句和禁止写法。
-    "- Character-specific voice, catchphrases, address habits, politeness level, and avoided topics belong here, not in global wiki/style/.",
-    // 中文：- 角色专属语气、口癖、称呼习惯、礼貌等级和回避话题属于这里，而不是全局 wiki/style/。
+    "- Character-specific voice, catchphrases, address habits, politeness level, and avoided topics belong here; global style material is REVIEW/control-doc import material.",
+    // 中文：- 角色专属语气、口癖、称呼习惯、礼貌等级和回避话题属于这里；全局风格材料进入 REVIEW / 控制文档导入。
     "- Relationship Levers should cover trust increases when, trust decreases when, defensive reaction triggers, and changes that require setup.",
     // 中文：- Relationship Levers 应覆盖什么会增加信任、什么会降低信任、防御反应触发器，以及需要铺垫的变化。
     "- Evidence and Uncertainty should separate direct evidence, reasonable inference, and route/timeline differences.",

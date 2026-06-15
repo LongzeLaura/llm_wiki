@@ -4,7 +4,7 @@
   "version": "0.4.16",
   "identifier": "com.llmwiki.app",
   "build": {
-    "beforeDevCommand": "npm run dev",
+    "beforeDevCommand": "npm run build:runtime && npm run dev",
     "devUrl": "http://localhost:1420",
     "beforeBuildCommand": "npm run build",
     "frontendDist": "../dist"
@@ -30,6 +30,7 @@
   "bundle": {
     "active": true,
     "targets": "all",
+    "resources": ["../dist-runtime/rpg-runtime-worker.mjs"],
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",

@@ -101,6 +101,12 @@ export function validateRpgRuntimeUpdateTarget(
   if (!isRpgUpdateStrategy(strategy)) {
     return { ok: false, reason: `strategy "${strategy}" is not allowed.` }
   }
+  if (normalizedPath.includes("*")) {
+    return {
+      ok: false,
+      reason: `targetPath "${normalizedPath}" must be a concrete file path, not a wildcard or pathPattern.`,
+    }
+  }
 
   for (const rule of RUNTIME_UPDATE_TARGET_RULES) {
     if (matchesRule(normalizedPath, rule.pathPattern)) {

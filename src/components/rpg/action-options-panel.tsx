@@ -1,5 +1,5 @@
 import { ArrowRight, ShieldAlert } from "lucide-react"
-import type { RpgActionOption } from "@/lib/rpg-runtime"
+import type { RpgActionOption } from "@/lib/rpg-runtime/turn-model"
 
 interface ActionOptionsPanelProps {
   options: RpgActionOption[]
@@ -13,15 +13,15 @@ export function ActionOptionsPanel({ options, selectedOptionId, onSelectOption, 
     <section className="min-w-0 border-b border-border/70 bg-background px-4 py-3" aria-labelledby="rpg-action-options-heading">
       <div className="flex items-center justify-between gap-3">
         <h2 id="rpg-action-options-heading" className="text-sm font-semibold text-foreground">
-          Future candidate actions
+          候选下一步行动
         </h2>
         <span className="shrink-0 rounded border border-border/70 px-2 py-0.5 text-[11px] font-medium text-muted-foreground">
-          {options.length} options
+          {options.length} 个选项
         </span>
       </div>
 
       {options.length === 0 ? (
-        <p className="mt-2 text-sm text-muted-foreground">No candidate actions available.</p>
+        <p className="mt-2 text-sm text-muted-foreground">当前没有可用的候选行动。</p>
       ) : (
         <div className="mt-3 grid gap-2">
           {options.map((option) => {

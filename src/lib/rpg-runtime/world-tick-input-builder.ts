@@ -55,22 +55,23 @@ export async function buildWorldTickInputFromWiki(
   const references = new Set<string>()
 
   const currentScene = await readRequiredSchemaSlot(projectPath, CURRENT_SCENE_SLOT_ID, warnings, references)
-  const actionTokens = tokenize(
-    [
-      input.submittedAction.text,
-      input.actionResolution.eventDraft.summary,
-      input.actionResolution.playerActionDelta.sceneChanges.join("\n"),
-      currentScene.content,
-    ].join("\n"),
-  )
   const affectedPaths = collectAffectedWikiPaths(input.actionResolution)
+  const actionTokens = tokenize(buildWorldTickQueryText(input, affectedPaths))
   const affectedTokens = tokenize(affectedPaths.join("\n"))
   const tokens = [...new Set([...actionTokens, ...affectedTokens])]
 
   const eventPages = rankedPages(await readMarkdownDir(projectPath, "events"), tokens, MAX_RELEVANT_PAGES)
   const questPages = rankedPages(await readMarkdownDir(projectPath, "quests"), tokens, MAX_RELEVANT_PAGES)
-  const relationshipRuntimePages = runtimeOnly(await readMarkdownDir(projectPath, "relationships")).slice(0, MAX_RELEVANT_PAGES)
-  const plotArcRuntimePages = runtimeOnly(await readMarkdownDir(projectPath, "plot-arcs")).slice(0, MAX_RELEVANT_PAGES)
+  const relationshipRuntimePages = rankedPages(
+    runtimeOnly(await readMarkdownDir(projectPath, "relationships")),
+    tokens,
+    MAX_RELEVANT_PAGES,
+  )
+  const plotArcRuntimePages = rankedPages(
+    runtimeOnly(await readMarkdownDir(projectPath, "plot-arcs")),
+    tokens,
+    MAX_RELEVANT_PAGES,
+  )
   const outlineProgressPages = await readSchemaSlotPages(projectPath, OUTLINE_PROGRESS_SLOT_IDS, warnings)
   const rulePages = await readSchemaSlotPages(projectPath, RULE_SLOT_IDS, warnings)
 
@@ -153,6 +154,31 @@ export async function buildWorldTickInputFromWiki(
       ...missingReferenceWarnings([...references].filter((reference) => !isAllowedReference(reference))),
     ],
   }
+}
+
+function buildWorldTickQueryText(input: BuildWorldTickInputFromWikiInput, affectedPaths: string[]): string {
+  const snapshot = input.preActionSnapshot
+  return [
+    input.submittedAction.text,
+    input.actionResolution.eventDraft.summary,
+    input.actionResolution.parsedIntent.actorRef,
+    ...input.actionResolution.parsedIntent.targetRefs,
+    ...input.actionResolution.eventDraft.actorRefs,
+    ...input.actionResolution.eventDraft.targetRefs,
+    ...input.actionResolution.eventDraft.affectedRefs,
+    ...input.actionResolution.playerActionDelta.sceneChanges,
+    ...input.actionResolution.playerActionDelta.knowledgeChanges,
+    ...input.actionResolution.references.map((reference) => reference.path),
+    ...affectedPaths,
+    snapshot.currentScene.currentLocation,
+    ...snapshot.currentScene.presentCharacters,
+    ...snapshot.currentScene.interactableObjects,
+    ...snapshot.currentScene.currentDangers,
+    ...snapshot.currentScene.locationActionConditions,
+    ...snapshot.activeClocks.map((clock) => `${clock.label}\n${clock.summary}`),
+    ...snapshot.countdowns.map((clock) => `${clock.label}\n${clock.summary}`),
+    ...snapshot.pendingReactions.map((reaction) => `${reaction.actorRef}\n${reaction.summary}`),
+  ].filter(Boolean).join("\n")
 }
 
 function buildPostActionRefs(actionResolution: ActionResolution): WorldTickRuntimeReference[] {

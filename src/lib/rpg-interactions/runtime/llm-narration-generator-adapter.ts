@@ -13,6 +13,7 @@ export interface CreateLlmRpgNarrationGeneratorAdapterInput {
 
 export interface LlmRpgNarrationGeneratorAdapterOptions {
   requestOverrides?: RequestOverrides
+  repairRequestOverrides?: RequestOverrides
 }
 
 export function createLlmRpgNarrationGeneratorAdapter(
@@ -24,6 +25,16 @@ export function createLlmRpgNarrationGeneratorAdapter(
       const output = await collectRpgNarrationGeneratorOutput(input, options, prompt)
       return narrationGeneratorInteractionSpec.parseOutput(output, promptInput)
     },
+    async generateNarrationRawOutput(prompt) {
+      return collectRpgNarrationGeneratorOutput(input, options, prompt)
+    },
+    async repairNarrationRawOutput(prompt) {
+      return collectRpgNarrationGeneratorOutput(input, options, prompt, {
+        temperature: 0,
+        max_tokens: 1800,
+        ...options.repairRequestOverrides,
+      })
+    },
   }
 }
 
@@ -31,6 +42,7 @@ async function collectRpgNarrationGeneratorOutput(
   input: CreateLlmRpgNarrationGeneratorAdapterInput,
   options: LlmRpgNarrationGeneratorAdapterOptions,
   prompt: RpgNarrationGeneratorPrompt,
+  requestOverrides: RequestOverrides | undefined = options.requestOverrides,
 ): Promise<string> {
   let output = ""
   let streamError: Error | undefined
@@ -52,7 +64,7 @@ async function collectRpgNarrationGeneratorOutput(
         },
       },
       input.signal,
-      options.requestOverrides,
+      requestOverrides,
     )
   } catch (error) {
     if (input.signal?.aborted) {

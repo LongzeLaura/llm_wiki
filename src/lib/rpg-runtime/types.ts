@@ -1,11 +1,14 @@
 import type {
   RpgGapImpactCandidate,
+  RpgBeliefState,
   RpgHappenedStatus,
+  RpgKnowledgeActorRef,
   RpgKnowledgeScope,
   RpgKnowledgeSourceKind,
   RpgNarrativeLine,
   RpgOutlineImpactLevel,
   RpgRecallReadMode,
+  RpgRevealState,
   RpgReviewItemKind,
   RpgRuntimeDeltaRef,
   RpgUsePurpose,
@@ -18,6 +21,32 @@ export interface SubmittedAction {
   text: string
   source: "selected_option" | "freeform"
   selectedOptionId?: string
+}
+
+export interface RpgActorBeliefState {
+  actor: RpgKnowledgeActorRef
+  beliefState: RpgBeliefState
+  reason: string
+}
+
+export interface RpgKnowledgeClaim {
+  claimId: string
+  summary: string
+  truthStatus: "true" | "false" | "partial" | "unknown"
+  holders: RpgKnowledgeActorRef[]
+  nonHolders: RpgKnowledgeActorRef[]
+  beliefStateByActor: RpgActorBeliefState[]
+  sourcePath?: string
+  sourceEventPath?: string
+}
+
+export interface RpgRevealGateRef {
+  gateId: string
+  truthId: string
+  revealState: RpgRevealState
+  allowedAudience: RpgKnowledgeActorRef[]
+  blockedAudience: RpgKnowledgeActorRef[]
+  reason: string
 }
 
 export type ActionResolverIntentKind =
@@ -608,6 +637,44 @@ export interface PostActionWorkingState {
   warnings: string[]
 }
 
+export interface TurnSemanticHandoffEntry {
+  source: string
+  sourceId: string
+  summary: string
+  happenedStatus: RpgHappenedStatus
+  visibilityScope?: RpgVisibilityScope
+  knowledgeScope?: RpgKnowledgeScope
+  affectedPaths: string[]
+}
+
+export interface TurnSemanticReferenceAllowlistEntry {
+  path: string
+  reason: string
+  lineTarget?: RpgNarrativeLine
+  visibilityScope?: RpgVisibilityScope
+  knowledgeScope?: RpgKnowledgeScope
+}
+
+export interface TurnSemanticHandoff {
+  submittedAction: SubmittedAction
+  actionOutcome: string
+  timeAdvanceSummary: string
+  confirmed: TurnSemanticHandoffEntry[]
+  attemptedOrBlocked: TurnSemanticHandoffEntry[]
+  ongoing: TurnSemanticHandoffEntry[]
+  possibleFuture: TurnSemanticHandoffEntry[]
+  pcVisible: TurnSemanticHandoffEntry[]
+  pcInferred: TurnSemanticHandoffEntry[]
+  userVisiblePcUnknown: TurnSemanticHandoffEntry[]
+  gmOnlyControl: TurnSemanticHandoffEntry[]
+  activeRisks: string[]
+  pressureSignals: string[]
+  openQuestions: string[]
+  candidatePaths: string[]
+  referenceAllowlist: TurnSemanticReferenceAllowlistEntry[]
+  warnings: string[]
+}
+
 export type RecallSelectionPriority = "critical" | "high" | "medium" | "low"
 
 export interface RecallableSection {
@@ -677,6 +744,26 @@ export interface RecallExclusion {
   reason: string
 }
 
+export interface RecallSelectionDraftItem {
+  path: string
+  readMode: RpgRecallReadMode
+  priority: RecallSelectionPriority
+  reason: string
+  expectedUse: string
+  sectionIds: string[]
+}
+
+export interface RecallSelectionDraftExclusion {
+  path: string
+  sectionIds: string[]
+  reason: string
+}
+
+export interface RecallSelectionDraft {
+  selectedItems: RecallSelectionDraftItem[]
+  exclusions: RecallSelectionDraftExclusion[]
+}
+
 export interface RecallSelection {
   selectionId: string
   sourceWorkingStateId: string
@@ -688,6 +775,7 @@ export interface RecallSelection {
 }
 
 export interface RecallSelectorInput {
+  turnSemanticHandoff?: TurnSemanticHandoff
   postActionWorkingState: PostActionWorkingState
   actionResolution?: ActionResolution
   worldTickResult?: WorldTickResult
@@ -718,6 +806,8 @@ export interface RecalledMaterial {
   expectedUse: string
   visibilityScope: RpgVisibilityScope
   knowledgeScope: RpgKnowledgeScope
+  knowledgeClaims?: RpgKnowledgeClaim[]
+  outlineControl?: RpgOutlineControlMetadata
   sections: RecalledMaterialSection[]
   warnings: string[]
 }
@@ -737,6 +827,24 @@ export type OutlineBriefRevealPolicy =
   | "gm_only"
 
 export type OutlineBriefPacingIntent = "hold" | "soft_push" | "medium" | "strong" | "scene_cut"
+
+export type RpgOutlineControlKind =
+  | "gm_truth"
+  | "act_structure"
+  | "reveal_gate"
+  | "branch_condition"
+  | "hard_constraint"
+  | "progress_marker"
+
+export interface RpgOutlineControlMetadata {
+  controlKind: RpgOutlineControlKind
+  gmSummary: string
+  playerSafeSummary?: string
+  actorKnowledgeRefs: RpgKnowledgeActorRef[]
+  revealGateRefs: string[]
+  mustNotRevealTo: RpgKnowledgeActorRef[]
+  boundaryNote: string
+}
 
 export interface OutlineStableRef {
   refId: string
@@ -787,6 +895,9 @@ export interface OutlineSlice {
   lineTarget: RpgNarrativeLine
   visibilityScope: RpgVisibilityScope
   knowledgeScope: RpgKnowledgeScope
+  outlineControl?: RpgOutlineControlMetadata
+  knowledgeClaims?: RpgKnowledgeClaim[]
+  revealGateMetadata?: RpgRevealGateRef[]
   summary: string
   beatRefs: OutlineBeatRef[]
   revealRefs: OutlineRevealRef[]
@@ -847,6 +958,7 @@ export interface OutlineKnownReference {
 }
 
 export interface OutlineBriefCompilerInput {
+  turnSemanticHandoff?: TurnSemanticHandoff
   postActionWorkingState: PostActionWorkingState
   actionResolution: ActionResolution
   worldTickResult: WorldTickResult
@@ -873,6 +985,7 @@ export interface OutlineBriefReference {
   usePurpose: RpgUsePurpose
   visibilityScope: RpgVisibilityScope
   knowledgeScope: RpgKnowledgeScope
+  knowledgeClaims?: RpgKnowledgeClaim[]
   reason: string
 }
 
@@ -1005,6 +1118,7 @@ export interface StoryOutlineForbiddenRevealBoundary {
 }
 
 export interface StoryOutlineRegeneratorInput {
+  turnSemanticHandoff?: TurnSemanticHandoff
   postActionWorkingState: PostActionWorkingState
   outlineImpactReport: OutlineImpactReport
   regenerationRequest: RegenerationRequest
@@ -1151,6 +1265,7 @@ export interface NarrationSourceRef {
   usePurpose: RpgUsePurpose
   visibilityScope?: RpgVisibilityScope
   knowledgeScope?: RpgKnowledgeScope
+  knowledgeClaims?: RpgKnowledgeClaim[]
   reason: string
 }
 
@@ -1259,6 +1374,7 @@ export interface TurnNarration {
 }
 
 export interface NarrationGeneratorInput {
+  turnSemanticHandoff?: TurnSemanticHandoff
   postActionWorkingState: PostActionWorkingState
   actionResolution: ActionResolution
   worldTickResult: WorldTickResult
@@ -1343,6 +1459,9 @@ export interface RuntimeUpdateSourceDelta {
   usePurpose: RpgUsePurpose
   affectedPaths: string[]
   runtimeDeltaRefs: RpgRuntimeDeltaRef[]
+  knowledgeClaims: RpgKnowledgeClaim[]
+  revealGateRefs: string[]
+  revealState?: RpgRevealState
 }
 
 export interface RuntimeUpdateValidationHint {

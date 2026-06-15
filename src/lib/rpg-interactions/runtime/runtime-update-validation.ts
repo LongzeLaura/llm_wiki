@@ -1,4 +1,7 @@
 import type { ProposedWikiUpdate } from "../../rpg-runtime/state-extractor"
+import type { RuntimeProposedWikiUpdate, RuntimeUpdateSourceDelta } from "../../rpg-runtime/types"
+import type { RpgKnowledgeActorRef } from "../../rpg-wiki-schema"
+import { isConcreteNonPcActorRef } from "../../rpg-runtime/actor-knowledge"
 
 export type RpgRuntimeUpdateValidationSeverity = "warning" | "reject"
 
@@ -24,6 +27,8 @@ export interface RpgRuntimeUpdateValidationResult {
 
 const FUTURE_CANDIDATE_PATTERN =
   /\b(possible futures?|future plans?|candidate actions?|unchosen options?|unselected options?|next actions?|possible next|foreshadow(?:ing)?|player may|player might|player could|could choose|might choose|may choose|recommended next|option\s*\d+)\b|未选择|候选行动|下一步|后续行动|未来可能|可能发展|伏笔|预示|可选择|玩家可以|玩家可能/iu
+const NEGATED_ACTION_STATUS_PATTERN =
+  /(?:^|[\n。；;])[^。\n；;]{0,40}(?:尚未|未|没有|并未)[^。\n；;]{0,20}(?:采取|选择|进行|执行|决定|确认)?[^。\n；;]{0,12}(?:下一步(?:行动)?|后续行动)[^。\n；;]{0,20}(?=$|[\n。；;])/giu
 
 const EVENT_FORBIDDEN_HEADING_PATTERN =
   /^#{1,6}\s*(Possible Futures?|Future Plans?|Next Actions?|Candidate Actions?|Foreshadowing|Unchosen Options?|未选择|候选行动|下一步|后续行动|未来可能|可能发展|伏笔|预示)\b/imu
@@ -35,15 +40,15 @@ const CURRENT_SCENE_LOCATION_SYNC_PATTERN =
 const CURRENT_SCENE_FACTION_SYNC_PATTERN =
   /\b(?:faction stance|watch stance|guild stance|order stance|clan stance|resources? changed|alert level|became hostile|became allied|became suspicious|patrol alerted)\b|势力态度|阵营态度|资源变化|警戒等级|变为敌对|结盟|巡逻警戒/iu
 const CURRENT_SCENE_ITEM_HOLDING_SYNC_PATTERN =
-  /\b(?:acquir(?:ed|es?|ing)|picked up|obtained|lost|dropped|equipped|unequipped|consumed|spent|quantity|now carries|inventory)\b|获得|取得|失去|丢下|装备|卸下|消耗|数量|背包/iu
+  /\b(?:acquir(?:ed|es?|ing)|picked up|obtained|lost|dropped|equipped|unequipped|consumed|spent|quantity|now carries|inventory)\b|获得|取得|失去|丢下|已装备|装备了|装备中|当前装备|卸下|消耗|数量|背包/iu
 const CURRENT_SCENE_ITEM_OBJECT_SYNC_PATTERN =
   /\b(?:item transferred|holder changed|transferred|damaged|broken|sealed|unsealed|enhanced|empowered|depleted|condition changed)\b|物品转移|持有者变化|转移|损坏|破损|封印|解封|强化|耗尽|状态变化/iu
 const CURRENT_SCENE_RELATIONSHIP_SYNC_PATTERN =
   /\b(?:relationship|trust|tension|conflict|reconciliation|misunderstanding|secret|betrayal|bond|rivalry)\b|关系|信任|张力|冲突|和解|误会|秘密|背叛|羁绊/iu
 const CURRENT_SCENE_PLOT_ARC_SYNC_PATTERN =
-  /\b(?:plot arc|arc|beat|triggered|skipped|delayed|advanced|pressure escalated|pressure resolved|foreshadowing resolved|reveal)\b|剧情弧|剧情线|节点|节拍|触发|跳过|延后|提前|推进|压力升级|压力解除|伏笔|揭示/iu
+  /\b(?:plot arc|arc beat|beat (?:triggered|skipped|delayed|advanced)|pressure escalated|pressure resolved|foreshadowing resolved|reveal (?:progress|state|gate|resolved))\b|剧情弧|剧情线|(?:节点|节拍).{0,16}(?:触发|跳过|延后|提前|推进)|(?:触发|跳过|延后|提前|推进).{0,16}(?:节点|节拍)|压力升级|压力解除|伏笔(?:解决|兑现)|揭示(?:进度|状态|门槛|完成)/iu
 const CURRENT_SCENE_OUTLINE_PROGRESS_SYNC_PATTERN =
-  /\b(?:outline|act|beat|progress|deviation|completed|skipped|advanced|delayed|main plan)\b|大纲|幕|章节|节点|进度|偏离|完成|跳过|提前|延后/iu
+  /\b(?:outline progress|main plan|advanced into act|deviation from (?:the )?main plan|act\s+\d+|beat (?:advanced|completed|skipped|delayed))\b|(?:大纲|章节|节点|进度|幕).{0,20}(?:偏离|完成|跳过|提前|延后|推进)|(?:偏离|完成|跳过|提前|延后|推进).{0,20}(?:大纲|章节|节点|进度|幕)/iu
 const INVENTORY_OBJECT_STATE_SYNC_PATTERN =
   /\b(?:damaged|broken|sealed|unsealed|enhanced|empowered|transferred|holder changed|condition changed|depleted)\b|损坏|破损|封印|解封|强化|转移|持有者变化|状态变化|耗尽/iu
 const ITEM_RUNTIME_INVENTORY_SYNC_PATTERN =
@@ -95,6 +100,7 @@ function validateUpdate(update: ProposedWikiUpdate): RpgRuntimeUpdateValidationI
   const path = normalizeWikiPath(update.targetPath)
   const text = `${update.reason}\n${update.content}`
   const issues: RpgRuntimeUpdateValidationIssue[] = []
+  issues.push(...validateActorKnowledgeBoundary(update))
 
   if (isEventsPath(path)) {
     pushIf(issues, update, "reject", "events_future_candidate_pollution", hasFutureCandidatePollution(text), [
@@ -141,6 +147,75 @@ function validateUpdate(update: ProposedWikiUpdate): RpgRuntimeUpdateValidationI
     pushIf(issues, update, "warning", "runtime_stable_page_pollution", STABLE_PAGE_POLLUTION_PATTERN.test(update.content), [
       "runtime state update looks like stable setting/profile material; keep only accepted runtime state, consequences, objective progress, or overlay changes.",
     ])
+  }
+
+  return issues
+}
+
+function validateActorKnowledgeBoundary(update: ProposedWikiUpdate): RpgRuntimeUpdateValidationIssue[] {
+  const issues: RpgRuntimeUpdateValidationIssue[] = []
+  const path = normalizeWikiPath(update.targetPath)
+  const runtimeUpdate = update as Partial<RuntimeProposedWikiUpdate>
+  const sourceDeltas = runtimeUpdate.sourceDeltas
+  if (!Array.isArray(sourceDeltas) || sourceDeltas.length === 0) {
+    pushIf(issues, update, "reject", "actor_metadata_missing", true, [
+      "runtime update proposals require structured sourceDeltas with actor-level knowledgeClaims before pending staging.",
+    ])
+    return issues
+  }
+  if (sourceDeltas.some((delta) => !Array.isArray(delta.knowledgeClaims) || delta.knowledgeClaims.length === 0)) {
+    pushIf(issues, update, "reject", "knowledge_claims_missing", true, [
+      "every sourceDelta must carry at least one actor-level knowledge claim.",
+    ])
+  }
+
+  if (path === "wiki/player/known_information.md") {
+    pushIf(
+      issues,
+      update,
+      "reject",
+      "player_knowledge_claim_boundary",
+      !sourceDeltas.every(sourceDeltaHasPcKnowledgeClaim) || sourceDeltas.some(sourceDeltaHasForbiddenPlayerClaim),
+      [
+        "player known information requires pc holder claims with known, inferred, or misunderstood belief state and no NPC/user/GM-only holder claims.",
+      ],
+    )
+  }
+
+  const characterActor = actorRefFromRuntimePath(path, "characters")
+  if (characterActor) {
+    pushIf(
+      issues,
+      update,
+      "reject",
+      "character_runtime_actor_mismatch",
+      sourceDeltas.some(
+        (delta) => sourceDeltaAssertsConcreteActorKnowledge(delta) && !sourceDeltaMentionsActor(delta, characterActor),
+      ),
+      [`characters/runtime knowledge claims must mention the matching actor holder ${characterActor}.`],
+    )
+  }
+
+  if (isRelationshipsPath(path) && looksLikeInformationGapUpdate(update, sourceDeltas)) {
+    pushIf(
+      issues,
+      update,
+      "reject",
+      "relationship_information_gap_claim_missing",
+      !sourceDeltas.some(sourceDeltaHasInformationGapClaim),
+      ["relationships/runtime information-gap updates require holder/non-holder or differing belief-state claims."],
+    )
+  }
+
+  if (isRevealProgressTarget(path) && looksLikeRevealProgressUpdate(update, sourceDeltas)) {
+    pushIf(
+      issues,
+      update,
+      "reject",
+      "reveal_progress_metadata_missing",
+      !sourceDeltas.some((delta) => (delta.revealGateRefs?.length ?? 0) > 0 && !!delta.revealState),
+      ["plot-arc or outline reveal-progress updates require revealGateRefs and revealState metadata."],
+    )
   }
 
   return issues
@@ -209,6 +284,85 @@ function validateCrossDirectorySync(updates: ProposedWikiUpdate[]): RpgRuntimeUp
   return dedupeIssues(issues)
 }
 
+function sourceDeltaHasPcKnowledgeClaim(delta: RuntimeUpdateSourceDelta): boolean {
+  return delta.knowledgeClaims.some((claim) =>
+    claim.holders.includes("pc") &&
+    claim.beliefStateByActor.some((belief) =>
+      belief.actor === "pc" && ["known", "inferred", "misunderstood"].includes(belief.beliefState)
+    )
+  )
+}
+
+function sourceDeltaHasForbiddenPlayerClaim(delta: RuntimeUpdateSourceDelta): boolean {
+  return delta.knowledgeClaims.some((claim) => {
+    const pcBelief = claim.beliefStateByActor.find((belief) => belief.actor === "pc")
+    if (pcBelief && !["known", "inferred", "misunderstood"].includes(pcBelief.beliefState)) return true
+    if (claim.holders.length > 0 && !claim.holders.includes("pc")) return true
+    return claim.nonHolders.includes("pc")
+  })
+}
+
+function sourceDeltaAssertsConcreteActorKnowledge(delta: RuntimeUpdateSourceDelta): boolean {
+  if (delta.knowledgeScope === "npc_known") return true
+  return delta.knowledgeClaims.some((claim) =>
+    claim.holders.some(isConcreteNonPcActorRef) ||
+    claim.beliefStateByActor.some((belief) => isConcreteNonPcActorRef(belief.actor))
+  )
+}
+
+function sourceDeltaMentionsActor(delta: RuntimeUpdateSourceDelta, actor: RpgKnowledgeActorRef): boolean {
+  return delta.knowledgeClaims.some((claim) =>
+    claim.holders.includes(actor) ||
+    claim.nonHolders.includes(actor) ||
+    claim.beliefStateByActor.some((belief) => belief.actor === actor)
+  )
+}
+
+function sourceDeltaHasInformationGapClaim(delta: RuntimeUpdateSourceDelta): boolean {
+  return delta.knowledgeClaims.some((claim) => {
+    if (claim.holders.length > 0 && claim.nonHolders.length > 0) return true
+    const states = new Set(claim.beliefStateByActor.map((belief) => belief.beliefState))
+    return claim.beliefStateByActor.length >= 2 && states.size >= 2
+  })
+}
+
+function actorRefFromRuntimePath(
+  path: string,
+  category: "characters" | "factions",
+): RpgKnowledgeActorRef | undefined {
+  const match = new RegExp(`^wiki/${category}/runtime/([^/]+)\\.md$`, "u").exec(path)
+  if (!match) return undefined
+  return category === "characters" ? `npc:${match[1]}` : `faction:${match[1]}`
+}
+
+function isRevealProgressTarget(path: string): boolean {
+  return path === "wiki/outlines/progress.md" || isPlotArcsPath(path)
+}
+
+function looksLikeInformationGapUpdate(
+  update: ProposedWikiUpdate,
+  sourceDeltas: readonly RuntimeUpdateSourceDelta[],
+): boolean {
+  const text = [
+    update.reason,
+    update.content,
+    ...sourceDeltas.map((delta) => delta.summary),
+  ].join("\n")
+  return /information gap|secret|misunderstanding|misread|knows?|unknown to|belief|信息差|秘密|误解|知道|未知|隐瞒|判断/iu.test(text)
+}
+
+function looksLikeRevealProgressUpdate(
+  update: ProposedWikiUpdate,
+  sourceDeltas: readonly RuntimeUpdateSourceDelta[],
+): boolean {
+  const text = [
+    update.reason,
+    update.content,
+    ...sourceDeltas.map((delta) => `${delta.summary}\n${delta.revealGateRefs?.join("\n") ?? ""}\n${delta.revealState ?? ""}`),
+  ].join("\n")
+  return /reveal progress|reveal gate|currentRevealState|revealState|active reveal|gate\.|information boundary|揭示进度|揭示门槛|当前揭示|信息边界/iu.test(text)
+}
+
 function pushIf(
   issues: RpgRuntimeUpdateValidationIssue[],
   update: ProposedWikiUpdate,
@@ -228,7 +382,11 @@ function pushIf(
 }
 
 function hasFutureCandidatePollution(text: string): boolean {
-  return FUTURE_CANDIDATE_PATTERN.test(text)
+  return FUTURE_CANDIDATE_PATTERN.test(stripNegatedActionStatus(text))
+}
+
+function stripNegatedActionStatus(text: string): string {
+  return text.replace(NEGATED_ACTION_STATUS_PATTERN, "\n")
 }
 
 function confirmedFactsSectionContainsFutureCandidate(content: string): boolean {

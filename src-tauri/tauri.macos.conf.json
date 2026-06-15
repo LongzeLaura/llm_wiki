@@ -1,5 +1,6 @@
 {
   "bundle": {
+    "resources": ["../dist-runtime/rpg-runtime-worker.mjs"],
     "macOS": {
       "frameworks": ["pdfium/libpdfium.dylib"]
     }

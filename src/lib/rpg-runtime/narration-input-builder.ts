@@ -11,9 +11,11 @@ import type {
   ProvisionalNarrationHandoff,
   RecalledMaterial,
   RecallSelection,
+  TurnSemanticHandoff,
   WorldTickVisibleSelection,
   WorldTickResult,
 } from "./types"
+import { defaultKnowledgeClaimsForPath } from "./actor-knowledge"
 import {
   collectConstraintNotes,
   collectForbiddenContradictions,
@@ -31,6 +33,7 @@ export interface BuildNarrationGeneratorInputFromHandoffsInput {
   worldTickResult: WorldTickResult
   visibleSelection: WorldTickVisibleSelection
   postActionWorkingState: PostActionWorkingState
+  turnSemanticHandoff?: TurnSemanticHandoff
   recallSelection: RecallSelection
   recalledMaterials: RecalledMaterial[]
   outlineAwareNarrationBrief: OutlineAwareNarrationBrief
@@ -86,6 +89,7 @@ export async function buildNarrationGeneratorInputFromHandoffs(
 
   return {
     input: {
+      turnSemanticHandoff: input.turnSemanticHandoff,
       postActionWorkingState: input.postActionWorkingState,
       actionResolution: input.actionResolution,
       worldTickResult: input.worldTickResult,
@@ -161,6 +165,7 @@ function buildNarrationReferences(input: {
     usePurpose: "recall" as const,
     visibilityScope: material.visibilityScope,
     knowledgeScope: material.knowledgeScope,
+    knowledgeClaims: material.knowledgeClaims,
     reason: material.reason,
   })))
   references.push(...input.outlineAwareNarrationBrief.references.map((reference) => ({
@@ -172,6 +177,7 @@ function buildNarrationReferences(input: {
     usePurpose: reference.usePurpose,
     visibilityScope: reference.visibilityScope,
     knowledgeScope: reference.knowledgeScope,
+    knowledgeClaims: reference.knowledgeClaims,
     reason: reference.reason,
   })))
   references.push(...(input.provisionalNarrationHandoff?.runtimeDeltaRefs.map((reference) => ({
@@ -309,6 +315,12 @@ function pageReference(
     usePurpose: options.usePurpose,
     visibilityScope: options.visibilityScope,
     knowledgeScope: options.knowledgeScope,
+    knowledgeClaims: defaultKnowledgeClaimsForPath({
+      path: page.relativePath,
+      visibilityScope: options.visibilityScope,
+      knowledgeScope: options.knowledgeScope,
+      summary: options.reason,
+    }),
     reason: options.reason,
   }
 }

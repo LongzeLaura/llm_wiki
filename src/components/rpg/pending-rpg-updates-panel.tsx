@@ -1,6 +1,6 @@
 import { Check, FileText, Upload, X } from "lucide-react"
 import { Button } from "@/components/ui/button"
-import type { ApplyRpgPendingUpdatesResult } from "@/lib/rpg-runtime/write-policy"
+import type { ApplyRpgPendingUpdatesResult } from "@/lib/rpg-runtime/write-policy-shared"
 import type { PendingRpgUpdate } from "@/lib/rpg-runtime/update-staging"
 
 export interface PendingRpgUpdatesPanelProps {
@@ -37,10 +37,10 @@ export function PendingRpgUpdatesPanel({
         <div className="flex flex-wrap items-center justify-between gap-2">
           <div>
             <h2 id="pending-rpg-updates-heading" className="text-sm font-semibold text-foreground">
-              Pending RPG updates
+              待处理 RPG 更新
             </h2>
             <p className="mt-1 text-xs text-muted-foreground">
-              Pending {countStatus(updates, "pending")} / Accepted {acceptedCount} / Rejected{" "}
+              待定 {countStatus(updates, "pending")} / 已接受 {acceptedCount} / 已拒绝{" "}
               {countStatus(updates, "rejected")}
             </p>
           </div>
@@ -50,17 +50,17 @@ export function PendingRpgUpdatesPanel({
             onClick={onApplyAcceptedUpdates}
             disabled={applyDisabled}
             className="h-8 gap-1.5 rounded-md px-3"
-            title="Apply accepted RPG updates"
+            title="应用已接受的 RPG 更新"
           >
             <Upload className="h-3.5 w-3.5" />
-            <span>{isApplying ? "Applying" : "Apply accepted"}</span>
+            <span>{isApplying ? "应用中" : "应用已接受项"}</span>
           </Button>
         </div>
       </div>
 
       {updates.length === 0 ? (
         <div className="min-h-0 flex-1 overflow-auto px-4 py-3">
-          <p className="text-sm text-muted-foreground">No pending RPG updates.</p>
+          <p className="text-sm text-muted-foreground">当前没有待处理的 RPG 更新。</p>
         </div>
       ) : (
         <div className="min-h-0 flex-1 space-y-3 overflow-auto px-4 py-3">
@@ -93,10 +93,10 @@ export function PendingRpgUpdatesPanel({
                     onClick={() => onAcceptUpdate(update.id)}
                     disabled={disabled || update.status === "accepted" || isApplying}
                     className="h-7 gap-1 rounded-md px-2"
-                    title={`Accept update ${update.id}`}
+                    title={`接受更新 ${update.id}`}
                   >
                     <Check className="h-3.5 w-3.5" />
-                    <span>Accept</span>
+                    <span>接受</span>
                   </Button>
                   <Button
                     type="button"
@@ -105,29 +105,29 @@ export function PendingRpgUpdatesPanel({
                     onClick={() => onRejectUpdate(update.id)}
                     disabled={disabled || update.status === "rejected" || isApplying}
                     className="h-7 gap-1 rounded-md px-2"
-                    title={`Reject update ${update.id}`}
+                    title={`拒绝更新 ${update.id}`}
                   >
                     <X className="h-3.5 w-3.5" />
-                    <span>Reject</span>
+                    <span>拒绝</span>
                   </Button>
                 </div>
               </div>
 
               <div className="mt-3 space-y-2 text-sm">
                 <div>
-                  <div className="text-xs font-medium text-muted-foreground">Reason</div>
+                  <div className="text-xs font-medium text-muted-foreground">原因</div>
                   <p className="mt-1 whitespace-pre-wrap break-words text-foreground/90">{update.reason}</p>
                 </div>
                 <details className="rounded-md border border-border/70 bg-background/70">
                   <summary className="cursor-pointer px-2 py-1.5 text-xs font-medium text-muted-foreground">
-                    Content
+                    内容
                   </summary>
                   <pre className="max-h-48 overflow-auto whitespace-pre-wrap break-words px-2 pb-2 text-xs leading-5 text-foreground/90">
                     {update.content}
                   </pre>
                 </details>
                 <div>
-                  <div className="text-xs font-medium text-muted-foreground">References</div>
+                  <div className="text-xs font-medium text-muted-foreground">引用</div>
                   {update.references.length > 0 ? (
                     <ul className="mt-1 space-y-1 text-xs text-muted-foreground">
                       {update.references.map((reference) => (
@@ -137,12 +137,12 @@ export function PendingRpgUpdatesPanel({
                       ))}
                     </ul>
                   ) : (
-                    <p className="mt-1 text-xs text-muted-foreground">None</p>
+                    <p className="mt-1 text-xs text-muted-foreground">无</p>
                   )}
                 </div>
                 {skippedApplyReasons[update.id] && (
                   <div className="rounded-md border border-amber-500/30 bg-amber-500/10 px-2 py-1.5 text-xs text-foreground">
-                    Skipped: {skippedApplyReasons[update.id]}
+                    已跳过：{skippedApplyReasons[update.id]}
                   </div>
                 )}
               </div>
@@ -153,24 +153,24 @@ export function PendingRpgUpdatesPanel({
 
       {applyResult && (
         <div className="shrink-0 border-t border-border/70 bg-muted/20 px-4 py-3 text-xs" aria-live="polite">
-          <div className="font-medium text-foreground">Last apply result</div>
+          <div className="font-medium text-foreground">上次应用结果</div>
           <div className="mt-2 space-y-2 text-muted-foreground">
             <ResultList
-              label="Affected paths"
-              emptyLabel="Affected paths: none"
+              label="受影响路径"
+              emptyLabel="受影响路径：无"
               items={getAffectedPaths(applyResult)}
             />
             <ResultList
-              label="Applied updates"
-              emptyLabel="Applied updates: none"
+              label="已应用更新"
+              emptyLabel="已应用更新：无"
               items={applyResult.appliedUpdates.map((update) => `${update.id}: ${update.targetPath}`)}
             />
             <ResultList
-              label="Skipped updates"
-              emptyLabel="Skipped updates: none"
+              label="已跳过更新"
+              emptyLabel="已跳过更新：无"
               items={applyResult.skippedUpdates.map((update) => `${update.id}: ${update.targetPath} - ${update.reason}`)}
             />
-            <ResultList label="Warnings" emptyLabel="Warnings: none" items={applyResult.warnings} />
+            <ResultList label="警告" emptyLabel="警告：无" items={applyResult.warnings} />
           </div>
         </div>
       )}
@@ -210,7 +210,7 @@ function countStatus(updates: PendingRpgUpdate[], status: PendingRpgUpdate["stat
 }
 
 function statusLabel(status: PendingRpgUpdate["status"]): string {
-  if (status === "accepted") return "Accepted"
-  if (status === "rejected") return "Rejected"
-  return "Pending"
+  if (status === "accepted") return "已接受"
+  if (status === "rejected") return "已拒绝"
+  return "待定"
 }

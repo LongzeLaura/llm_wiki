@@ -3,6 +3,7 @@ import { RPG_SCHEMA_SLOTS } from "./rpg-wiki-schema"
 import { sampleActionResolution, sampleWorldTickResult } from "./rpg-runtime-test-fixtures"
 import {
   buildPostActionWorkingState,
+  buildWorldTickSemanticHandoff,
   selectWorldTickVisibleContent,
   type SubmittedAction,
 } from "./rpg-runtime"
@@ -108,6 +109,64 @@ describe("RPG World Tick working state", () => {
 
     expect(workingState.campaignDelta).toBe("")
     expect(workingState.warnings.join("\n")).toContain("missing_campaign_delta")
+  })
+
+  it("builds a compact semantic handoff without replacing the canonical WorldTickResult", () => {
+    const submittedAction: SubmittedAction = {
+      id: "turn-working-state-semantic-handoff",
+      text: "Wait while Mira studies the canal gate sigil.",
+      source: "freeform",
+    }
+    const actionResolution = sampleActionResolution(submittedAction)
+    const worldTickResult = sampleWorldTickResult(actionResolution)
+    const visibleSelection = selectWorldTickVisibleContent({ actionResolution, worldTickResult })
+    const postActionWorkingState = buildPostActionWorkingState({
+      submittedAction,
+      actionResolution,
+      worldTickResult,
+      visibleSelection,
+    })
+
+    const handoff = buildWorldTickSemanticHandoff({
+      submittedAction,
+      actionResolution,
+      worldTickResult,
+      visibleSelection,
+      postActionWorkingState,
+    })
+
+    expect(handoff.submittedActionId).toBe(submittedAction.id)
+    expect(handoff.actionSummary).toBe(actionResolution.eventDraft.summary)
+    expect(handoff.timeAdvanceSummary).toBe(worldTickResult.timeAdvance.appliedSummary)
+    expect(handoff.confirmed.map((entry) => entry.source)).toEqual(
+      expect.arrayContaining([
+        "worldTick.playerVisibleLine",
+        "worldTick.parallelLine",
+        "worldTick.informationBroadcast",
+        "worldTick.reactionQueue",
+      ]),
+    )
+    expect(handoff.ongoing.map((entry) => entry.source)).toEqual(
+      expect.arrayContaining([
+        "worldTick.tensionLine",
+        "worldTick.clockUpdate",
+        "worldTick.settledOngoingEvent",
+        "worldTick.pacingUpdate",
+      ]),
+    )
+    expect(handoff.possibleFuture).toEqual([
+      expect.objectContaining({ source: "worldTick.gapState", sourceId: worldTickResult.gapState.gapSignalId }),
+    ])
+    expect(handoff.pcVisible.map((entry) => entry.sourceId)).toEqual(
+      visibleSelection.currentSceneVisibleCandidates.map((candidate) => candidate.sourceId),
+    )
+    expect(handoff.userVisiblePcUnknown).toEqual([
+      expect.objectContaining({ source: "worldTick.parallelLine", sourceId: "world-delta-watch-captain-order" }),
+    ])
+    expect(handoff.tensionAndGap.map((entry) => entry.source)).toEqual(
+      expect.arrayContaining(["worldTick.tensionLine", "worldTick.pacingUpdate", "worldTick.gapState"]),
+    )
+    expect(handoff.candidatePaths).toEqual(postActionWorkingState.references)
   })
 
   it("does not add a normal runtime wiki category or alter schema slots", () => {

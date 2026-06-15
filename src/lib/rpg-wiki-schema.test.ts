@@ -94,6 +94,7 @@ describe("RPG_WIKI_SCHEMA", () => {
 
   it("defines the shared runtime schema spine enums and guidance", () => {
     const guidance = getRpgRuntimeSharedSchemaGuidance()
+    const combinedGuidance = guidance.guidance.join("\n")
 
     expect(guidance.narrativeLines).toEqual(expect.arrayContaining([
       "playerVisibleLine",
@@ -127,6 +128,12 @@ describe("RPG_WIKI_SCHEMA", () => {
       "runtimeWikiUpdate",
       "outlineRevision",
     ]))
+    expect(combinedGuidance).toContain("current-turn runtime/narration lens targets")
+    expect(combinedGuidance).toContain("not outline ownership")
+    expect(combinedGuidance).toContain("not a requirement to advance three story lines in parallel")
+    expect(combinedGuidance).toContain("playerVisibleLine means")
+    expect(combinedGuidance).toContain("parallelLine means")
+    expect(combinedGuidance).toContain("tensionLine means")
   })
 
   it("defines runtime visibility, delta ref, recallable section, and clock fields", () => {
@@ -145,6 +152,8 @@ describe("RPG_WIKI_SCHEMA", () => {
       "usePurpose",
       "happenedStatus",
     ]))
+    expect(JSON.stringify(getRpgRuntimeDeltaRefFields())).toContain("Current-turn narration lens target")
+    expect(JSON.stringify(getRpgClockStateFields())).toContain("does not make the clock an outline axis")
 
     const recallableSectionFields = getRpgRecallableSectionFields()
     expect(recallableSectionFields.map((field) => field.name)).toEqual(expect.arrayContaining([
@@ -176,6 +185,11 @@ describe("RPG_WIKI_SCHEMA", () => {
     expect(guidance).toContain("directResults")
     expect(guidance).toContain("write wiki files")
     expect(guidance).toContain("player-facing narration")
+    expect(guidance).toContain("worldDeltas.playerVisibleLine")
+    expect(guidance).toContain("current-turn runtime/narration lens buckets")
+    expect(guidance).toContain("not equal outline axes or synchronized story lines")
+    expect(guidance).toContain("low-information turn")
+    expect(guidance).toContain("do not invent material just to keep all three lens buckets active")
     expect(guidance).toContain("Parallel-line display is not PC knowledge")
     expect(guidance).toContain("possible_future, intention_only, and attempted_not_confirmed")
     expect(guidance).toContain("Gap signal output is World Tick's first-pass screening only")
@@ -539,6 +553,12 @@ describe("RPG_WIKI_SCHEMA", () => {
     expect(combined).toContain("LLM 6 Schema Guidance only defines code-readable schema descriptions")
     expect(combined).toContain("structured fact sources")
     expect(combined).toContain("structured turn delta has priority over generatedNarrative")
+    expect(combined).toContain("lineTarget values remain playerVisibleLine, parallelLine, and tensionLine")
+    expect(combined).toContain("current-turn narration lens targets")
+    expect(combined).toContain("not outline axes")
+    expect(combined).toContain("requirement to keep all three story lines advancing")
+    expect(JSON.stringify(proposedUpdateFields)).toContain("not outline ownership or a required story axis")
+    expect(JSON.stringify(sourceDeltaFields)).toContain("not a persistent outline line")
     expect(combined).toContain("playerFacingText is display evidence only")
     expect(combined).toContain("parallelLineText and user_visible_pc_unknown")
     expect(combined).toContain("must not automatically enter wiki/player/known_information.md")

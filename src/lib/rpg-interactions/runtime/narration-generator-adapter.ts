@@ -6,6 +6,14 @@ export interface RpgNarrationGeneratorAdapter {
     prompt: RpgNarrationGeneratorPrompt,
     promptInput: NarrationGeneratorInput,
   ): Promise<TurnNarration>
+  generateNarrationRawOutput?(
+    prompt: RpgNarrationGeneratorPrompt,
+    promptInput: NarrationGeneratorInput,
+  ): Promise<string>
+  repairNarrationRawOutput?(
+    prompt: RpgNarrationGeneratorPrompt,
+    promptInput: NarrationGeneratorInput,
+  ): Promise<string>
 }
 
 export function createFixtureNarrationGeneratorAdapter(
@@ -13,6 +21,7 @@ export function createFixtureNarrationGeneratorAdapter(
 ): RpgNarrationGeneratorAdapter {
   return {
     async generateNarration(_prompt, promptInput) {
+      if (typeof output !== "string") return output
       const rawOutput = typeof output === "string" ? output : JSON.stringify(output)
       return parseRpgNarrationGeneratorOutput(rawOutput, promptInput)
     },

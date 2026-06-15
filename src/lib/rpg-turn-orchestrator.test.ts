@@ -134,13 +134,16 @@ describe("RPG Runtime Turn Orchestrator", () => {
       "narration",
     ])
     expect(capturedActionResolverPrompt?.systemPrompt).toContain("Action Resolver")
-    expect(capturedActionResolverPrompt?.userPrompt).toContain("## Pre-Action Snapshot")
+    expect(capturedActionResolverPrompt?.userPrompt).toContain("## 行动前快照")
+    expect(capturedActionResolverPrompt?.debugSections?.some((section) =>
+      section.sectionId === "action-resolver-pre-action-snapshot",
+    )).toBe(true)
     expect(capturedWorldTickPrompt?.systemPrompt).toContain("World Tick")
     expect(capturedWorldTickInput?.playerActionDelta).toBe(capturedWorldTickInput?.actionResolution.playerActionDelta)
     expect(capturedWorldTickInput?.actionResolution).toEqual(actionResolution)
     expect(capturedRecallSelectorInputPaths).toContain("wiki/current-scene/scene_state.md")
     expect(capturedRecallSelectorInputPaths).toContain("wiki/factions/runtime/harbor-watch.md")
-    expect(capturedOutlineBriefPrompt?.systemPrompt).toContain("Outline-aware Brief Compiler")
+    expect(capturedOutlineBriefPrompt?.systemPrompt).toContain("Outline Brief Draft Generator")
     expect(capturedOutlineBriefInput?.postActionWorkingState).toEqual(result.postActionWorkingState)
     expect(capturedOutlineBriefInput?.actionResolution).toEqual(actionResolution)
     expect(capturedOutlineBriefInput?.worldTickResult).toEqual(worldTickResult)
@@ -160,13 +163,14 @@ describe("RPG Runtime Turn Orchestrator", () => {
       ]),
     )
     expect(capturedPrompt?.systemPrompt).toContain("Narration Generator")
-    expect(capturedPrompt?.systemPrompt).toContain("Return strict JSON matching TurnNarration only")
-    expect(capturedPrompt?.systemPrompt).toContain("parallel line display is not PC knowledge")
-    expect(capturedPrompt?.systemPrompt).toContain("outlineRevisionProposal is not Narration fact material")
-    expect(capturedPrompt?.userPrompt).toContain("## ActionResolution")
-    expect(capturedPrompt?.userPrompt).toContain("## WorldTickResult")
-    expect(capturedPrompt?.userPrompt).toContain("## WorldTickVisibleSelection")
-    expect(capturedPrompt?.userPrompt).toContain("## PostActionWorkingState")
+    expect(capturedPrompt?.systemPrompt).toContain("只返回严格匹配 TurnNarrationDraft 的 JSON")
+    expect(capturedPrompt?.systemPrompt).toContain("parallel line 的展示不等于 PC 已知")
+    expect(capturedPrompt?.systemPrompt).toContain("outlineRevisionProposal 不是 Narration 的事实材料")
+    expect(capturedPrompt?.userPrompt).toContain("## TurnSemanticHandoff")
+    expect(capturedPrompt?.userPrompt).not.toContain("## ActionResolution")
+    expect(capturedPrompt?.userPrompt).not.toContain("## WorldTickResult")
+    expect(capturedPrompt?.userPrompt).not.toContain("## WorldTickVisibleSelection")
+    expect(capturedPrompt?.userPrompt).not.toContain("## PostActionWorkingState")
     expect(capturedPrompt?.userPrompt).toContain("## RecallSelection")
     expect(capturedPrompt?.userPrompt).toContain("## recalledMaterials")
     expect(capturedPrompt?.userPrompt).toContain("## OutlineAwareNarrationBrief")
@@ -174,7 +178,7 @@ describe("RPG Runtime Turn Orchestrator", () => {
     expect(capturedPrompt?.userPrompt).not.toContain("FULL_OUTLINES_MAIN_POISON")
     expect(capturedPrompt?.userPrompt).toContain("world-delta-watch-captain-order")
     expect(capturedPrompt?.userPrompt).toContain("attempted_not_confirmed")
-    expect(capturedPrompt?.userPrompt).toContain("A careful inspection consumes a few focused minutes.")
+    expect(capturedPrompt?.userPrompt).toContain("Two to five minutes pass while Mira studies the ward.")
     expect(capturedPrompt?.userPrompt).toContain(submittedAction.text)
     expect(capturedNarrationInput?.outlineAwareNarrationBrief).toEqual(result.outlineAwareNarrationBrief)
     expect(capturedNarrationInput?.forbiddenNarrationConstraints.map((constraint) => constraint.lineTarget)).toContain(
@@ -199,6 +203,7 @@ describe("RPG Runtime Turn Orchestrator", () => {
       worldTickResult,
       visibleSelection: result.visibleSelection,
       postActionWorkingState: result.postActionWorkingState,
+      turnSemanticHandoff: result.turnSemanticHandoff,
       recallSelection: result.recallSelection,
       recalledMaterials: result.recalledMaterials,
       outlineAwareNarrationBrief: result.outlineAwareNarrationBrief,

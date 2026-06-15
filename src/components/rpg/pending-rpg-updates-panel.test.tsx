@@ -4,7 +4,7 @@ import { renderToStaticMarkup } from "react-dom/server"
 import { describe, expect, it, vi } from "vitest"
 import { PendingRpgUpdatesPanel } from "@/components/rpg"
 import type { PendingRpgUpdate } from "@/lib/rpg-runtime"
-import type { ApplyRpgPendingUpdatesResult } from "@/lib/rpg-runtime/write-policy"
+import type { ApplyRpgPendingUpdatesResult } from "@/lib/rpg-runtime/write-policy-shared"
 
 describe("PendingRpgUpdatesPanel", () => {
   it("renders pending RPG updates for review", () => {
@@ -17,10 +17,10 @@ describe("PendingRpgUpdatesPanel", () => {
       />,
     )
 
-    expect(html).toContain("Pending RPG updates")
+    expect(html).toContain("待处理 RPG 更新")
     expect(html).toContain("wiki/current-scene/scene_state.md")
     expect(html).toContain("overwrite")
-    expect(html).toContain("Pending")
+    expect(html).toContain("待定")
     expect(html).toContain("Refresh the current scene snapshot.")
     expect(html).toContain("The lantern key has answered the sigil.")
     expect(html).toContain("wiki/events/canal-gate.md")
@@ -35,7 +35,7 @@ describe("PendingRpgUpdatesPanel", () => {
       onApplyAcceptedUpdates: () => undefined,
     })
 
-    findElementByTitle(tree, "Accept update update-scene").props.onClick?.()
+    findElementByTitle(tree, "接受更新 update-scene").props.onClick?.()
 
     expect(onAcceptUpdate).toHaveBeenCalledWith("update-scene")
     expect(
@@ -47,7 +47,7 @@ describe("PendingRpgUpdatesPanel", () => {
           onApplyAcceptedUpdates={() => undefined}
         />,
       ),
-    ).toContain("Accepted")
+    ).toContain("已接受")
   })
 
   it("calls reject update and displays a rejected status", () => {
@@ -59,7 +59,7 @@ describe("PendingRpgUpdatesPanel", () => {
       onApplyAcceptedUpdates: () => undefined,
     })
 
-    findElementByTitle(tree, "Reject update update-scene").props.onClick?.()
+    findElementByTitle(tree, "拒绝更新 update-scene").props.onClick?.()
 
     expect(onRejectUpdate).toHaveBeenCalledWith("update-scene")
     expect(
@@ -71,7 +71,7 @@ describe("PendingRpgUpdatesPanel", () => {
           onApplyAcceptedUpdates={() => undefined}
         />,
       ),
-    ).toContain("Rejected")
+    ).toContain("已拒绝")
   })
 
   it("enables apply only when at least one update is accepted", () => {
@@ -81,7 +81,7 @@ describe("PendingRpgUpdatesPanel", () => {
       onRejectUpdate: () => undefined,
       onApplyAcceptedUpdates: () => undefined,
     })
-    expect(findElementByTitle(pendingTree, "Apply accepted RPG updates").props.disabled).toBe(true)
+    expect(findElementByTitle(pendingTree, "应用已接受的 RPG 更新").props.disabled).toBe(true)
 
     const acceptedTree = PendingRpgUpdatesPanel({
       updates: [{ ...sampleUpdate(), status: "accepted" }],
@@ -89,7 +89,7 @@ describe("PendingRpgUpdatesPanel", () => {
       onRejectUpdate: () => undefined,
       onApplyAcceptedUpdates: () => undefined,
     })
-    expect(findElementByTitle(acceptedTree, "Apply accepted RPG updates").props.disabled).toBe(false)
+    expect(findElementByTitle(acceptedTree, "应用已接受的 RPG 更新").props.disabled).toBe(false)
   })
 
   it("calls apply and displays the latest apply result", () => {
@@ -101,7 +101,7 @@ describe("PendingRpgUpdatesPanel", () => {
       onApplyAcceptedUpdates,
     })
 
-    findElementByTitle(tree, "Apply accepted RPG updates").props.onClick?.()
+    findElementByTitle(tree, "应用已接受的 RPG 更新").props.onClick?.()
 
     expect(onApplyAcceptedUpdates).toHaveBeenCalledTimes(1)
 
@@ -116,14 +116,14 @@ describe("PendingRpgUpdatesPanel", () => {
       />,
     )
 
-    expect(html).toContain("Last apply result")
-    expect(html).toContain("Affected paths")
+    expect(html).toContain("上次应用结果")
+    expect(html).toContain("受影响路径")
     expect(html).toContain("wiki/current-scene/scene_state.md")
-    expect(html).toContain("Applied updates")
+    expect(html).toContain("已应用更新")
     expect(html).toContain("update-scene: wiki/current-scene/scene_state.md")
-    expect(html).toContain("Skipped updates")
+    expect(html).toContain("已跳过更新")
     expect(html).toContain("targetPath is outside allowed runtime write paths.")
-    expect(html).toContain("Warnings")
+    expect(html).toContain("警告")
     expect(html).toContain("Skipped RPG pending update")
   })
 })
@@ -171,7 +171,7 @@ type ElementProps = {
 
 function findElementByTitle(node: ReactNode, title: string): ReactElement<ElementProps> {
   const found = findElement(node, (element) => element.props.title === title)
-  if (!found) throw new Error(`Could not find element with title "${title}".`)
+  if (!found) throw new Error(`找不到 title 为 "${title}" 的元素。`)
   return found
 }
 

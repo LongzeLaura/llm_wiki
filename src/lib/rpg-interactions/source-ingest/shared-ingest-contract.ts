@@ -1,5 +1,20 @@
 import { buildLanguageDirective } from "@/lib/output-language"
-import { GENERATION_WIKI_TYPES } from "@/lib/wiki-page-types"
+
+const SOURCE_INGEST_FRONTMATTER_TYPES = [
+  "source",
+  "world",
+  "characters",
+  "player",
+  "locations",
+  "factions",
+  "items",
+  "plot-arcs",
+  "events",
+  "relationships",
+  "index",
+  "overview",
+  "log",
+] as const
 
 // 用途：根据来源内容生成输出语言规则，统一控制后续 prompt 的语言约束。
 // 原因：不同来源可能需要不同输出语言，单独封装能避免各个 prompt 重复拼接相同逻辑。
@@ -57,7 +72,7 @@ export function buildFrontmatterRules(sourceFileName: string): string {
     //    应写成 `related: [a, b]`，使用裸 slug。
     "",
     "Required fields and types:",
-    `  - type     - one of the known types (${GENERATION_WIKI_TYPES.join(" | ")}), or a custom type explicitly defined by the project schema`,
+    `  - type     - one of the ordinary Source Ingest allowed types (${SOURCE_INGEST_FRONTMATTER_TYPES.join(" | ")})`,
     "  - title    - string (quote it if it contains a colon, e.g. `title: \"Foo: Bar\"`)",
     "  - created  - date in YYYY-MM-DD form (no quotes)",
     "  - updated  - same as created",
@@ -66,7 +81,7 @@ export function buildFrontmatterRules(sourceFileName: string): string {
     "               `wiki/`, `.md`, or `[[...]]` here -- slugs only.",
     `  - sources  - array of source filenames; MUST include "${sourceFileName}".`,
     // 必填字段与类型：
-    //   - type     - 已知类型之一（${GENERATION_WIKI_TYPES.join(" | ")}），或项目 schema 明确定义的自定义类型
+    //   - type     - 普通 Source Ingest 允许的类型之一
     //   - title    - 字符串（如果包含冒号，请加引号，例如 `title: "Foo: Bar"`）
     //   - created  - YYYY-MM-DD 格式日期（不要加引号）
     //   - updated  - 同 created
@@ -97,6 +112,7 @@ export function buildFrontmatterRules(sourceFileName: string): string {
     "- Use [[wikilink]] syntax in the BODY for cross-references between pages.",
     "- If you include images, use wiki-root-relative paths such as `media/source-slug/image.png`; never output absolute filesystem paths.",
     "- Use kebab-case filenames.",
+    "- Do not use current-scene, rules, style, memory, outlines, quests, or runtime overlay as ordinary Source Ingest frontmatter types; emit REVIEW with the recommended mode instead.",
     "- Follow the analysis recommendations on what to emphasize.",
     "- If the analysis found connections to existing pages, add cross-references.",
     // 其他规则：

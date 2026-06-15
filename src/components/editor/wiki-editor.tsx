@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { Editor, rootCtx, defaultValueCtx } from "@milkdown/kit/core"
+import { getMarkdown } from "@milkdown/kit/utils"
 import { commonmark } from "@milkdown/kit/preset/commonmark"
 import { gfm } from "@milkdown/kit/preset/gfm"
 import { history } from "@milkdown/kit/plugin/history"
@@ -9,18 +10,25 @@ import { nord } from "@milkdown/theme-nord"
 import { Milkdown, MilkdownProvider, useEditor } from "@milkdown/react"
 import "@milkdown/theme-nord/style.css"
 import "katex/dist/katex.min.css"
-import { Pencil, Eye } from "lucide-react"
+import { Loader2, Pencil, Eye } from "lucide-react"
 import { parseFrontmatter } from "@/lib/frontmatter"
 import { FrontmatterPanel } from "@/components/editor/frontmatter-panel"
 import { WikiReader } from "@/components/editor/wiki-reader"
+import { resolveWikiEditorSaveBody } from "@/components/editor/wiki-editor-save"
 
 interface WikiEditorInnerProps {
   content: string
-  onSave: (markdown: string, options?: { immediate?: boolean }) => void
+  onSave: (markdown: string, options?: { immediate?: boolean }) => void | Promise<void>
   onMarkdownChange: (markdown: string) => void
+  onCurrentMarkdownGetterChange: (getter: (() => string) | null) => void
 }
 
-function WikiEditorInner({ content, onSave, onMarkdownChange }: WikiEditorInnerProps) {
+function WikiEditorInner({
+  content,
+  onSave,
+  onMarkdownChange,
+  onCurrentMarkdownGetterChange,
+}: WikiEditorInnerProps) {
   // Milkdown fires `markdownUpdated` once on initial parse before any
   // user interaction. That one emit must not be forwarded as a save,
   // otherwise just opening a file can overwrite its content with
@@ -28,7 +36,7 @@ function WikiEditorInner({ content, onSave, onMarkdownChange }: WikiEditorInnerP
   // placeholder string that came back from a failed read).
   const initialEmitConsumedRef = useRef(false)
 
-  useEditor(
+  const editor = useEditor(
     (root) =>
       Editor.make()
         .config(nord)
@@ -42,7 +50,7 @@ function WikiEditorInner({ content, onSave, onMarkdownChange }: WikiEditorInnerP
               return
             }
             onMarkdownChange(markdown)
-            onSave(markdown)
+            void onSave(markdown)
           })
         })
         .use(commonmark)
@@ -53,12 +61,23 @@ function WikiEditorInner({ content, onSave, onMarkdownChange }: WikiEditorInnerP
     [content],
   )
 
+  useEffect(() => {
+    if (editor.loading) return
+    const instance = editor.get()
+    if (!instance) return
+
+    onCurrentMarkdownGetterChange(() => instance.action(getMarkdown()))
+    return () => {
+      onCurrentMarkdownGetterChange(null)
+    }
+  }, [editor, editor.loading, onCurrentMarkdownGetterChange])
+
   return <Milkdown />
 }
 
 interface WikiEditorProps {
   content: string
-  onSave: (markdown: string, options?: { immediate?: boolean }) => void
+  onSave: (markdown: string, options?: { immediate?: boolean }) => void | Promise<void>
 }
 
 function wrapBareMathBlocks(text: string): string {
@@ -84,6 +103,8 @@ export function WikiEditor({ content, onSave }: WikiEditorProps) {
   //      them; the toggle makes editing a deliberate action
   //      rather than the default state.
   const [mode, setMode] = useState<"read" | "edit">("read")
+  const [isSaving, setIsSaving] = useState(false)
+  const [saveError, setSaveError] = useState<string | null>(null)
 
   // Split frontmatter from body. Both modes consume `body`;
   // Milkdown additionally rebuilds the full file via `rawBlock`
@@ -95,6 +116,7 @@ export function WikiEditor({ content, onSave }: WikiEditorProps) {
 
   const processedBody = useMemo(() => wrapBareMathBlocks(body), [body])
   const latestBodyRef = useRef(processedBody)
+  const getCurrentMarkdownRef = useRef<(() => string) | null>(null)
 
   useEffect(() => {
     latestBodyRef.current = processedBody
@@ -105,9 +127,30 @@ export function WikiEditor({ content, onSave }: WikiEditorProps) {
     [onSave, rawBlock],
   )
 
-  const saveLatestNow = useCallback(() => {
-    onSave(rawBlock + latestBodyRef.current, { immediate: true })
+  const saveLatestNow = useCallback(async () => {
+    await waitForEditorFlush()
+    const currentBody = resolveWikiEditorSaveBody(getCurrentMarkdownRef.current, latestBodyRef.current)
+    await onSave(rawBlock + currentBody, { immediate: true })
   }, [onSave, rawBlock])
+
+  const toggleMode = useCallback(async () => {
+    if (mode === "read") {
+      setSaveError(null)
+      setMode("edit")
+      return
+    }
+
+    setIsSaving(true)
+    setSaveError(null)
+    try {
+      await saveLatestNow()
+      setMode("read")
+    } catch (err) {
+      setSaveError(err instanceof Error ? err.message : String(err))
+    } finally {
+      setIsSaving(false)
+    }
+  }, [mode, saveLatestNow])
 
   return (
     <div
@@ -117,22 +160,33 @@ export function WikiEditor({ content, onSave }: WikiEditorProps) {
         if (mode !== "edit") return
         if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "s") {
           event.preventDefault()
-          saveLatestNow()
+          void saveLatestNow().catch((err) => {
+            setSaveError(err instanceof Error ? err.message : String(err))
+          })
         }
       }}
     >
       <button
         type="button"
-        onClick={() => {
-          if (mode === "edit") saveLatestNow()
-          setMode((m) => (m === "read" ? "edit" : "read"))
-        }}
+        onClick={() => void toggleMode()}
+        disabled={isSaving}
         title={mode === "read" ? "Edit (raw markdown)" : "Done editing"}
-        className="absolute right-3 top-3 z-10 inline-flex items-center gap-1 rounded-md border border-border/60 bg-background/90 px-2 py-1 text-xs text-muted-foreground shadow-sm hover:bg-accent hover:text-foreground"
+        className="absolute right-3 top-3 z-10 inline-flex items-center gap-1 rounded-md border border-border/60 bg-background/90 px-2 py-1 text-xs text-muted-foreground shadow-sm hover:bg-accent hover:text-foreground disabled:cursor-not-allowed disabled:opacity-60"
       >
-        {mode === "read" ? <Pencil className="h-3.5 w-3.5" /> : <Eye className="h-3.5 w-3.5" />}
-        {mode === "read" ? "Edit" : "Done"}
+        {isSaving ? (
+          <Loader2 className="h-3.5 w-3.5 animate-spin" />
+        ) : mode === "read" ? (
+          <Pencil className="h-3.5 w-3.5" />
+        ) : (
+          <Eye className="h-3.5 w-3.5" />
+        )}
+        {isSaving ? "Saving" : mode === "read" ? "Edit" : "Done"}
       </button>
+      {saveError && mode === "edit" && (
+        <div className="absolute right-3 top-12 z-10 max-w-[min(28rem,calc(100%-1.5rem))] rounded-md border border-destructive/40 bg-background/95 px-3 py-2 text-xs text-destructive shadow-sm">
+          Save failed: {saveError}
+        </div>
+      )}
 
       {mode === "read" ? (
         <div className="px-6 py-6">
@@ -149,10 +203,23 @@ export function WikiEditor({ content, onSave }: WikiEditorProps) {
               onMarkdownChange={(markdown) => {
                 latestBodyRef.current = markdown
               }}
+              onCurrentMarkdownGetterChange={(getter) => {
+                getCurrentMarkdownRef.current = getter
+              }}
             />
           </div>
         </MilkdownProvider>
       )}
     </div>
   )
+}
+
+async function waitForEditorFlush(): Promise<void> {
+  await new Promise<void>((resolve) => {
+    if (typeof requestAnimationFrame === "function") {
+      requestAnimationFrame(() => resolve())
+      return
+    }
+    setTimeout(resolve, 0)
+  })
 }

@@ -1,15 +1,11 @@
 import {
-  runtimeUpdateInteractionSpec,
-  validateRpgRuntimeUpdateProposals,
-  type RejectedRpgRuntimeUpdate,
-  type RpgRuntimeUpdateValidationIssue,
+  parseAndValidateRuntimeUpdateProposalResult,
   type RpgRuntimeUpdateValidationResult,
-  validateRpgRuntimeUpdateTarget,
 } from "../rpg-interactions/runtime"
 import {
   applyRpgPendingUpdates,
   type ApplyRpgPendingUpdatesResult,
-} from "../rpg-runtime/write-policy"
+} from "../rpg-runtime/write-policy-client"
 import type { ProposedWikiUpdate } from "../rpg-runtime/state-extractor"
 import type { RpgTurnRecord } from "../rpg-runtime/turn-model"
 import {
@@ -17,6 +13,10 @@ import {
   type PendingRpgUpdate,
 } from "../rpg-runtime/update-staging"
 import { buildRuntimeUpdateProposalInputFromTurnRecord } from "../rpg-runtime/runtime-update-proposal-handoff"
+import {
+  validateRpgRuntimePersistenceBoundary,
+  type RpgRuntimePersistenceReviewOnlyAuditItem,
+} from "../rpg-runtime/persistence-boundary"
 import type { RuntimeUpdateProposalResult } from "../rpg-runtime/types"
 import type { RpgImportModeSpec, RpgImportRequest, RpgImportResult } from "./types"
 
@@ -46,13 +46,6 @@ interface ResolvedRuntimeUpdateProposals {
   warnings: string[]
 }
 
-interface TargetPolicyValidationResult {
-  acceptedUpdates: ProposedWikiUpdate[]
-  rejectedUpdates: RejectedRpgRuntimeUpdate[]
-  issues: RpgRuntimeUpdateValidationIssue[]
-  warnings: string[]
-}
-
 export async function runRuntimeUpdateApplyImport(
   request: RpgImportRequest,
 ): Promise<RuntimeUpdateApplyResult> {
@@ -70,7 +63,10 @@ export const runtimeUpdateApplyModeSpec: RpgImportModeSpec = {
 
 async function runStagePending(request: RpgImportRequest): Promise<RuntimeUpdateApplyResult> {
   const resolved = resolveStagePendingProposals(request)
-  const runtimeUpdateValidation = validateRuntimeUpdateApplyProposals(resolved.proposedUpdates)
+  const runtimeUpdateValidation = validateRpgRuntimePersistenceBoundary({
+    proposedUpdates: resolved.proposedUpdates,
+    reviewOnlyAuditItems: buildRuntimePersistenceReviewOnlyAuditItems(resolved),
+  })
   const pendingUpdates = createPendingRpgUpdates(runtimeUpdateValidation.acceptedUpdates)
 
   return {
@@ -138,13 +134,13 @@ function resolveStagePendingProposals(request: RpgImportRequest): ResolvedRuntim
       throw new Error("runtime_update_apply stage_pending with sourceText requires options.turnRecord.")
     }
     return runtimeUpdateProposalResultToResolvedProposals(
-      runtimeUpdateInteractionSpec.parseOutput(request.sourceText, buildRuntimeUpdateProposalInputFromTurnRecord(turnRecord)),
+      parseAndValidateRuntimeUpdateProposalResult(request.sourceText, buildRuntimeUpdateProposalInputFromTurnRecord(turnRecord)),
     )
   }
 
   if (turnRecord) {
     return runtimeUpdateProposalResultToResolvedProposals(
-      runtimeUpdateInteractionSpec.parseOutput(
+      parseAndValidateRuntimeUpdateProposalResult(
         turnRecord.generatedNarrative,
         buildRuntimeUpdateProposalInputFromTurnRecord(turnRecord),
       ),
@@ -157,7 +153,7 @@ function resolveStagePendingProposals(request: RpgImportRequest): ResolvedRuntim
 }
 
 function runtimeUpdateProposalResultToResolvedProposals(
-  result: ReturnType<typeof runtimeUpdateInteractionSpec.parseOutput>,
+  result: RuntimeUpdateProposalResult,
 ): ResolvedRuntimeUpdateProposals {
   return {
     proposedUpdates: result.proposedWikiUpdates,
@@ -170,52 +166,43 @@ function runtimeUpdateProposalResultToResolvedProposals(
   }
 }
 
-function validateRuntimeUpdateApplyProposals(
-  proposedUpdates: ProposedWikiUpdate[],
-): RpgRuntimeUpdateValidationResult {
-  const targetPolicy = validateRuntimeTargets(proposedUpdates)
-  const validation = validateRpgRuntimeUpdateProposals(targetPolicy.acceptedUpdates)
-  const issues = [...targetPolicy.issues, ...validation.issues]
-
-  return {
-    acceptedUpdates: validation.acceptedUpdates,
-    rejectedUpdates: [...targetPolicy.rejectedUpdates, ...validation.rejectedUpdates],
-    issues,
-    warnings: [...targetPolicy.warnings, ...validation.warnings],
-  }
-}
-
-function validateRuntimeTargets(updates: ProposedWikiUpdate[]): TargetPolicyValidationResult {
-  const acceptedUpdates: ProposedWikiUpdate[] = []
-  const rejectedUpdates: RejectedRpgRuntimeUpdate[] = []
-  const issues: RpgRuntimeUpdateValidationIssue[] = []
-  const warnings: string[] = []
-
-  for (const update of updates) {
-    const targetValidation = validateRpgRuntimeUpdateTarget(update.targetPath, update.strategy)
-    if (!targetValidation.ok) {
-      const issue: RpgRuntimeUpdateValidationIssue = {
-        severity: "reject",
-        code: "runtime_update_target_policy",
-        message: targetValidation.reason,
-        targetPath: update.targetPath,
-        updateId: update.id,
-      }
-      issues.push(issue)
-      rejectedUpdates.push({ update, issues: [issue] })
-      warnings.push(formatValidationIssueWarning(issue))
-      continue
-    }
-
-    acceptedUpdates.push({
-      ...update,
-      targetPath: targetValidation.targetPath,
-      strategy: targetValidation.strategy,
-      references: [...update.references],
-    })
-  }
-
-  return { acceptedUpdates, rejectedUpdates, issues, warnings }
+function buildRuntimePersistenceReviewOnlyAuditItems(
+  resolved: ResolvedRuntimeUpdateProposals,
+): RpgRuntimePersistenceReviewOnlyAuditItem[] {
+  return [
+    ...resolved.skippedDeltas.map((delta) => ({
+      kind: "skipped_delta" as const,
+      id: delta.skipId,
+      summary: `${delta.code}: ${delta.reason}`,
+      reviewPolicy: delta.reviewPolicy,
+    })),
+    ...resolved.outlineRevisionReviewItems.map((item) => ({
+      kind: "outline_revision_review" as const,
+      id: item.reviewItemId,
+      summary: item.summary,
+      reviewPolicy: item.reviewPolicy,
+    })),
+    ...resolved.journalEntries.map((entry, index) => ({
+      kind: "journal_entry" as const,
+      id: `runtime-update-journal-${index + 1}`,
+      summary: entry,
+      reviewPolicy: "review_only",
+    })),
+    ...(resolved.pacingUpdateProposal
+      ? [{
+          kind: "pacing_update_proposal" as const,
+          id: resolved.pacingUpdateProposal.proposalId,
+          summary: resolved.pacingUpdateProposal.campaignDelta,
+          reviewPolicy: resolved.pacingUpdateProposal.reviewPolicy,
+        }]
+      : []),
+    ...resolved.proposalGroups.map((group) => ({
+      kind: "proposal_group" as const,
+      id: group.groupId,
+      summary: group.reason,
+      reviewPolicy: group.reviewPolicy,
+    })),
+  ]
 }
 
 function resolveProposedUpdates(value: unknown): ProposedWikiUpdate[] {
@@ -532,8 +519,4 @@ function emptyRuntimeUpdateValidation(): RpgRuntimeUpdateValidationResult {
     issues: [],
     warnings: [],
   }
-}
-
-function formatValidationIssueWarning(issue: RpgRuntimeUpdateValidationIssue): string {
-  return `Rejected RPG runtime update ${issue.updateId} (${issue.targetPath}): ${issue.code}: ${issue.message}`
 }

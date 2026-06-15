@@ -1,10 +1,19 @@
 # llmWikiRPG
 
-Current version: v0.5
+Current version: v0.6
 
 llmWikiRPG is a desktop RPG runtime knowledge base. It organizes source material, player state, current scene, relationship tension, style rules, and turn history into a readable and writable wiki that can support live conversation-driven play.
 
 This branch is RPG-only. Legacy `llm_wiki` / `default` projects are not supported, and the app will reject projects that are not marked as `llmwikirpg`.
+
+## v0.6 Highlights
+
+- Runtime prompt/compiler alignment: runtime-facing prompts now spell out the draft fields that local compilers actually read, with stricter guidance against natural-language field aliases.
+- Soft format recovery controls: runtime LLM stages can use explicit, opt-in repair retry paths while preserving canonical validator and persistence boundaries.
+- Prompt slimming: late runtime handoffs now pass compact prompt-only summaries instead of repeatedly embedding full canonical objects.
+- Draft contract hardening: Action Resolver, World Tick, Narration Generator, Outline Brief, and Runtime Update Proposal contracts are clearer about model-owned fields versus locally derived canonical fields.
+- Debug trace visibility: runtime traces and formatting audits now surface JSON recovery, loose coercion, repair retry status, and prompt-size pressure without changing wiki write behavior.
+- Backend runtime bridge: Tauri runs turns through the Node worker and streams per-run debug trace snapshots back to the frontend.
 
 ## v0.5 Highlights
 

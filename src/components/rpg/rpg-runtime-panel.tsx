@@ -1,34 +1,32 @@
-import { useEffect, useMemo, useRef, useState, type Dispatch, type SetStateAction } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState, type Dispatch, type SetStateAction } from "react"
 import { AlertTriangle, Loader2 } from "lucide-react"
 import { listDirectory, readFile } from "@/commands/fs"
 import { useWikiStore, type LlmConfig } from "@/stores/wiki-store"
+import type { RunRpgRuntimeTurnFlowResult } from "@/lib/rpg-runtime/runtime-controller"
+import { runRpgRuntimeTurnFlowClient } from "@/lib/rpg-runtime/runtime-controller-client"
 import {
-  createLlmRpgActionResolverAdapter,
-  createLlmRpgNarrationGeneratorAdapter,
-  createLlmRpgOutlineBriefAdapter,
-  createLlmRpgRecallSelectorAdapter,
-  createLlmRpgRuntimeUpdateInteractionAdapter,
-  createLlmRpgWorldTickAdapter,
-  type RpgActionResolverAdapter,
-  type RpgNarrationGeneratorAdapter,
-  type RpgOutlineBriefAdapter,
-  type RpgRecallSelectorAdapter,
-  type RpgRuntimeUpdateInteractionAdapter,
-  type RpgWorldTickAdapter,
-} from "@/lib/rpg-interactions/runtime"
+  createRpgRuntimeDebugTraceStore,
+  type RpgRuntimeDebugTrace,
+  type RpgRuntimeDebugTraceState,
+  type RpgRuntimeDebugTraceSink,
+} from "@/lib/rpg-runtime/debug-trace"
 import {
-  runRpgRuntimeTurnFlow,
-  type RunRpgRuntimeTurnFlowResult,
-  type RpgRuntimeTurnPersistence,
-} from "@/lib/rpg-runtime/runtime-controller"
+  clearRpgRuntimeDebugTraces,
+  loadRpgRuntimeDebugTraces,
+  saveRpgRuntimeDebugTrace,
+} from "@/lib/rpg-runtime/debug-trace-persistence-client"
+import {
+  buildRpgRuntimeDebugTraceExportFileName,
+  serializeRpgRuntimeDebugTraceForExport,
+} from "@/lib/rpg-runtime/debug-trace-export"
 import {
   appendRpgApplyJournalEntry,
-  appendRpgTurnJournalEntry,
   loadRpgRuntimeSnapshot,
   saveRpgPendingUpdates,
-  type RuntimeApplyJournalEntry,
-  type RuntimeTurnJournalEntry,
-} from "@/lib/rpg-runtime/runtime-persistence"
+} from "@/lib/rpg-runtime/runtime-persistence-client"
+import type {
+  RuntimeApplyJournalEntry,
+} from "@/lib/rpg-runtime/runtime-persistence-shared"
 import type { RpgActionOption } from "@/lib/rpg-runtime/turn-model"
 import type { SubmittedAction } from "@/lib/rpg-runtime/types"
 import {
@@ -36,44 +34,49 @@ import {
   rejectPendingRpgUpdate,
   type PendingRpgUpdate,
 } from "@/lib/rpg-runtime/update-staging"
-import {
-  applyRpgPendingUpdates,
-  type ApplyRpgPendingUpdatesInput,
-  type ApplyRpgPendingUpdatesResult,
-} from "@/lib/rpg-runtime/write-policy"
+import { applyRpgPendingUpdates } from "@/lib/rpg-runtime/write-policy-client"
+import type {
+  ApplyRpgPendingUpdatesInput,
+  ApplyRpgPendingUpdatesResult,
+} from "@/lib/rpg-runtime/write-policy-shared"
 import { PendingRpgUpdatesPanel } from "./pending-rpg-updates-panel"
 import { RpgPlayPanel } from "./rpg-play-panel"
+import { RpgRuntimeDebugConsole } from "./rpg-runtime-debug-console"
 
 const CURRENT_SCENE_PATH = "wiki/current-scene/scene_state.md"
 
+export interface RpgRuntimeDebugTracePersistencePolicy {
+  enabled: boolean
+  maxTraces: 5 | 10 | 20
+}
+
+const DEFAULT_DEBUG_TRACE_PERSISTENCE_POLICY: RpgRuntimeDebugTracePersistencePolicy = {
+  enabled: false,
+  maxTraces: 5,
+}
+
 export interface RpgRuntimePanelDependencies {
   readFile: (path: string) => Promise<string>
-  createActionResolverAdapter: (input: { llmConfig: LlmConfig; signal?: AbortSignal }) => RpgActionResolverAdapter
-  createWorldTickAdapter: (input: { llmConfig: LlmConfig; signal?: AbortSignal }) => RpgWorldTickAdapter
-  createRecallSelectorAdapter: (input: { llmConfig: LlmConfig; signal?: AbortSignal }) => RpgRecallSelectorAdapter
-  createOutlineBriefCompilerAdapter: (input: { llmConfig: LlmConfig; signal?: AbortSignal }) => RpgOutlineBriefAdapter
-  createNarrationAdapter: (input: { llmConfig: LlmConfig; signal?: AbortSignal }) => RpgNarrationGeneratorAdapter
-  createUpdateInteractionAdapter: (input: {
-    llmConfig: LlmConfig
-    signal?: AbortSignal
-  }) => RpgRuntimeUpdateInteractionAdapter
   runTurnFlow: (input: {
     projectPath: string
     wikiMode: "llmwikirpg"
     submittedAction: SubmittedAction
-    actionResolverAdapter: RpgActionResolverAdapter
-    worldTickAdapter: RpgWorldTickAdapter
-    recallSelectorAdapter: RpgRecallSelectorAdapter
-    outlineBriefCompilerAdapter: RpgOutlineBriefAdapter
-    narrationAdapter: RpgNarrationGeneratorAdapter
-    updateInteractionAdapter: RpgRuntimeUpdateInteractionAdapter
-    runtimePersistence?: RpgRuntimeTurnPersistence
+    llmConfig: LlmConfig
+    debugTraceSink?: RpgRuntimeDebugTraceSink
+    softSemanticRepairRetry?: { enabled?: boolean; maxAttempts?: 1; maxFailedOutputChars?: number }
   }) => Promise<RunRpgRuntimeTurnFlowResult>
   applyPendingUpdates: (input: ApplyRpgPendingUpdatesInput) => Promise<ApplyRpgPendingUpdatesResult>
   loadRuntimeSnapshot: (projectPath: string) => Promise<{ pendingUpdates: PendingRpgUpdate[]; warnings: string[] }>
   savePendingUpdates: (projectPath: string, updates: PendingRpgUpdate[]) => Promise<{ warnings?: string[] }>
-  appendTurnJournalEntry: (projectPath: string, entry: RuntimeTurnJournalEntry) => Promise<{ warnings?: string[] } | void>
   appendApplyJournalEntry: (projectPath: string, entry: RuntimeApplyJournalEntry) => Promise<{ warnings?: string[] } | void>
+  saveDebugTrace: (
+    projectPath: string,
+    trace: RpgRuntimeDebugTrace,
+    options: { maxTraces: number },
+  ) => Promise<{ warnings?: string[] }>
+  loadDebugTraces: (projectPath: string) => Promise<{ traces: RpgRuntimeDebugTrace[]; warnings?: string[] }>
+  clearDebugTraces: (projectPath: string) => Promise<{ warnings?: string[] }>
+  exportDebugTrace: (trace: RpgRuntimeDebugTrace) => void
   reloadProjectFiles: (
     projectPath: string,
     affectedPaths: string[],
@@ -111,18 +114,15 @@ export interface RpgRuntimePanelProps {
 
 const defaultDependencies: RpgRuntimePanelDependencies = {
   readFile,
-  createActionResolverAdapter: createLlmRpgActionResolverAdapter,
-  createWorldTickAdapter: createLlmRpgWorldTickAdapter,
-  createRecallSelectorAdapter: createLlmRpgRecallSelectorAdapter,
-  createOutlineBriefCompilerAdapter: createLlmRpgOutlineBriefAdapter,
-  createNarrationAdapter: createLlmRpgNarrationGeneratorAdapter,
-  createUpdateInteractionAdapter: createLlmRpgRuntimeUpdateInteractionAdapter,
-  runTurnFlow: runRpgRuntimeTurnFlow,
+  runTurnFlow: runRpgRuntimeTurnFlowClient,
   applyPendingUpdates: applyRpgPendingUpdates,
   loadRuntimeSnapshot: loadRpgRuntimeSnapshot,
   savePendingUpdates: saveRpgPendingUpdates,
-  appendTurnJournalEntry: appendRpgTurnJournalEntry,
   appendApplyJournalEntry: appendRpgApplyJournalEntry,
+  saveDebugTrace: saveRpgRuntimeDebugTrace,
+  loadDebugTraces: loadRpgRuntimeDebugTraces,
+  clearDebugTraces: clearRpgRuntimeDebugTraces,
+  exportDebugTrace: downloadRpgRuntimeDebugTrace,
   reloadProjectFiles: reloadRpgProjectFiles,
 }
 
@@ -134,7 +134,7 @@ export async function loadRpgCurrentScene(
   if (!normalizedProjectPath) {
     return {
       currentScene: "",
-      warnings: ["Open an llmWikiRPG project before starting the RPG runtime."],
+      warnings: ["请先打开 llmWikiRPG 项目，再启动 RPG runtime。"],
     }
   }
 
@@ -144,7 +144,7 @@ export async function loadRpgCurrentScene(
   } catch {
     return {
       currentScene: "",
-      warnings: [`Missing current scene: ${CURRENT_SCENE_PATH}`],
+      warnings: [`缺少当前场景文件：${CURRENT_SCENE_PATH}`],
     }
   }
 }
@@ -154,66 +154,29 @@ export async function submitRpgRuntimePanelAction(input: {
   llmConfig: LlmConfig
   submittedAction: SubmittedAction
   signal?: AbortSignal
+  debugTraceSink?: RpgRuntimeDebugTraceSink
+  softSemanticRepairRetry?: { enabled?: boolean; maxAttempts?: 1; maxFailedOutputChars?: number }
   dependencies?: Partial<
     Pick<
       RpgRuntimePanelDependencies,
-      | "createActionResolverAdapter"
-      | "createWorldTickAdapter"
-      | "createRecallSelectorAdapter"
-      | "createOutlineBriefCompilerAdapter"
-      | "createNarrationAdapter"
-      | "createUpdateInteractionAdapter"
       | "runTurnFlow"
-      | "appendTurnJournalEntry"
-      | "savePendingUpdates"
     >
   >
 }): Promise<RpgRuntimePanelSubmitResult> {
   const dependencies = { ...defaultDependencies, ...input.dependencies }
-  const actionResolverAdapter = dependencies.createActionResolverAdapter({
-    llmConfig: input.llmConfig,
-    signal: input.signal,
-  })
-  const worldTickAdapter = dependencies.createWorldTickAdapter({
-    llmConfig: input.llmConfig,
-    signal: input.signal,
-  })
-  const recallSelectorAdapter = dependencies.createRecallSelectorAdapter({
-    llmConfig: input.llmConfig,
-    signal: input.signal,
-  })
-  const outlineBriefCompilerAdapter = dependencies.createOutlineBriefCompilerAdapter({
-    llmConfig: input.llmConfig,
-    signal: input.signal,
-  })
-  const narrationAdapter = dependencies.createNarrationAdapter({
-    llmConfig: input.llmConfig,
-    signal: input.signal,
-  })
-  const updateInteractionAdapter = dependencies.createUpdateInteractionAdapter({
-    llmConfig: input.llmConfig,
-    signal: input.signal,
-  })
   const result = await dependencies.runTurnFlow({
     projectPath: input.projectPath,
     wikiMode: "llmwikirpg",
     submittedAction: input.submittedAction,
-    actionResolverAdapter,
-    worldTickAdapter,
-    recallSelectorAdapter,
-    outlineBriefCompilerAdapter,
-    narrationAdapter,
-    updateInteractionAdapter,
-    runtimePersistence: {
-      appendTurnJournalEntry: dependencies.appendTurnJournalEntry,
-    },
+    llmConfig: input.llmConfig,
+    ...(input.debugTraceSink ? { debugTraceSink: input.debugTraceSink } : {}),
+    ...(input.softSemanticRepairRetry ? { softSemanticRepairRetry: input.softSemanticRepairRetry } : {}),
   })
-  const persistenceResult = await dependencies.savePendingUpdates(input.projectPath, result.pendingUpdates)
 
   return {
     lastNarrative: result.turnResult.narrative,
     nextActionOptions: result.turnResult.nextActionOptions,
-    warnings: [...result.warnings, ...(persistenceResult.warnings ?? [])],
+    warnings: result.warnings,
     pendingUpdates: result.pendingUpdates,
   }
 }
@@ -234,6 +197,33 @@ export async function saveRpgRuntimePanelPendingUpdates(input: {
   const dependencies = { ...defaultDependencies, ...input.dependencies }
   const result = await dependencies.savePendingUpdates(input.projectPath, input.updates)
   return { warnings: result.warnings ?? [] }
+}
+
+export async function saveCompletedRpgRuntimeDebugTrace(input: {
+  projectPath: string
+  trace: RpgRuntimeDebugTrace | null
+  policy: RpgRuntimeDebugTracePersistencePolicy
+  savedTraceIds: Set<string>
+  dependencies?: Partial<Pick<RpgRuntimePanelDependencies, "saveDebugTrace">>
+}): Promise<{ saved: boolean; warnings: string[] }> {
+  if (!input.policy.enabled || !input.trace || input.trace.status === "running") {
+    return { saved: false, warnings: [] }
+  }
+  if (input.savedTraceIds.has(input.trace.traceId)) return { saved: false, warnings: [] }
+
+  const dependencies = { ...defaultDependencies, ...input.dependencies }
+  try {
+    const result = await dependencies.saveDebugTrace(input.projectPath, input.trace, {
+      maxTraces: input.policy.maxTraces,
+    })
+    input.savedTraceIds.add(input.trace.traceId)
+    return { saved: true, warnings: result.warnings ?? [] }
+  } catch (error) {
+    return {
+      saved: false,
+      warnings: [`无法保存 RPG runtime 调试 trace：${error instanceof Error ? error.message : String(error)}`],
+    }
+  }
 }
 
 export async function applyRpgRuntimePanelAcceptedUpdates(input: {
@@ -278,7 +268,7 @@ export async function applyRpgRuntimePanelAcceptedUpdates(input: {
       const reloadResult = await dependencies.reloadProjectFiles(input.projectPath, affectedPaths)
       refreshWarnings.push(...(reloadResult?.warnings ?? []))
     } catch (error) {
-      refreshWarnings.push(`Could not refresh project files after RPG apply: ${error instanceof Error ? error.message : String(error)}`)
+      refreshWarnings.push(`应用 RPG 更新后无法刷新项目文件：${error instanceof Error ? error.message : String(error)}`)
     }
   }
 
@@ -315,7 +305,20 @@ export function RpgRuntimePanel({
     () => ({ ...defaultDependencies, ...dependencies }),
     [dependencies],
   )
+  const debugTraceStore = useMemo(() => createRpgRuntimeDebugTraceStore(), [])
   const abortRef = useRef<AbortController | null>(null)
+  const [activeView, setActiveView] = useState<"play" | "debug">("play")
+  const [debugTraceState, setDebugTraceState] = useState<RpgRuntimeDebugTraceState>({
+    currentTrace: null,
+    lastTrace: null,
+  })
+  const [debugTracePersistencePolicy, setDebugTracePersistencePolicy] =
+    useState<RpgRuntimeDebugTracePersistencePolicy>(DEFAULT_DEBUG_TRACE_PERSISTENCE_POLICY)
+  const [softSemanticRepairRetryEnabled, setSoftSemanticRepairRetryEnabled] = useState(false)
+  const [persistedDebugTraces, setPersistedDebugTraces] = useState<RpgRuntimeDebugTrace[]>([])
+  const [selectedPersistedDebugTraceId, setSelectedPersistedDebugTraceId] = useState<string | null>(null)
+  const [debugTracePersistenceWarnings, setDebugTracePersistenceWarnings] = useState<string[]>([])
+  const savedDebugTraceIdsRef = useRef<Set<string>>(new Set())
 
   const [state, setState] = useState<RpgRuntimePanelState>({
     currentScene: initialState?.currentScene ?? "",
@@ -378,11 +381,76 @@ export function RpgRuntimePanel({
     return () => abortRef.current?.abort()
   }, [])
 
+  useEffect(() => debugTraceStore.subscribe(setDebugTraceState), [debugTraceStore])
+
+  const refreshPersistedDebugTraces = useCallback(async () => {
+    if (!effectiveProjectPath.trim()) {
+      setPersistedDebugTraces([])
+      setSelectedPersistedDebugTraceId(null)
+      return
+    }
+
+    try {
+      const result = await resolvedDependencies.loadDebugTraces(effectiveProjectPath)
+      setPersistedDebugTraces(result.traces)
+      setSelectedPersistedDebugTraceId((current) => (
+        current && result.traces.some((trace) => trace.traceId === current) ? current : null
+      ))
+      setDebugTracePersistenceWarnings((current) => mergeWarnings(current, result.warnings ?? []))
+    } catch (error) {
+      setDebugTracePersistenceWarnings((current) => mergeWarnings(current, [
+        `无法加载 RPG runtime 调试 trace：${error instanceof Error ? error.message : String(error)}`,
+      ]))
+    }
+  }, [effectiveProjectPath, resolvedDependencies])
+
+  useEffect(() => {
+    savedDebugTraceIdsRef.current.clear()
+    setPersistedDebugTraces([])
+    setSelectedPersistedDebugTraceId(null)
+    setDebugTracePersistenceWarnings([])
+  }, [effectiveProjectPath])
+
+  useEffect(() => {
+    if (activeView !== "debug") return
+    void refreshPersistedDebugTraces()
+  }, [activeView, refreshPersistedDebugTraces])
+
+  useEffect(() => {
+    const trace = debugTraceState.lastTrace
+    if (!debugTracePersistencePolicy.enabled || !trace || trace.status === "running") return
+
+    let cancelled = false
+
+    saveCompletedRpgRuntimeDebugTrace({
+      projectPath: effectiveProjectPath,
+      trace,
+      policy: debugTracePersistencePolicy,
+      savedTraceIds: savedDebugTraceIdsRef.current,
+      dependencies: resolvedDependencies,
+    }).then((result) => {
+      if (cancelled) return
+      setDebugTracePersistenceWarnings((current) => mergeWarnings(current, result.warnings))
+      if (result.saved && activeView === "debug") void refreshPersistedDebugTraces()
+    })
+
+    return () => {
+      cancelled = true
+    }
+  }, [
+    activeView,
+    debugTracePersistencePolicy,
+    debugTraceState.lastTrace,
+    effectiveProjectPath,
+    refreshPersistedDebugTraces,
+    resolvedDependencies,
+  ])
+
   const handleSubmitAction = async (submittedAction: SubmittedAction) => {
     if (!effectiveProjectPath) {
       setState((current) => ({
         ...current,
-        runtimeError: "Open an llmWikiRPG project before submitting an RPG action.",
+        runtimeError: "请先打开 llmWikiRPG 项目，再提交 RPG 行动。",
       }))
       return
     }
@@ -403,6 +471,10 @@ export function RpgRuntimePanel({
         llmConfig: effectiveLlmConfig,
         submittedAction,
         signal: abortController.signal,
+        debugTraceSink: debugTraceStore,
+        ...(softSemanticRepairRetryEnabled
+          ? { softSemanticRepairRetry: { enabled: true, maxAttempts: 1 as const } }
+          : {}),
         dependencies: resolvedDependencies,
       })
       setState((current) => ({
@@ -419,7 +491,7 @@ export function RpgRuntimePanel({
       if (abortController.signal.aborted) return
       setState((current) => ({
         ...current,
-        runtimeError: `RPG runtime error: ${error instanceof Error ? error.message : String(error)}`,
+        runtimeError: `RPG runtime 错误：${error instanceof Error ? error.message : String(error)}`,
         isSubmitting: false,
       }))
     }
@@ -449,7 +521,7 @@ export function RpgRuntimePanel({
     if (!effectiveProjectPath) {
       setState((current) => ({
         ...current,
-        runtimeError: "Open an llmWikiRPG project before applying RPG updates.",
+        runtimeError: "请先打开 llmWikiRPG 项目，再应用 RPG 更新。",
       }))
       return
     }
@@ -488,9 +560,25 @@ export function RpgRuntimePanel({
     } catch (error) {
       setState((current) => ({
         ...current,
-        runtimeError: `RPG apply error: ${error instanceof Error ? error.message : String(error)}`,
+        runtimeError: `RPG 应用错误：${error instanceof Error ? error.message : String(error)}`,
         isApplying: false,
       }))
+    }
+  }
+
+  const handleClearSavedDebugTraces = async () => {
+    if (!effectiveProjectPath.trim()) return
+
+    try {
+      const result = await resolvedDependencies.clearDebugTraces(effectiveProjectPath)
+      setDebugTracePersistenceWarnings((current) => mergeWarnings(current, result.warnings ?? []))
+      setPersistedDebugTraces([])
+      setSelectedPersistedDebugTraceId(null)
+      if ((result.warnings ?? []).length === 0) void refreshPersistedDebugTraces()
+    } catch (error) {
+      setDebugTracePersistenceWarnings((current) => mergeWarnings(current, [
+        `无法清除 RPG runtime 调试 trace：${error instanceof Error ? error.message : String(error)}`,
+      ]))
     }
   }
 
@@ -505,15 +593,31 @@ export function RpgRuntimePanel({
               RPG Runtime
             </h1>
             <p className="mt-1 text-xs text-muted-foreground">
-              Pending updates: {state.pendingUpdates.length}
+              待处理更新：{state.pendingUpdates.length}
             </p>
           </div>
           {(state.isLoadingScene || state.isSubmitting) && (
             <div className="inline-flex items-center gap-2 text-xs font-medium text-muted-foreground" aria-live="polite">
               <Loader2 className="h-3.5 w-3.5 animate-spin" />
-              {state.isSubmitting ? "Running turn..." : "Loading scene..."}
+              {state.isSubmitting ? "正在执行回合……" : "正在加载场景……"}
             </div>
           )}
+          <div className="inline-flex rounded-md border border-border/70 bg-background p-0.5 text-xs">
+            <button
+              type="button"
+              className={`rounded-sm px-2.5 py-1 font-medium ${activeView === "play" ? "bg-foreground text-background" : "text-muted-foreground"}`}
+              onClick={() => setActiveView("play")}
+            >
+              游玩
+            </button>
+            <button
+              type="button"
+              className={`rounded-sm px-2.5 py-1 font-medium ${activeView === "debug" ? "bg-foreground text-background" : "text-muted-foreground"}`}
+              onClick={() => setActiveView("debug")}
+            >
+              调试
+            </button>
+          </div>
         </div>
 
         {state.runtimeError && (
@@ -526,7 +630,7 @@ export function RpgRuntimePanel({
           <div className="mt-3 rounded-md border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-sm text-foreground">
             <div className="flex items-center gap-2 font-medium">
               <AlertTriangle className="h-4 w-4 text-amber-600" />
-              Runtime warnings
+              Runtime 警告
             </div>
             <ul className="mt-1 list-inside list-disc space-y-1 text-xs text-muted-foreground">
               {state.warnings.map((warning) => (
@@ -545,36 +649,54 @@ export function RpgRuntimePanel({
             ))}
             {state.pendingUpdates.length > 4 && (
               <span className="rounded border border-border/70 px-2 py-1">
-                +{state.pendingUpdates.length - 4} more
+                +{state.pendingUpdates.length - 4} 项
               </span>
             )}
           </div>
         )}
       </section>
 
-      <div className="flex min-h-0 flex-1 flex-col overflow-hidden lg:flex-row">
-        <div className="min-h-0 flex-1 overflow-hidden">
-          <RpgPlayPanel
-            currentScene={state.currentScene}
-            lastNarrative={state.lastNarrative}
-            nextActionOptions={state.nextActionOptions}
-            onSubmitAction={handleSubmitAction}
-            disabled={disabled}
-          />
+      {activeView === "debug" ? (
+        <RpgRuntimeDebugConsole
+          currentTrace={debugTraceState.currentTrace}
+          lastTrace={debugTraceState.lastTrace}
+          onClear={() => debugTraceStore.clear()}
+          onExportTrace={resolvedDependencies.exportDebugTrace}
+          persistencePolicy={debugTracePersistencePolicy}
+          onPersistencePolicyChange={setDebugTracePersistencePolicy}
+          repairRetryEnabled={softSemanticRepairRetryEnabled}
+          onRepairRetryEnabledChange={setSoftSemanticRepairRetryEnabled}
+          persistedTraces={persistedDebugTraces}
+          selectedPersistedTraceId={selectedPersistedDebugTraceId}
+          onSelectPersistedTrace={setSelectedPersistedDebugTraceId}
+          onClearSaved={handleClearSavedDebugTraces}
+          persistenceWarnings={debugTracePersistenceWarnings}
+        />
+      ) : (
+        <div className="flex min-h-0 flex-1 flex-col overflow-hidden lg:flex-row">
+          <div className="min-h-0 flex-1 overflow-hidden">
+            <RpgPlayPanel
+              currentScene={state.currentScene}
+              lastNarrative={state.lastNarrative}
+              nextActionOptions={state.nextActionOptions}
+              onSubmitAction={handleSubmitAction}
+              disabled={disabled}
+            />
+          </div>
+          <div className="min-h-0 max-h-96 shrink-0 border-t border-border/70 lg:h-full lg:max-h-none lg:w-[420px] lg:border-l lg:border-t-0">
+            <PendingRpgUpdatesPanel
+              updates={state.pendingUpdates}
+              onAcceptUpdate={handleAcceptUpdate}
+              onRejectUpdate={handleRejectUpdate}
+              onApplyAcceptedUpdates={handleApplyAcceptedUpdates}
+              applyResult={state.lastApplyResult}
+              skippedApplyReasons={state.skippedApplyReasons}
+              isApplying={state.isApplying}
+              disabled={state.isLoadingScene || state.isSubmitting || !effectiveProjectPath}
+            />
+          </div>
         </div>
-        <div className="min-h-0 max-h-96 shrink-0 border-t border-border/70 lg:h-full lg:max-h-none lg:w-[420px] lg:border-l lg:border-t-0">
-          <PendingRpgUpdatesPanel
-            updates={state.pendingUpdates}
-            onAcceptUpdate={handleAcceptUpdate}
-            onRejectUpdate={handleRejectUpdate}
-            onApplyAcceptedUpdates={handleApplyAcceptedUpdates}
-            applyResult={state.lastApplyResult}
-            skippedApplyReasons={state.skippedApplyReasons}
-            isApplying={state.isApplying}
-            disabled={state.isLoadingScene || state.isSubmitting || !effectiveProjectPath}
-          />
-        </div>
-      </div>
+      )}
     </div>
   )
 }
@@ -596,6 +718,23 @@ export function didApplyCurrentSceneOverwrite(applyResult: ApplyRpgPendingUpdate
   )
 }
 
+function downloadRpgRuntimeDebugTrace(trace: RpgRuntimeDebugTrace): void {
+  if (typeof document === "undefined" || typeof URL === "undefined" || typeof Blob === "undefined") return
+
+  const blob = new Blob([serializeRpgRuntimeDebugTraceForExport(trace)], {
+    type: "application/json;charset=utf-8",
+  })
+  const url = URL.createObjectURL(blob)
+  const anchor = document.createElement("a")
+  anchor.href = url
+  anchor.download = buildRpgRuntimeDebugTraceExportFileName(trace)
+  anchor.style.display = "none"
+  document.body.appendChild(anchor)
+  anchor.click()
+  anchor.remove()
+  URL.revokeObjectURL(url)
+}
+
 async function reloadRpgProjectFiles(
   projectPath: string,
   affectedPaths: string[],
@@ -603,7 +742,7 @@ async function reloadRpgProjectFiles(
   if (affectedPaths.length === 0) return undefined
   const normalizedProjectPath = projectPath.trim().replace(/\\/g, "/").replace(/\/+$/, "")
   if (!normalizedProjectPath) {
-    return { warnings: ["Could not refresh project files after RPG apply: projectPath is required."] }
+    return { warnings: ["应用 RPG 更新后无法刷新项目文件：projectPath 为必填项。"] }
   }
 
   const tree = await listDirectory(normalizedProjectPath)
@@ -635,14 +774,14 @@ async function appendAndSaveApplyPersistence(
     const journalResult = await input.dependencies.appendApplyJournalEntry(projectPath, entry)
     warnings.push(...(journalResult?.warnings ?? []))
   } catch (error) {
-    warnings.push(`Could not append RPG apply journal entry: ${error instanceof Error ? error.message : String(error)}`)
+    warnings.push(`无法追加 RPG 应用日志条目：${error instanceof Error ? error.message : String(error)}`)
   }
 
   try {
     const saveResult = await input.dependencies.savePendingUpdates(projectPath, input.remainingPendingUpdates)
     warnings.push(...(saveResult.warnings ?? []))
   } catch (error) {
-    warnings.push(`Could not save RPG pending updates: ${error instanceof Error ? error.message : String(error)}`)
+    warnings.push(`无法保存 RPG 待处理更新：${error instanceof Error ? error.message : String(error)}`)
   }
 
   return warnings
@@ -667,7 +806,7 @@ async function persistPendingQueue(
     setState((current) => ({
       ...current,
       warnings: mergeWarnings(current.warnings, [
-        `Could not save RPG pending updates: ${error instanceof Error ? error.message : String(error)}`,
+        `无法保存 RPG 待处理更新：${error instanceof Error ? error.message : String(error)}`,
       ]),
     }))
   }

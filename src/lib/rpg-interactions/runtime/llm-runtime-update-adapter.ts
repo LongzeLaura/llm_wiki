@@ -15,6 +15,7 @@ export interface CreateLlmRpgRuntimeUpdateInteractionAdapterInput {
 
 export interface LlmRpgRuntimeUpdateInteractionAdapterOptions {
   requestOverrides?: RequestOverrides
+  repairRequestOverrides?: RequestOverrides
 }
 
 export function createLlmRpgRuntimeUpdateInteractionAdapter(
@@ -24,6 +25,13 @@ export function createLlmRpgRuntimeUpdateInteractionAdapter(
   return {
     async generateUpdateProposal(prompt) {
       return collectRpgRuntimeUpdateOutput(input, options, prompt)
+    },
+    async repairUpdateProposalRawOutput(prompt) {
+      return collectRpgRuntimeUpdateOutput(input, options, prompt, {
+        temperature: 0,
+        max_tokens: 1800,
+        ...options.repairRequestOverrides,
+      })
     },
   }
 }
@@ -45,6 +53,7 @@ async function collectRpgRuntimeUpdateOutput(
   input: CreateLlmRpgRuntimeUpdateInteractionAdapterInput,
   options: LlmRpgRuntimeUpdateInteractionAdapterOptions,
   prompt: RpgInteractionPrompt,
+  requestOverrides: RequestOverrides | undefined = options.requestOverrides,
 ): Promise<string> {
   let output = ""
   let streamError: Error | undefined
@@ -66,7 +75,7 @@ async function collectRpgRuntimeUpdateOutput(
         },
       },
       input.signal,
-      options.requestOverrides,
+      requestOverrides,
     )
   } catch (error) {
     if (input.signal?.aborted) {

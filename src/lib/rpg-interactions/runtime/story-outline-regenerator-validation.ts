@@ -1,6 +1,7 @@
 import type {
   OutlineRevisionProposal,
   OutlineStableRef,
+  OutlineVisibilityBoundary,
   ProvisionalNarrationHandoff,
   ProvisionalOutlinePatch,
   RegenerationSafetyReport,
@@ -13,6 +14,7 @@ import type {
   RpgRuntimeDeltaRef,
   RpgVisibilityScope,
 } from "../../rpg-wiki-schema"
+import { normalizeRuntimeDeltaRefsDraft } from "./soft-draft-protocol"
 
 const ALLOWED_LINE_TARGETS = new Set<RpgNarrativeLine>([
   "playerVisibleLine",
@@ -56,6 +58,217 @@ const ALLOWED_TOP_LEVEL_KEYS = new Set([
   "regenerationSafetyReport",
   "warnings",
 ])
+
+export function compileStoryOutlineRegeneratorDraftOutput(
+  value: unknown,
+  input: StoryOutlineRegeneratorInput,
+): StoryOutlineRegeneratorOutput {
+  assertNoForbiddenOutputKeys(value)
+  assertNoForbiddenPaths(value)
+  assertNoUnsafeBoundaryClaims(value)
+  const record = expectRecord(value, "StoryOutlineRegeneratorDraft")
+  assertOnlyTopLevelKeys(record)
+
+  if (input.outlineImpactReport.impactLevel !== "major_rewrite_required" || !input.outlineImpactReport.requiresRegeneration) {
+    throw new Error("Invalid StoryOutlineRegeneratorInput: output can be accepted only for major_rewrite_required regeneration requests.")
+  }
+
+  const knownRefs = collectKnownReferences(input)
+  const refCatalog = buildStoryRegeneratorReferenceCatalog(input)
+  const patchRecord = expectRecord(record.provisionalOutlinePatch, "StoryOutlineRegeneratorDraft.provisionalOutlinePatch")
+  const proposalRecord = expectRecord(record.outlineRevisionProposal, "StoryOutlineRegeneratorDraft.outlineRevisionProposal")
+  const handoffRecord = expectRecord(
+    patchRecord.narrationHandoff ?? {},
+    "StoryOutlineRegeneratorDraft.provisionalOutlinePatch.narrationHandoff",
+  )
+  const proposedRevisionRecord = expectRecord(
+    proposalRecord.proposedRevision ?? {},
+    "StoryOutlineRegeneratorDraft.outlineRevisionProposal.proposedRevision",
+  )
+  const safetyRecord = expectRecord(record.regenerationSafetyReport ?? {}, "StoryOutlineRegeneratorDraft.regenerationSafetyReport")
+
+  const patchId = `provisional-outline-patch-${input.regenerationRequest.requestId}`
+  const runtimeDeltaRefs = compileRuntimeRefsForDraft(
+    patchRecord.runtimeDeltaRefs,
+    refCatalog.runtimeRefs,
+    input.runtimeRefs.slice(0, 1),
+  )
+  const affectedOutlineRefs = compileStableRefsForDraft(
+    patchRecord.affectedOutlineRefs,
+    refCatalog.stableRefs,
+    input.regenerationRequest.sourceRefs.flatMap((ref) => ref.stableId ? [ref.stableId] : []),
+  )
+  const suspendedBeatRefs = compileStableRefsForDraft(
+    patchRecord.suspendedBeatRefs,
+    refCatalog.stableRefs,
+    [],
+  )
+  const invalidatedBeatRefs = compileStableRefsForDraft(
+    patchRecord.invalidatedBeatRefs,
+    refCatalog.stableRefs,
+    suspendedBeatRefs.map((ref) => ref.stableId),
+  )
+  const preservedConfirmedFacts = uniqueStrings([
+    ...readOptionalStringArrayValue(patchRecord, "preservedConfirmedFacts"),
+    ...input.confirmedFacts.map((fact) => fact.factId),
+  ])
+  const narrativeLines = compileNarrativeLines(patchRecord.narrativeLines, ["playerVisibleLine", "tensionLine"])
+  const visibilityBoundary = compileVisibilityBoundariesForDraft(
+    patchRecord.visibilityBoundary,
+    refCatalog.visibilityBoundaries,
+    input.visibilityBoundaries,
+    knownRefs,
+  )
+  const handoffRuntimeRefs = compileRuntimeRefsForDraft(
+    handoffRecord.runtimeDeltaRefs,
+    refCatalog.runtimeRefs,
+    runtimeDeltaRefs,
+  )
+  const handoffOutlineRefs = compileStableRefsForDraft(
+    handoffRecord.outlineRefs,
+    refCatalog.stableRefs,
+    affectedOutlineRefs.map((ref) => ref.stableId),
+  )
+  const handoffVisibilityBoundaries = compileVisibilityBoundariesForDraft(
+    handoffRecord.visibilityBoundaries,
+    refCatalog.visibilityBoundaries,
+    visibilityBoundary,
+    knownRefs,
+  )
+  const proposalTargetRefs = compileStableRefsForDraft(
+    proposalRecord.targetOutlineRefs,
+    refCatalog.stableRefs,
+    affectedOutlineRefs.map((ref) => ref.stableId),
+  )
+  const proposalRuntimeRefs = compileRuntimeRefsForDraft(
+    proposalRecord.runtimeDeltaRefs,
+    refCatalog.runtimeRefs,
+    runtimeDeltaRefs,
+  )
+  const proposalVisibility = compileVisibilityBoundariesForDraft(
+    proposalRecord.visibilityAndKnowledgeScope,
+    refCatalog.visibilityBoundaries,
+    visibilityBoundary,
+    knownRefs,
+  )
+  const mustNotReveal = uniqueStrings([
+    ...readOptionalStringArrayValue(handoffRecord, "mustNotReveal"),
+    ...input.forbiddenReveals.flatMap((reveal) => [reveal.revealId, reveal.stableId].filter((entry): entry is string => !!entry)),
+  ])
+  const nextSceneDirection = readString(
+    handoffRecord,
+    "nextSceneDirection",
+    "StoryOutlineRegeneratorDraft.provisionalOutlinePatch.narrationHandoff.nextSceneDirection",
+  )
+  const proposedRevisionSummary = readString(
+    proposedRevisionRecord,
+    "summary",
+    "StoryOutlineRegeneratorDraft.outlineRevisionProposal.proposedRevision.summary",
+  )
+  assertExactString(
+    safetyRecord,
+    "safetyConclusion",
+    "safe",
+    "StoryOutlineRegeneratorDraft.regenerationSafetyReport.safetyConclusion",
+  )
+  const mustPreserveFacts = uniqueStrings([
+    ...readOptionalStringArrayValue(handoffRecord, "mustPreserveFacts"),
+    ...preservedConfirmedFacts,
+  ])
+  const proposalMustPreserveFacts = uniqueStrings([
+    ...readOptionalStringArrayValue(proposalRecord, "mustPreserveFacts"),
+    ...preservedConfirmedFacts,
+  ])
+
+  const output: StoryOutlineRegeneratorOutput = {
+    provisionalOutlinePatch: {
+      patchId,
+      sourceRequestId: input.regenerationRequest.requestId,
+      scope: "same_turn_only",
+      outlineImpactLevel: "major_rewrite_required",
+      affectedOutlineRefs,
+      suspendedBeatRefs,
+      invalidatedBeatRefs,
+      preservedConfirmedFacts,
+      runtimeDeltaRefs,
+      narrativeLines,
+      visibilityBoundary,
+      narrationHandoff: {
+        handoffId: `provisional-narration-handoff-${input.regenerationRequest.requestId}`,
+        sourcePatchId: patchId,
+        mustFollow: readOptionalStringArrayValue(handoffRecord, "mustFollow"),
+        mustPreserveFacts,
+        mustNotReveal,
+        invalidatedOldBeats: readOptionalStringArrayValue(handoffRecord, "invalidatedOldBeats"),
+        nextSceneDirection,
+        narrativeLines: compileNarrativeLines(handoffRecord.narrativeLines, narrativeLines),
+        visibilityBoundaries: handoffVisibilityBoundaries,
+        runtimeDeltaRefs: handoffRuntimeRefs,
+        outlineRefs: handoffOutlineRefs,
+        grantsPcKnowledgeFromHiddenMaterial: false,
+      },
+      nonPersistenceBoundary: {
+        sameTurnOnly: true,
+        writesToWiki: false,
+        modifiesMainOutline: false,
+        persistedToOutlinesMain: false,
+        ordinaryRuntimeUpdate: false,
+        acceptedWikiFacts: false,
+      },
+    },
+    outlineRevisionProposal: {
+      proposalId: `outline-revision-proposal-${input.regenerationRequest.requestId}`,
+      sourceRequestId: input.regenerationRequest.requestId,
+      reviewItemKind: "outlineRevision",
+      outlineImpactLevel: "major_rewrite_required",
+      targetOutlineRefs: proposalTargetRefs,
+      invalidatedAssumptions: readOptionalStringArrayValue(proposalRecord, "invalidatedAssumptions"),
+      mustPreserveFacts: proposalMustPreserveFacts,
+      proposedRevision: {
+        summary: proposedRevisionSummary,
+        revisedBeats: readOptionalStringArrayValue(proposedRevisionRecord, "revisedBeats"),
+        revisedRevealOrder: readOptionalStringArrayValue(proposedRevisionRecord, "revisedRevealOrder"),
+        branchAdjustments: readOptionalStringArrayValue(proposedRevisionRecord, "branchAdjustments"),
+        futureOnly: true,
+      },
+      visibilityAndKnowledgeScope: proposalVisibility,
+      runtimeDeltaRefs: proposalRuntimeRefs,
+      reviewBoundary: {
+        reviewItemKind: "outlineRevision",
+        reviewBoundary: "independent_pending_review",
+        ordinaryRuntimeUpdate: false,
+        proposedWikiUpdate: false,
+        autoWriteMainOutline: false,
+        mainOutlineWritePolicy: "manual_or_review_only",
+      },
+    },
+    regenerationSafetyReport: {
+      reportKind: "regenerationSafetyReport",
+      safetyConclusion: "safe",
+      preservesConfirmedFacts: true,
+      futureNotWrittenAsEvent: true,
+      forbiddenRevealProtected: true,
+      mainOutlineNotDirectlyModified: true,
+      provisionalPatchNonPersistent: true,
+      proposalReviewBoundary: true,
+      ordinaryRuntimeUpdateBoundary: true,
+      noWikiWrite: true,
+      noPlayerFacingProse: true,
+      checkedRuntimeRefs: uniqueStrings([
+        ...readOptionalStringArrayValue(safetyRecord, "checkedRuntimeRefs"),
+        ...runtimeDeltaRefs.map((ref) => ref.deltaId),
+      ]),
+      checkedOutlineRefs: uniqueStrings([
+        ...readOptionalStringArrayValue(safetyRecord, "checkedOutlineRefs"),
+        ...affectedOutlineRefs.map((ref) => ref.stableId),
+      ]),
+      warnings: readOptionalStringArrayValue(safetyRecord, "warnings"),
+    },
+    warnings: readOptionalStringArrayValue(record, "warnings"),
+  }
+
+  return validateStoryOutlineRegeneratorOutput(output, input)
+}
 
 export function validateStoryOutlineRegeneratorOutput(
   value: unknown,
@@ -642,6 +855,158 @@ function assertOnlyTopLevelKeys(record: Record<string, unknown>): void {
     if (!ALLOWED_TOP_LEVEL_KEYS.has(key)) {
       throw new Error(`Invalid StoryOutlineRegeneratorOutput.${key}: top-level key is not allowed.`)
     }
+  }
+}
+
+interface StoryRegeneratorReferenceCatalog {
+  runtimeRefs: RpgRuntimeDeltaRef[]
+  stableRefs: Map<string, OutlineStableRef>
+  visibilityBoundaries: Map<string, OutlineVisibilityBoundary>
+}
+
+function buildStoryRegeneratorReferenceCatalog(input: StoryOutlineRegeneratorInput): StoryRegeneratorReferenceCatalog {
+  const stableRefs = new Map<string, OutlineStableRef>()
+  const addStableRef = (ref: OutlineStableRef) => {
+    if (!stableRefs.has(ref.stableId)) stableRefs.set(ref.stableId, ref)
+  }
+  input.outlineSlices.forEach((slice) => {
+    slice.beatRefs.forEach(addStableRef)
+    slice.revealRefs.forEach(addStableRef)
+    slice.branchConditionRefs.forEach(addStableRef)
+  })
+
+  const visibilityBoundaries = new Map<string, OutlineVisibilityBoundary>()
+  input.visibilityBoundaries.forEach((boundary) => {
+    visibilityBoundaries.set(boundary.boundaryId, boundary)
+  })
+
+  const runtimeRefs = uniqueRuntimeRefs([
+    ...input.runtimeRefs,
+    ...input.postActionWorkingState.runtimeDeltaRefs,
+    ...input.confirmedFacts.flatMap((fact) => fact.runtimeDeltaRefs),
+  ])
+
+  return { runtimeRefs, stableRefs, visibilityBoundaries }
+}
+
+function compileRuntimeRefsForDraft(
+  value: unknown,
+  inputRefs: readonly RpgRuntimeDeltaRef[],
+  fallback: readonly RpgRuntimeDeltaRef[],
+): RpgRuntimeDeltaRef[] {
+  const refs = normalizeRuntimeDeltaRefsDraft(value, inputRefs)
+  return refs.length > 0 ? refs : uniqueRuntimeRefs(fallback)
+}
+
+function compileStableRefsForDraft(
+  value: unknown,
+  stableRefs: ReadonlyMap<string, OutlineStableRef>,
+  fallbackStableIds: readonly string[],
+): OutlineStableRef[] {
+  const ids = readDraftStableIds(value)
+  const resolved = ids.map((id) => stableRefs.get(id)).filter((ref): ref is OutlineStableRef => !!ref)
+  if (resolved.length > 0) return uniqueStableRefs(resolved)
+  return uniqueStableRefs(fallbackStableIds.map((id) => stableRefs.get(id)).filter((ref): ref is OutlineStableRef => !!ref))
+}
+
+function readDraftStableIds(value: unknown): string[] {
+  if (!Array.isArray(value)) return []
+  return value.map((entry) => {
+    if (typeof entry === "string") return entry.trim()
+    if (entry && typeof entry === "object" && !Array.isArray(entry)) {
+      const stableId = (entry as Record<string, unknown>).stableId
+      return typeof stableId === "string" ? stableId.trim() : ""
+    }
+    return ""
+  }).filter(Boolean)
+}
+
+function compileVisibilityBoundariesForDraft(
+  value: unknown,
+  knownBoundaries: ReadonlyMap<string, OutlineVisibilityBoundary>,
+  fallback: readonly OutlineVisibilityBoundary[],
+  knownRefs: KnownReferenceSet,
+): OutlineVisibilityBoundary[] {
+  if (!Array.isArray(value)) return [...fallback]
+  const result: OutlineVisibilityBoundary[] = []
+  for (const [index, entry] of value.entries()) {
+    if (typeof entry === "string") {
+      const boundary = knownBoundaries.get(entry.trim())
+      if (boundary) result.push(boundary)
+      continue
+    }
+    if (!entry || typeof entry !== "object" || Array.isArray(entry)) continue
+    const boundaryId = (entry as Record<string, unknown>).boundaryId
+    const known = typeof boundaryId === "string" ? knownBoundaries.get(boundaryId.trim()) : undefined
+    result.push(known ?? validateVisibilityBoundary(entry, index, "StoryOutlineRegeneratorDraft.visibilityBoundaries", knownRefs))
+  }
+  return result.length > 0 ? uniqueVisibilityBoundaries(result) : [...fallback]
+}
+
+function compileNarrativeLines(value: unknown, fallback: readonly RpgNarrativeLine[]): RpgNarrativeLine[] {
+  if (!Array.isArray(value)) return [...fallback]
+  const lines = value.filter((line): line is RpgNarrativeLine =>
+    typeof line === "string" && ALLOWED_LINE_TARGETS.has(line as RpgNarrativeLine)
+  )
+  return lines.length > 0 ? uniqueStrings(lines) as RpgNarrativeLine[] : [...fallback]
+}
+
+function readOptionalStringArrayValue(record: Record<string, unknown>, key: string): string[] {
+  const value = record[key]
+  if (!Array.isArray(value)) return []
+  return value.filter((entry): entry is string => typeof entry === "string").map((entry) => entry.trim()).filter(Boolean)
+}
+
+function uniqueRuntimeRefs(refs: readonly RpgRuntimeDeltaRef[]): RpgRuntimeDeltaRef[] {
+  const seen = new Set<string>()
+  return refs.filter((ref) => {
+    if (seen.has(ref.deltaId)) return false
+    seen.add(ref.deltaId)
+    return true
+  })
+}
+
+function uniqueStableRefs(refs: readonly OutlineStableRef[]): OutlineStableRef[] {
+  const seen = new Set<string>()
+  return refs.filter((ref) => {
+    if (seen.has(ref.stableId)) return false
+    seen.add(ref.stableId)
+    return true
+  })
+}
+
+function uniqueVisibilityBoundaries(
+  boundaries: readonly OutlineVisibilityBoundary[],
+): OutlineVisibilityBoundary[] {
+  const seen = new Set<string>()
+  return boundaries.filter((boundary) => {
+    if (seen.has(boundary.boundaryId)) return false
+    seen.add(boundary.boundaryId)
+    return true
+  })
+}
+
+function uniqueStrings(values: readonly string[]): string[] {
+  return [...new Set(values.filter(Boolean))]
+}
+
+function assertNoUnsafeBoundaryClaims(value: unknown, path = "StoryOutlineRegeneratorDraft"): void {
+  if (value === null || typeof value !== "object") return
+  if (Array.isArray(value)) {
+    value.forEach((entry, index) => assertNoUnsafeBoundaryClaims(entry, `${path}[${index}]`))
+    return
+  }
+  for (const [key, child] of Object.entries(value as Record<string, unknown>)) {
+    if (
+      child === true &&
+      /^(?:writesToWiki|modifiesMainOutline|persistedToOutlinesMain|ordinaryRuntimeUpdate|acceptedWikiFacts|proposedWikiUpdate|autoWriteMainOutline)$/i.test(key)
+    ) {
+      throw new Error(`Invalid StoryOutlineRegeneratorDraft: unsafe boundary claim ${path}.${key}.`)
+    }
+    if (key === "futureOnly" && child === false) {
+      throw new Error(`Invalid StoryOutlineRegeneratorDraft: proposed revision must remain future-only at ${path}.${key}.`)
+    }
+    assertNoUnsafeBoundaryClaims(child, `${path}.${key}`)
   }
 }
 

@@ -13,6 +13,7 @@ export interface CreateLlmRpgOutlineBriefAdapterInput {
 
 export interface LlmRpgOutlineBriefAdapterOptions {
   requestOverrides?: RequestOverrides
+  repairRequestOverrides?: RequestOverrides
 }
 
 export function createLlmRpgOutlineBriefAdapter(
@@ -24,6 +25,16 @@ export function createLlmRpgOutlineBriefAdapter(
       const output = await collectRpgOutlineBriefOutput(input, options, prompt)
       return outlineBriefInteractionSpec.parseOutput(output, promptInput)
     },
+    async compileOutlineBriefRawOutput(prompt) {
+      return collectRpgOutlineBriefOutput(input, options, prompt)
+    },
+    async repairOutlineBriefRawOutput(prompt) {
+      return collectRpgOutlineBriefOutput(input, options, prompt, {
+        temperature: 0,
+        max_tokens: 1800,
+        ...options.repairRequestOverrides,
+      })
+    },
   }
 }
 
@@ -31,6 +42,7 @@ async function collectRpgOutlineBriefOutput(
   input: CreateLlmRpgOutlineBriefAdapterInput,
   options: LlmRpgOutlineBriefAdapterOptions,
   prompt: RpgOutlineBriefPrompt,
+  requestOverrides: RequestOverrides | undefined = options.requestOverrides,
 ): Promise<string> {
   let output = ""
   let streamError: Error | undefined
@@ -52,7 +64,7 @@ async function collectRpgOutlineBriefOutput(
         },
       },
       input.signal,
-      options.requestOverrides,
+      requestOverrides,
     )
   } catch (error) {
     if (input.signal?.aborted) {

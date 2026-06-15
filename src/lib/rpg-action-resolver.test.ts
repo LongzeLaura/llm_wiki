@@ -61,16 +61,46 @@ describe("RPG Action Resolver", () => {
     const combined = `${prompt.systemPrompt}\n${prompt.userPrompt}`
 
     expect(actionResolverInteractionSpec.kind).toBe("action_resolver")
-    expect(combined).toContain("player action is an attempt")
+    expect(combined).toContain("玩家行动是一种尝试")
     expect(combined).toContain("attempted_not_confirmed")
-    expect(combined).toContain("feasibility, cost, obstacle, and direct result")
+    expect(combined).toContain("可行性、代价、障碍和直接结果")
     expect(combined).toContain("no world tick")
     expect(combined).toContain("no wiki write")
     expect(combined).toContain("no player-facing narration")
+    expect(combined).toContain("可选字段没有值时必须省略整个 key")
+    expect(combined).toContain("禁止输出 undefined")
+    expect(combined).toContain("禁止用 null 代替缺失值")
+    expect(combined).not.toContain("| undefined")
+    expect(combined).not.toMatch(/:\s*undefined\b/)
+    expect(combined).toContain("不要输出 resolutionId")
+    expect(combined).not.toContain("\"costId\"")
+    expect(combined).toContain("\"kind\"")
+    expect(combined).toContain("\"appliesIf\"")
+    expect(combined).not.toContain("\"obstacleId\"")
+    expect(combined).toContain("\"bypassHint\"")
+    expect(combined).not.toContain("\"resultId\"")
+    expect(combined).toContain("\"happenedStatus\"")
+    expect(prompt.systemPrompt).toContain("\"referencePaths\": string[]")
+    expect(prompt.systemPrompt).toContain("\"warnings\": string[]")
+    expect(prompt.systemPrompt).not.toContain("\"references\": [{")
+    expect(prompt.systemPrompt).not.toContain("\"code\": string")
     expect(combined).toContain("wiki/current-scene/scene_state.md")
     expect(combined).toContain("wiki/player/known_information.md")
     expect(combined).toContain("wiki/outlines/progress.md")
     expect(combined).toContain("wiki/rules/core.md")
+    expect(prompt.debugSections?.map((section) => section.title)).toEqual(
+      expect.arrayContaining([
+        "系统固定提示词",
+        "已提交行动",
+        "行动前快照",
+        "相关规则",
+        "固定槽位引用",
+        "最近回合摘要",
+        "Runtime 引用",
+        "返回契约",
+      ]),
+    )
+    expectPromptDebugSectionsRecompose(prompt)
   })
 
   it("parses legal fenced ActionResolution JSON", () => {
@@ -78,6 +108,51 @@ describe("RPG Action Resolver", () => {
     const output = ["```json", JSON.stringify(resolution, null, 2), "```"].join("\n")
 
     expect(parseRpgActionResolverOutput(output)).toEqual(resolution)
+  })
+
+  it("repairs trailing commas before parsing ActionResolution JSON", () => {
+    const resolution = sampleActionResolution()
+    const output = JSON.stringify(resolution, null, 2).replace(/\n}$/, ",\n}")
+    const reports: unknown[] = []
+
+    expect(parseRpgActionResolverOutput(output, undefined, { onJsonParseReport: (report) => reports.push(report) })).toEqual(
+      resolution,
+    )
+    expect(reports).toEqual([
+      expect.objectContaining({
+        operations: expect.arrayContaining(["removed_trailing_commas"]),
+        parseSucceeded: true,
+      }),
+    ])
+  })
+
+  it("accepts legal ActionResolution JSON that omits optional fields", () => {
+    const raw = cloneResolution()
+    delete raw.parsedIntent.timeJumpSignal
+    delete raw.eventDraft.confirmationBasis
+    delete raw.timeDelta.min
+    delete raw.timeDelta.max
+
+    const parsed = parseRpgActionResolverOutput(JSON.stringify(raw))
+
+    expect(parsed.parsedIntent.timeJumpSignal).toBeUndefined()
+    expect(parsed.eventDraft.confirmationBasis).toBeUndefined()
+    expect(parsed.timeDelta.min).toBeUndefined()
+    expect(parsed.timeDelta.max).toBeUndefined()
+  })
+
+  it("keeps invalid undefined literal output as a JSON protocol error", () => {
+    const output = [
+      "{",
+      "  \"resolutionId\": \"bad-resolution\",",
+      "  \"submittedActionId\": \"act-1\",",
+      "  \"parsedIntent\": {",
+      "    \"timeJumpSignal\": undefined",
+      "  }",
+      "}",
+    ].join("\n")
+
+    expect(() => parseRpgActionResolverOutput(output)).toThrow(/解析 JSON 失败/)
   })
 
   it("defaults a missing eventDraft.status to attempted_not_confirmed", () => {
@@ -202,6 +277,8 @@ describe("RPG Action Resolver", () => {
     expect(serialized).toContain("River Port runtime overlay")
     expect(serialized).toContain("lantern key runtime overlay")
     expect(serialized).toContain("Quiet canal route")
+    expect(serialized).not.toContain("UNRELATED_SABER_RUNTIME_POISON")
+    expect(serialized).not.toContain("UNRELATED_EA_ITEM_POISON")
     expect(input.preActionSnapshot.references).toEqual(
       expect.arrayContaining([
         "wiki/current-scene/scene_state.md",
@@ -242,7 +319,11 @@ describe("RPG Action Resolver", () => {
       { requestOverrides },
     )
 
-    await expect(adapter.resolveAction(samplePrompt(), sampleActionResolverInput())).resolves.toEqual(resolution)
+    const parsed = await adapter.resolveAction(samplePrompt(), sampleActionResolverInput())
+    expect(parsed.resolutionId).toBe("action-resolution-act-1")
+    expect(parsed.eventDraft.eventId).toBe("event-draft-act-1")
+    expect(parsed.runtimeDeltaRefs[0]?.deltaId).toBe("player-action-delta-act-1")
+    expect(parsed.warnings.map((warning) => warning.code)).toContain("derivable_protocol_stripped")
     expect(streamChatMock).toHaveBeenCalledWith(
       sampleLlmConfig(),
       [
@@ -256,6 +337,40 @@ describe("RPG Action Resolver", () => {
       }),
       signal,
       requestOverrides,
+    )
+  })
+
+  it("creates a real Action Resolver repair adapter method with repair request overrides", async () => {
+    const signal = new AbortController().signal
+    streamChatMock.mockImplementationOnce(async (_config, _messages, callbacks) => {
+      callbacks.onToken("{\"ok\":true}")
+      callbacks.onDone()
+    })
+
+    const adapter = createLlmRpgActionResolverAdapter(
+      { llmConfig: sampleLlmConfig(), signal },
+      { repairRequestOverrides: { max_tokens: 900 } },
+    )
+
+    await expect(
+      adapter.repairActionResolutionRawOutput?.(samplePrompt(), sampleActionResolverInput()),
+    ).resolves.toBe("{\"ok\":true}")
+    expect(streamChatMock).toHaveBeenCalledWith(
+      sampleLlmConfig(),
+      [
+        { role: "system", content: "System action resolver instructions." },
+        { role: "user", content: "User action resolver input." },
+      ],
+      expect.objectContaining({
+        onToken: expect.any(Function),
+        onDone: expect.any(Function),
+        onError: expect.any(Function),
+      }),
+      signal,
+      expect.objectContaining({
+        temperature: 0,
+        max_tokens: 900,
+      }),
     )
   })
 
@@ -393,6 +508,7 @@ async function writeActionResolverWikiFixture(projectPath: string): Promise<void
       "- Interactable Objects: brass lantern key, lowest sigil",
       "- Active Clock: Harbor Watch return pressure is medium.",
       "- Pending Reaction: Mira will stop reckless ward contact.",
+      "- Background Archive: Saber and Ea are unrelated encyclopedia terms, not active scene refs.",
     ].join("\n"),
   )
   await writeFileRaw(`${projectPath}/wiki/player/player.md`, "# Iven\n\nIven is a smuggler-mage under patrol pressure.")
@@ -420,6 +536,14 @@ async function writeActionResolverWikiFixture(projectPath: string): Promise<void
   await writeFileRaw(
     `${projectPath}/wiki/items/runtime/lantern-key.md`,
     "# Lantern Key Runtime\n\nlantern key runtime overlay: the lowest tooth glows near the sigil.",
+  )
+  await writeFileRaw(
+    `${projectPath}/wiki/characters/runtime/saber.md`,
+    "# Saber Runtime\n\nUNRELATED_SABER_RUNTIME_POISON",
+  )
+  await writeFileRaw(
+    `${projectPath}/wiki/items/ea.md`,
+    "# Ea\n\nUNRELATED_EA_ITEM_POISON",
   )
   await writeFileRaw(
     `${projectPath}/wiki/factions/runtime/harbor-watch.md`,
@@ -559,6 +683,16 @@ function samplePrompt(): RpgActionResolverPrompt {
     systemPrompt: "System action resolver instructions.",
     userPrompt: "User action resolver input.",
   }
+}
+
+function expectPromptDebugSectionsRecompose(prompt: RpgActionResolverPrompt): void {
+  const sections = prompt.debugSections ?? []
+  expect(sections.filter((section) => section.promptRole === "system").map((section) => section.content).join("\n\n")).toBe(
+    prompt.systemPrompt,
+  )
+  expect(sections.filter((section) => section.promptRole === "user").map((section) => section.content).join("\n\n")).toBe(
+    prompt.userPrompt,
+  )
 }
 
 function sampleLlmConfig(): LlmConfig {

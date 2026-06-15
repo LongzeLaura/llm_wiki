@@ -3,6 +3,8 @@ import type { RpgActionResolverPrompt } from "./action-resolver-interaction"
 
 export interface RpgActionResolverAdapter {
   resolveAction(prompt: RpgActionResolverPrompt, promptInput?: ActionResolverInput): Promise<ActionResolution>
+  resolveActionRawOutput?(prompt: RpgActionResolverPrompt, promptInput?: ActionResolverInput): Promise<string>
+  repairActionResolutionRawOutput?(prompt: RpgActionResolverPrompt, promptInput?: ActionResolverInput): Promise<string>
 }
 
 export function createFixtureActionResolverAdapter(

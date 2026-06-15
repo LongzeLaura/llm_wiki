@@ -1,33 +1,26 @@
 import fs from "node:fs/promises"
 import path from "node:path"
 import { validateRpgRuntimeUpdateTarget } from "../rpg-interactions/runtime/wiki-update-policy"
-import { mergeRpgSections } from "../rpg-section-merge"
 import type { RpgUpdateStrategy } from "./state-extractor"
 import type { PendingRpgUpdate } from "./update-staging"
+import {
+  appendRuntimeSection,
+  createEmptyProjectPathApplyResult,
+  formatWriteContent,
+  mergeRuntimeSections,
+  normalizeWikiPathForDisplay,
+  type AppliedRpgUpdate,
+  type ApplyRpgPendingUpdatesInput,
+  type ApplyRpgPendingUpdatesResult,
+  type SkippedRpgUpdate,
+} from "./write-policy-shared"
 
-export interface ApplyRpgPendingUpdatesInput {
-  projectPath: string
-  updates: PendingRpgUpdate[]
-}
-
-export interface AppliedRpgUpdate {
-  id: string
-  targetPath: string
-  strategy: RpgUpdateStrategy
-  status: "applied"
-}
-
-export interface SkippedRpgUpdate {
-  id: string
-  targetPath: string
-  reason: string
-}
-
-export interface ApplyRpgPendingUpdatesResult {
-  appliedUpdates: AppliedRpgUpdate[]
-  skippedUpdates: SkippedRpgUpdate[]
-  warnings: string[]
-}
+export type {
+  AppliedRpgUpdate,
+  ApplyRpgPendingUpdatesInput,
+  ApplyRpgPendingUpdatesResult,
+  SkippedRpgUpdate,
+} from "./write-policy-shared"
 
 type WriteTargetValidation =
   | { ok: true; targetPath: string; strategy: RpgUpdateStrategy; absolutePath: string }
@@ -42,16 +35,7 @@ export async function applyRpgPendingUpdates(
   const projectPath = input.projectPath.trim()
 
   if (!projectPath) {
-    warnings.push("Skipped RPG pending updates: projectPath is required.")
-    return {
-      appliedUpdates,
-      skippedUpdates: input.updates.map((update) => ({
-        id: update.id,
-        targetPath: normalizeWikiPathForDisplay(update.targetPath),
-        reason: "projectPath is required.",
-      })),
-      warnings,
-    }
+    return createEmptyProjectPathApplyResult(input.updates)
   }
 
   const projectRoot = path.resolve(projectPath)
@@ -137,7 +121,7 @@ async function writeRuntimeUpdate(
 
   if (strategy === "append" || strategy === "merge") {
     const existing = await readOptionalFile(absolutePath)
-    const nextContent = strategy === "append" ? appendSection(existing, content) : mergeRuntimeSections(existing, content, targetPath)
+    const nextContent = strategy === "append" ? appendRuntimeSection(existing, content) : mergeRuntimeSections(existing, content, targetPath)
     await fs.writeFile(absolutePath, nextContent, "utf-8")
   }
 }
@@ -149,38 +133,6 @@ async function readOptionalFile(absolutePath: string): Promise<string> {
     if (isNodeError(error) && error.code === "ENOENT") return ""
     throw error
   }
-}
-
-function appendSection(existing: string, content: string): string {
-  const nextContent = content.trim()
-  if (!existing.trim()) return formatWriteContent(nextContent)
-  return `${existing.trimEnd()}\n\n${nextContent}\n`
-}
-
-function mergeRuntimeSections(existing: string, content: string, targetPath: string): string {
-  const nextContent = content.trim()
-  if (!existing.trim()) return formatWriteContent(nextContent)
-
-  const result = mergeRpgSections(nextContent, {
-    pagePath: targetPath,
-    existingContent: existing,
-    incomingContent: nextContent,
-    preserveExistingSections: true,
-    preserveExistingFrontmatter: true,
-    preserveExistingBodyPrefix: true,
-  })
-  if (result.warnings.length > 0) {
-    console.warn(`[rpg-runtime-write] section merge for ${targetPath}: ${result.warnings.join(" | ")}`)
-  }
-  return formatWriteContent(result.content)
-}
-
-function formatWriteContent(content: string): string {
-  return `${content.trimEnd()}\n`
-}
-
-function normalizeWikiPathForDisplay(targetPath: string): string {
-  return targetPath.trim().replace(/\\/g, "/").replace(/\/+/g, "/").replace(/^\.\//, "").replace(/^\/+/, "")
 }
 
 function isPathInsideOrEqual(child: string, parent: string): boolean {

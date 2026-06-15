@@ -67,6 +67,14 @@ describe("RPG import runtime_update_apply", () => {
               content: "# Canal Gate Opened\n\nIven opened the canal gate with the lantern key.",
               sourceTurnId: turnId,
             }),
+            runtimeProposedUpdate({
+              id: "player-known-structured",
+              targetPath: "wiki/player/known_information.md",
+              strategy: "merge",
+              reason: "Record the player character's knowledge of the completed gate opening.",
+              content: "## Known Information\n\n- Iven knows the canal gate opened after the lantern key answered.",
+              sourceTurnId: turnId,
+            }),
           ],
         }),
         null,
@@ -84,12 +92,14 @@ describe("RPG import runtime_update_apply", () => {
     expect(result.proposedUpdates.map((update) => update.targetPath)).toEqual([
       "wiki/current-scene/scene_state.md",
       "wiki/events/canal-gate-opened.md",
+      "wiki/player/known_information.md",
     ])
     expect(result.pendingUpdates.map((update) => [update.targetPath, update.status])).toEqual([
       ["wiki/current-scene/scene_state.md", "pending"],
       ["wiki/events/canal-gate-opened.md", "pending"],
+      ["wiki/player/known_information.md", "pending"],
     ])
-    expect(result.reviewItems.filter((item) => isReviewItemType(item, "runtime-update-pending"))).toHaveLength(2)
+    expect(result.reviewItems.filter((item) => isReviewItemType(item, "runtime-update-pending"))).toHaveLength(3)
     expect(result.runtimeUpdateValidation.rejectedUpdates).toEqual([])
     expect(await readFileRaw(`${projectPath}/wiki/current-scene/scene_state.md`)).toContain("Old scene.")
     expect(await fileExists(`${projectPath}/wiki/events/canal-gate-opened.md`)).toBe(false)
@@ -116,6 +126,9 @@ describe("RPG import runtime_update_apply", () => {
                 "- Next action: the player may force the gate before the patrol returns.",
               ].join("\n"),
               sourceTurnId: turnId,
+              visibility: "gm_only",
+              knowledgeScope: "gm_only",
+              sourceDeltas: [gmOnlyRuntimeSourceDelta("delta-event-future-structured", "wiki/events/canal-gate-future.md")],
             }),
           ],
         }),
@@ -398,17 +411,19 @@ describe("RPG import runtime_update_apply", () => {
       options: {
         operation: "stage_pending",
         proposedUpdates: [
-          proposedUpdate({
+          runtimeProposedUpdate({
             id: "relationship-direct",
             targetPath: "wiki/relationships/runtime/iven-mira.md",
             strategy: "merge",
             content: "## Current State\n\n- Trust increased after Iven kept the promise.",
+            sourceTurnId: "turn-direct",
           }),
-          proposedUpdate({
+          runtimeProposedUpdate({
             id: "plot-direct",
             targetPath: "wiki/plot-arcs/runtime/canal-gate.md",
             strategy: "merge",
             content: "## Confirmed Facts\n\n- The canal-gate beat advanced after the brass light answered.",
+            sourceTurnId: "turn-direct",
           }),
         ],
       },
@@ -506,8 +521,60 @@ function runtimeSourceDelta(overrides: Partial<RuntimeUpdateSourceDelta> = {}): 
     usePurpose: "writeback",
     affectedPaths: ["wiki/current-scene/scene_state.md"],
     runtimeDeltaRefs: [runtimeDeltaRef(deltaId)],
+    knowledgeClaims: [
+      {
+        claimId: `claim-${deltaId}`,
+        summary: "PC-visible runtime delta.",
+        truthStatus: "unknown",
+        holders: ["pc"],
+        nonHolders: [],
+        beliefStateByActor: [
+          {
+            actor: "pc",
+            beliefState: "known",
+            reason: "Runtime source delta is PC-visible.",
+          },
+        ],
+        sourcePath: "wiki/current-scene/scene_state.md",
+      },
+    ],
+    revealGateRefs: [],
     ...overrides,
   }
+}
+
+function gmOnlyRuntimeSourceDelta(deltaId: string, affectedPath: string): RuntimeUpdateSourceDelta {
+  return runtimeSourceDelta({
+    deltaId,
+    sourceField: "worldDeltas.tensionLine",
+    summary: "GM-only runtime delta retained for validation coverage.",
+    lineTarget: "tensionLine",
+    visibility: "gm_only",
+    knowledgeScope: "gm_only",
+    affectedPaths: [affectedPath],
+    knowledgeClaims: [
+      {
+        claimId: `claim-${deltaId}`,
+        summary: "GM-only runtime knowledge that does not grant PC knowledge.",
+        truthStatus: "unknown",
+        holders: ["gm"],
+        nonHolders: ["pc"],
+        beliefStateByActor: [
+          {
+            actor: "gm",
+            beliefState: "known",
+            reason: "GM-only audit material.",
+          },
+          {
+            actor: "pc",
+            beliefState: "unknown",
+            reason: "The player character has not learned this material.",
+          },
+        ],
+        sourcePath: affectedPath,
+      },
+    ],
+  })
 }
 
 function runtimeSkippedDelta(overrides: Partial<SkippedRuntimeDelta> = {}): SkippedRuntimeDelta {

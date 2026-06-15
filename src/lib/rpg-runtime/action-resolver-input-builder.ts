@@ -60,7 +60,7 @@ export async function buildActionResolverInputFromWiki(
   const references = new Set<string>()
 
   const currentScene = await readRequiredSchemaSlot(projectPath, CURRENT_SCENE_SLOT_ID, warnings, references)
-  const actionTokens = tokenize(`${input.submittedAction.text}\n${currentScene.content}`)
+  const actionTokens = tokenize(buildActionResolverQueryText(input.submittedAction, currentScene))
   const playerPages = await readSchemaSlotPages(projectPath, PLAYER_SLOT_IDS, warnings)
   const rulePages = await readSchemaSlotPages(projectPath, RULE_SLOT_IDS, warnings)
   const outlineProgressPages = await readSchemaSlotPages(projectPath, OUTLINE_PROGRESS_SLOT_IDS, warnings)
@@ -159,6 +159,25 @@ export async function buildActionResolverInputFromWiki(
     },
     warnings,
   }
+}
+
+function buildActionResolverQueryText(submittedAction: SubmittedAction, currentScene: RuntimePage): string {
+  return [
+    submittedAction.text,
+    extractLabeledValue(currentScene.content, [/current\s+location/i, /^location$/i, /当前地点/, /當前地點/]),
+    ...extractSceneAnchorLines(currentScene),
+  ].filter(Boolean).join("\n")
+}
+
+function extractSceneAnchorLines(currentScene: RuntimePage): string[] {
+  return [
+    ...extractRelevantLines(currentScene, /current\s+location|当前地点|當前地點/i),
+    ...extractRelevantLines(currentScene, /present|character|npc|在场|在場|人物|角色/i),
+    ...extractRelevantLines(currentScene, /interact|object|item|clue|可交互|可互动|可互動|物品|线索|線索/i),
+    ...extractRelevantLines(currentScene, /danger|risk|threat|clock|countdown|危险|危險|风险|風險|倒计时|倒計時/i),
+    ...extractRelevantLines(currentScene, /condition|constraint|route|path|block|条件|限制|路径|路徑|阻碍|阻礙/i),
+    ...extractRelevantLines(currentScene, /pending\s+reaction|reaction|will\s+react|待反应|待反應|反应|反應/i),
+  ]
 }
 
 function buildRuleExcerpts(pages: RuntimePage[]): ActionResolverRuleExcerpt[] {

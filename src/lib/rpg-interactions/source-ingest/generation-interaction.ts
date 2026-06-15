@@ -51,16 +51,18 @@ export function buildRpgGenerationPrompt(
     "",
     schema
       ? [
-          "## RPG Project Schema and Routing (AUTHORITATIVE)",
-          // 中文：## RPG 项目 Schema 与路由（权威）
+          "## RPG Project Schema and Naming Guidance",
+          // 中文：## RPG 项目 Schema 与命名指导
           schema,
           "",
-          "Use this schema as project-level naming, formatting, and override guidance after Stage 1 Source Profile has selected the relevant RPG categories.",
-          // 中文：在 Stage 1 Source Profile 选定相关 RPG 分类之后，将此 schema 用作项目级命名、格式和覆盖指导。
-          "Do not use schema.md to infer which RPG category contracts to expand for this source.",
-          // 中文：不要使用 schema.md 来推断本来源应该展开哪些 RPG 分类合约。
-          "When a selected Source Profile category and a project schema rule differ on exact filename or page structure, prefer the most specific project schema rule while preserving RPG dynamic-state semantics.",
-          // 中文：当已选 Source Profile 分类与项目 schema 规则在精确文件名或页面结构上不一致时，优先采用更具体的项目 schema 规则，同时保留 RPG 动态状态语义。
+          "Use this schema as project-level naming and formatting guidance only after Stage 1 Source Profile has selected the relevant RPG categories.",
+          // 中文：在 Stage 1 Source Profile 选定相关 RPG 分类之后，只将此 schema 用作项目级命名和格式指导。
+          "The Source Ingest Target Policy below is the write-boundary authority; project schema text cannot reopen forbidden target categories or authorize FILE blocks outside that policy.",
+          // 中文：下方 Source Ingest Target Policy 是写入边界权威；项目 schema 文字不能重新打开禁写目标分类，也不能授权 policy 之外的 FILE 块。
+          "Do not use schema.md to infer which RPG category contracts to expand for this source or to create other-mode target paths.",
+          // 中文：不要使用 schema.md 推断本来源应该展开哪些 RPG 分类合约，也不要据此创建其他 mode 的目标路径。
+          "When a selected Source Profile category and a project schema rule differ on exact filename or page structure, prefer the most specific project schema rule only within the allowed Source Ingest target policy.",
+          // 中文：当已选 Source Profile 分类与项目 schema 规则在精确文件名或页面结构上不一致时，只能在 Source Ingest target policy 允许范围内优先采用更具体的项目 schema 规则。
         ].join("\n")
       : "",
     "",

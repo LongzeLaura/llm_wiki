@@ -3,6 +3,8 @@ import type { RpgWorldTickPrompt } from "./world-tick-interaction"
 
 export interface RpgWorldTickAdapter {
   advanceWorldTick(prompt: RpgWorldTickPrompt, promptInput?: WorldTickInput): Promise<WorldTickResult>
+  advanceWorldTickRawOutput?(prompt: RpgWorldTickPrompt, promptInput?: WorldTickInput): Promise<string>
+  repairWorldTickRawOutput?(prompt: RpgWorldTickPrompt, promptInput?: WorldTickInput): Promise<string>
 }
 
 export function createFixtureWorldTickAdapter(result: WorldTickResult): RpgWorldTickAdapter {

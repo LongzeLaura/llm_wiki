@@ -106,6 +106,7 @@ describe("RPG Runtime Turn Controller", () => {
       worldTickResult: result.worldTickResult,
       visibleSelection: result.visibleSelection,
       postActionWorkingState: result.postActionWorkingState,
+      turnSemanticHandoff: result.turnSemanticHandoff,
       recallSelection: result.recallSelection,
       recalledMaterials: result.recalledMaterials,
       outlineAwareNarrationBrief: result.outlineAwareNarrationBrief,
@@ -286,37 +287,51 @@ describe("RPG Runtime Turn Controller", () => {
       ),
       updateInteractionAdapter: {
         async generateUpdateProposal(prompt) {
-          expect(prompt.systemPrompt).toContain("RuntimeUpdateProposalResult JSON")
+          expect(prompt.systemPrompt).toContain("RuntimeUpdateProposalDraft JSON")
           expect(prompt.userPrompt).toContain("postActionWorkingState")
-          expect(prompt.userPrompt).toContain("Allowed Runtime Update Target Rules")
-          return JSON.stringify(sampleStructuredRuntimeUpdateProposalResult(submittedAction))
+          expect(prompt.userPrompt).toContain("允许的 Runtime 更新目标规则")
+          return sampleRuntimeUpdateProposalDraftOutput(sampleStructuredRuntimeUpdateProposalResult(submittedAction))
         },
       },
       runtimePersistence: { appendTurnJournalEntry },
     })
 
     const entry = appendTurnJournalEntry.mock.calls[0]?.[1] as RuntimeTurnJournalEntry
-    expect(result.proposedUpdates.map((update) => update.id)).toEqual(["structured-scene-update"])
-    expect(result.pendingUpdates.map((update) => update.id)).toEqual(["structured-scene-update"])
+    expect(result.proposedUpdates.map((update) => update.id)).toEqual(["runtime-update-turn-structured-proposal-1"])
+    expect(result.pendingUpdates.map((update) => update.id)).toEqual(["runtime-update-turn-structured-proposal-1"])
     expect(result.pendingUpdates[0]).toMatchObject({
       targetPath: "wiki/current-scene/scene_state.md",
       status: "pending",
     })
-    expect(result.skippedDeltas.map((delta) => delta.skipId)).toEqual(["skip-parallel-pc-knowledge"])
-    expect(result.outlineRevisionReviewItems.map((item) => item.reviewItemId)).toEqual(["outline-review-structured"])
-    expect(result.proposalGroups.map((group) => group.groupId)).toEqual(["group-structured-runtime"])
-    expect(result.pacingUpdateProposal?.proposalId).toBe("pacing-structured")
-    expect(JSON.stringify(result.pendingUpdates)).not.toContain("skip-parallel-pc-knowledge")
-    expect(JSON.stringify(result.pendingUpdates)).not.toContain("outline-review-structured")
-    expect(result.warnings.join("\n")).toContain("Skipped runtime delta skip-parallel-pc-knowledge")
-    expect(result.warnings.join("\n")).toContain("Outline revision review item outline-review-structured")
-    expect(entry.runtimeUpdateProposalAudit).toMatchObject({
-      proposedWikiUpdateIds: ["structured-scene-update"],
-      skippedDeltas: [expect.objectContaining({ skipId: "skip-parallel-pc-knowledge" })],
-      proposalGroups: [expect.objectContaining({ groupId: "group-structured-runtime" })],
-      outlineRevisionReviewItems: [expect.objectContaining({ reviewItemId: "outline-review-structured" })],
+    expect(result.skippedDeltas.map((delta) => delta.skipId)).toEqual(["runtime-skip-turn-structured-proposal-1"])
+    expect(result.outlineRevisionReviewItems.map((item) => item.reviewItemId)).toEqual(["outline-revision-review-turn-structured-proposal-1"])
+    expect(result.proposalGroups.map((group) => group.groupId)).toEqual(["runtime-update-group-turn-structured-proposal-1"])
+    expect(result.pacingUpdateProposal?.proposalId).toBe("pacing-update-turn-structured-proposal")
+    expect(JSON.stringify(result.pendingUpdates)).not.toContain("runtime-skip-turn-structured-proposal-1")
+    expect(JSON.stringify(result.pendingUpdates)).not.toContain("outline-revision-review-turn-structured-proposal-1")
+    expect(result.runtimePersistenceBoundary).toMatchObject({
+      proposedCount: 1,
+      acceptedCount: 1,
+      rejectedCount: 0,
+      pendingEligibleUpdateIds: ["runtime-update-turn-structured-proposal-1"],
+      reviewOnlyAuditIds: [
+        "runtime-skip-turn-structured-proposal-1",
+        "outline-revision-review-turn-structured-proposal-1",
+        "runtime-update-journal-1",
+        "pacing-update-turn-structured-proposal",
+        "runtime-update-group-turn-structured-proposal-1",
+      ],
     })
-    expect(entry.pendingUpdateIds).toEqual(["structured-scene-update"])
+    expect(result.warnings.join("\n")).toContain("Skipped runtime delta runtime-skip-turn-structured-proposal-1")
+    expect(result.warnings.join("\n")).toContain("Outline revision review item outline-revision-review-turn-structured-proposal-1")
+    expect(entry.runtimeUpdateProposalAudit).toMatchObject({
+      proposedWikiUpdateIds: ["runtime-update-turn-structured-proposal-1"],
+      skippedDeltas: [expect.objectContaining({ skipId: "runtime-skip-turn-structured-proposal-1" })],
+      proposalGroups: [expect.objectContaining({ groupId: "runtime-update-group-turn-structured-proposal-1" })],
+      outlineRevisionReviewItems: [expect.objectContaining({ reviewItemId: "outline-revision-review-turn-structured-proposal-1" })],
+    })
+    expect(entry.runtimePersistenceBoundary).toEqual(result.runtimePersistenceBoundary)
+    expect(entry.pendingUpdateIds).toEqual(["runtime-update-turn-structured-proposal-1"])
     expect(writePolicy.applyRpgPendingUpdates).not.toHaveBeenCalled()
   })
 
@@ -451,7 +466,7 @@ describe("RPG Runtime Turn Controller", () => {
 
     const combined = `${capturedPrompt?.systemPrompt ?? ""}\n${capturedPrompt?.userPrompt ?? ""}`
     expect(combined).toContain("Mira traces the lowest sigil")
-    expect(combined).toContain("# Runtime Update Proposal Input")
+    expect(combined).toContain("# Runtime Update Proposal 输入")
     expect(combined).toContain("postActionWorkingState")
     expect(combined).toContain("actionResolution")
     expect(combined).toContain("worldTickResult")
@@ -462,12 +477,43 @@ describe("RPG Runtime Turn Controller", () => {
     expect(combined).toContain("outlineImpactReport")
     expect(combined).toContain("turnNarration")
     expect(combined).toContain("consistencyValidation")
-    expect(combined).toContain("nextActionOptions are candidate future actions")
-    expect(combined).toContain("attempted_not_confirmed cannot enter confirmed events")
-    expect(combined).toContain("parallelLineText and user_visible_pc_unknown material")
+    expect(combined).toContain("nextActionOptions 是候选未来行动")
+    expect(combined).toContain("attempted_not_confirmed 不能进入已确认事件")
+    expect(combined).toContain("parallelLineText 和 user_visible_pc_unknown 材料")
     expect(combined).toContain("Touch the lantern key to the lowest sigil")
     expect(combined).toContain("opt-key")
     expect(combined).toContain("POISON_ATTEMPTED_NOT_CONFIRMED_DRAFT_SHOULD_NOT_ENTER_UPDATE_PROMPT")
+  })
+
+  it("repairs malformed runtime update proposal draft output when soft retry is enabled", async () => {
+    ctx = { tmp: await createTempProject("rpg-runtime-controller-update-repair") }
+    const projectPath = ctx.tmp.path
+    await writeTurnFixture(projectPath)
+    const submittedAction = sampleSubmittedAction("turn-update-repair")
+    const repairedOutput = sampleEmptyRuntimeUpdateProposalOutput(submittedAction)
+    const repairUpdateProposalRawOutput = vi.fn(async () => repairedOutput)
+
+    const result = await runRpgRuntimeTurnFlow({
+      projectPath,
+      submittedAction,
+      wikiMode: "llmwikirpg",
+      actionResolverAdapter: sampleActionResolverAdapter(submittedAction),
+      worldTickAdapter: sampleWorldTickAdapter(submittedAction),
+      recallSelectorAdapter: sampleRecallSelectorAdapter(),
+      outlineBriefCompilerAdapter: sampleOutlineBriefCompilerAdapter(submittedAction),
+      narrationAdapter: createFixtureNarrationGeneratorAdapter(sampleTurnNarration()),
+      updateInteractionAdapter: {
+        async generateUpdateProposal() {
+          return repairedOutput.replace("\"proposedWikiUpdates\":", "\"proposedWikiUpdates\"")
+        },
+        repairUpdateProposalRawOutput,
+      },
+      softSemanticRepairRetry: { enabled: true },
+    })
+
+    expect(repairUpdateProposalRawOutput).toHaveBeenCalledTimes(1)
+    expect(result.pendingUpdates).toEqual([])
+    expect(result.runtimeUpdateProposal.proposedWikiUpdates).toEqual([])
   })
 
   it("appends a completed turn journal entry when persistence is injected", async () => {
@@ -809,7 +855,7 @@ function sampleTurnResultWithoutUpdateBlocks(): RpgTurnResult {
 
 function sampleRuntimeUpdateOutput(actionOrId: SubmittedAction | string = "turn-controller"): string {
   const submittedAction = typeof actionOrId === "string" ? sampleSubmittedAction(actionOrId) : actionOrId
-  return JSON.stringify({
+  return sampleRuntimeUpdateProposalDraftOutput({
     ...sampleEmptyRuntimeUpdateProposalResult(),
     proposedWikiUpdates: [
       sampleRuntimeProposedWikiUpdate(submittedAction, "scene"),
@@ -820,12 +866,12 @@ function sampleRuntimeUpdateOutput(actionOrId: SubmittedAction | string = "turn-
 
 function sampleEmptyRuntimeUpdateProposalOutput(actionOrId: SubmittedAction | string = "turn-controller"): string {
   void actionOrId
-  return JSON.stringify(sampleEmptyRuntimeUpdateProposalResult())
+  return sampleRuntimeUpdateProposalDraftOutput(sampleEmptyRuntimeUpdateProposalResult())
 }
 
 function sampleEventOnlyRuntimeUpdateOutput(actionOrId: SubmittedAction | string): string {
   const submittedAction = typeof actionOrId === "string" ? sampleSubmittedAction(actionOrId) : actionOrId
-  return JSON.stringify({
+  return sampleRuntimeUpdateProposalDraftOutput({
     ...sampleEmptyRuntimeUpdateProposalResult(),
     proposedWikiUpdates: [sampleRuntimeProposedWikiUpdate(submittedAction, "event")],
   })
@@ -833,7 +879,7 @@ function sampleEventOnlyRuntimeUpdateOutput(actionOrId: SubmittedAction | string
 
 function sampleKnownInformationRuntimeUpdateOutput(actionOrId: SubmittedAction | string): string {
   const submittedAction = typeof actionOrId === "string" ? sampleSubmittedAction(actionOrId) : actionOrId
-  return JSON.stringify({
+  return sampleRuntimeUpdateProposalDraftOutput({
     ...sampleEmptyRuntimeUpdateProposalResult(),
     proposedWikiUpdates: [
       sampleRuntimeProposedWikiUpdate(submittedAction, "knownInformation"),
@@ -843,7 +889,7 @@ function sampleKnownInformationRuntimeUpdateOutput(actionOrId: SubmittedAction |
 
 function sampleInvalidTargetRuntimeUpdateOutput(actionOrId: SubmittedAction | string): string {
   const submittedAction = typeof actionOrId === "string" ? sampleSubmittedAction(actionOrId) : actionOrId
-  return JSON.stringify({
+  return sampleRuntimeUpdateProposalDraftOutput({
     ...sampleEmptyRuntimeUpdateProposalResult(),
     proposedWikiUpdates: [
       {
@@ -866,7 +912,7 @@ function sampleInvalidTargetRuntimeUpdateOutput(actionOrId: SubmittedAction | st
 
 function sampleFutureAndSceneRuntimeUpdateOutput(actionOrId: SubmittedAction | string): string {
   const submittedAction = typeof actionOrId === "string" ? sampleSubmittedAction(actionOrId) : actionOrId
-  return JSON.stringify({
+  return sampleRuntimeUpdateProposalDraftOutput({
     ...sampleEmptyRuntimeUpdateProposalResult(),
     proposedWikiUpdates: [
       sampleRuntimeProposedWikiUpdate(submittedAction, "futureEvent"),
@@ -877,12 +923,58 @@ function sampleFutureAndSceneRuntimeUpdateOutput(actionOrId: SubmittedAction | s
 
 function sampleFutureAndPlayerRuntimeUpdateOutput(actionOrId: SubmittedAction | string): string {
   const submittedAction = typeof actionOrId === "string" ? sampleSubmittedAction(actionOrId) : actionOrId
-  return JSON.stringify({
+  return sampleRuntimeUpdateProposalDraftOutput({
     ...sampleEmptyRuntimeUpdateProposalResult(),
     proposedWikiUpdates: [
       sampleRuntimeProposedWikiUpdate(submittedAction, "futureEvent"),
       sampleRuntimeProposedWikiUpdate(submittedAction, "playerProfile"),
     ],
+  })
+}
+
+function sampleRuntimeUpdateProposalDraftOutput(result: RuntimeUpdateProposalResult): string {
+  return JSON.stringify({
+    proposedWikiUpdates: result.proposedWikiUpdates.map((update) => ({
+      targetPath: update.targetPath,
+      strategy: update.strategy,
+      reason: update.reason,
+      content: update.content,
+      runtimeDeltaIds: update.sourceDeltas.flatMap((delta) => delta.runtimeDeltaRefs.map((ref) => ref.deltaId)),
+      sourceRefs: [
+        {
+          path: update.references[0] ?? update.targetPath,
+          reason: update.reason,
+        },
+      ],
+      happenedStatus: update.happenedStatus,
+      confidence: update.confidence,
+      riskNotes: update.validationHints.map((hint) => hint.message),
+    })),
+    outlineRevisionReviewItems: result.outlineRevisionReviewItems.map((item) => ({
+      summary: item.summary,
+      proposedRevisionSummary: item.proposedRevisionSummary,
+      warnings: item.warnings,
+    })),
+    journalEntries: result.journalEntries,
+    skippedDeltas: result.skippedDeltas.map((skip) => ({
+      runtimeDeltaId: skip.sourceDelta.runtimeDeltaRefs[0]?.deltaId,
+      sourceRef: { path: skip.sourceDelta.sourcePath ?? skip.sourceDelta.affectedPaths[0], reason: skip.reason },
+      code: skip.code,
+      reason: skip.reason,
+      reviewPolicy: skip.reviewPolicy,
+    })),
+    pacingUpdateProposal: result.pacingUpdateProposal
+      ? {
+          sourceRuntimeDeltaIds: result.pacingUpdateProposal.sourceDeltaIds,
+          nextPacingState: result.pacingUpdateProposal.nextPacingState,
+          timeDeltaSummary: result.pacingUpdateProposal.timeDeltaSummary,
+          campaignDelta: result.pacingUpdateProposal.campaignDelta,
+          pacingDebtChange: result.pacingUpdateProposal.pacingDebtChange,
+          targetPath: result.pacingUpdateProposal.targetPath,
+          reviewPolicy: result.pacingUpdateProposal.reviewPolicy,
+        }
+      : null,
+    warnings: result.warnings,
   })
 }
 
@@ -914,6 +1006,8 @@ function sampleRuntimeProposedWikiUpdate(
     usePurpose: "writeback" as const,
     affectedPaths: ["wiki/current-scene/scene_state.md"],
     runtimeDeltaRefs: [],
+    knowledgeClaims: [pcKnowledgeClaim(`claim-${kind}-${submittedAction.id}`, "PC can track the visible canal gate scene.")],
+    revealGateRefs: [],
   }
 
   if (kind === "event" || kind === "futureEvent") {
@@ -934,13 +1028,16 @@ function sampleRuntimeProposedWikiUpdate(
         {
           ...baseSourceDelta,
           deltaId: `source-delta-${kind}-${submittedAction.id}`,
+          visibility: "gm_only",
+          knowledgeScope: "gm_only",
           happenedStatus: "confirmed_happened",
           affectedPaths: [targetPath],
+          knowledgeClaims: [gmKnowledgeClaim(`claim-${kind}-${submittedAction.id}`, "GM tracks this confirmed event.", targetPath)],
         },
       ],
       lineTarget: "playerVisibleLine",
-      visibility: "pc_visible",
-      knowledgeScope: "pc_known",
+      visibility: "gm_only",
+      knowledgeScope: "gm_only",
       happenedStatus: "confirmed_happened",
       confidence: "high",
       validationHints: [],
@@ -1030,6 +1127,8 @@ function sampleStructuredRuntimeUpdateProposalResult(
     usePurpose: "writeback" as const,
     affectedPaths: ["wiki/current-scene/scene_state.md"],
     runtimeDeltaRefs: [],
+    knowledgeClaims: [pcKnowledgeClaim("claim-structured-scene", "PC sees the warning and patrol pressure.")],
+    revealGateRefs: [],
   }
   const skippedSourceDelta = {
     deltaId: "source-delta-parallel-watch-order",
@@ -1043,6 +1142,8 @@ function sampleStructuredRuntimeUpdateProposalResult(
     usePurpose: "journalOnly" as const,
     affectedPaths: ["wiki/player/known_information.md"],
     runtimeDeltaRefs: [],
+    knowledgeClaims: [userKnowledgeClaim("claim-parallel-watch-order", "The user sees the offscreen watch order.")],
+    revealGateRefs: [],
   }
 
   return {
@@ -1123,6 +1224,70 @@ function sampleStructuredRuntimeUpdateProposalResult(
       },
     ],
     warnings: [],
+  }
+}
+
+function pcKnowledgeClaim(claimId: string, summary: string, sourcePath = "wiki/current-scene/scene_state.md") {
+  return {
+    claimId,
+    summary,
+    truthStatus: "unknown" as const,
+    holders: ["pc" as const],
+    nonHolders: [],
+    beliefStateByActor: [
+      {
+        actor: "pc" as const,
+        beliefState: "known" as const,
+        reason: "PC-visible runtime evidence supports this claim.",
+      },
+    ],
+    sourcePath,
+  }
+}
+
+function gmKnowledgeClaim(claimId: string, summary: string, sourcePath: string) {
+  return {
+    claimId,
+    summary,
+    truthStatus: "unknown" as const,
+    holders: ["gm" as const],
+    nonHolders: ["pc" as const],
+    beliefStateByActor: [
+      {
+        actor: "gm" as const,
+        beliefState: "known" as const,
+        reason: "GM/runtime audit tracks this event claim.",
+      },
+      {
+        actor: "pc" as const,
+        beliefState: "unknown" as const,
+        reason: "This event update does not itself grant PC knowledge.",
+      },
+    ],
+    sourcePath,
+  }
+}
+
+function userKnowledgeClaim(claimId: string, summary: string, sourcePath = "wiki/player/known_information.md") {
+  return {
+    claimId,
+    summary,
+    truthStatus: "unknown" as const,
+    holders: ["user" as const],
+    nonHolders: ["pc" as const],
+    beliefStateByActor: [
+      {
+        actor: "user" as const,
+        beliefState: "known" as const,
+        reason: "Parallel-line display is visible to the real user.",
+      },
+      {
+        actor: "pc" as const,
+        beliefState: "unknown" as const,
+        reason: "Parallel-line display does not grant PC knowledge.",
+      },
+    ],
+    sourcePath,
   }
 }
 

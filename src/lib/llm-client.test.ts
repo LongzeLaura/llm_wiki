@@ -1,5 +1,6 @@
-import { describe, it, expect } from "vitest"
-import { isFetchNetworkError } from "./llm-client"
+import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from "vitest"
+import type { LlmConfig } from "@/stores/wiki-store"
+import { isFetchNetworkError, streamChat } from "./llm-client"
 
 /**
  * Guards for cross-webview error detection. Tauri renders the frontend
@@ -48,5 +49,151 @@ describe("isFetchNetworkError — cross-webview fetch failures", () => {
     expect(isFetchNetworkError(null)).toBe(false)
     expect(isFetchNetworkError(undefined)).toBe(false)
     expect(isFetchNetworkError({ message: "Load failed" })).toBe(false)
+  })
+})
+
+const fetchMock = vi.fn()
+
+const llmConfig: LlmConfig = {
+  provider: "custom",
+  apiKey: "test-key",
+  model: "test-model",
+  ollamaUrl: "http://localhost:11434",
+  customEndpoint: "http://localhost:1234/v1",
+  maxContextSize: 4096,
+  apiMode: "chat_completions",
+}
+
+const messages = [{ role: "user" as const, content: "Say hello." }]
+
+function makeCallbacks() {
+  return {
+    onToken: vi.fn(),
+    onDone: vi.fn(),
+    onError: vi.fn(),
+  }
+}
+
+function sseResponse(lines: string[]): Response {
+  const encoder = new TextEncoder()
+  const body = new ReadableStream<Uint8Array>({
+    start(controller) {
+      for (const line of lines) controller.enqueue(encoder.encode(line))
+      controller.close()
+    },
+  })
+  return new Response(body, { status: 200, statusText: "OK" })
+}
+
+describe("streamChat — backstop timeout cleanup", () => {
+  beforeEach(() => {
+    vi.useFakeTimers()
+    fetchMock.mockReset()
+    vi.stubGlobal("fetch", fetchMock)
+  })
+
+  afterEach(() => {
+    vi.useRealTimers()
+  })
+
+  afterAll(() => {
+    vi.unstubAllGlobals()
+  })
+
+  it("clears the 30-minute backstop after a successful SSE stream", async () => {
+    const callbacks = makeCallbacks()
+    fetchMock.mockResolvedValueOnce(sseResponse([
+      'data: {"choices":[{"delta":{"content":"hello"}}]}\n',
+      "data: [DONE]\n",
+    ]))
+
+    await streamChat(llmConfig, messages, callbacks)
+
+    expect(callbacks.onToken).toHaveBeenCalledWith("hello")
+    expect(callbacks.onDone).toHaveBeenCalledTimes(1)
+    expect(callbacks.onError).not.toHaveBeenCalled()
+    expect(vi.getTimerCount()).toBe(0)
+  })
+
+  it("clears the backstop after an HTTP error", async () => {
+    const callbacks = makeCallbacks()
+    fetchMock.mockResolvedValueOnce(new Response("bad key", {
+      status: 401,
+      statusText: "Unauthorized",
+    }))
+
+    await streamChat(llmConfig, messages, callbacks)
+
+    expect(callbacks.onError).toHaveBeenCalledTimes(1)
+    expect(callbacks.onError.mock.calls[0]?.[0].message).toContain("HTTP 401: Unauthorized")
+    expect(callbacks.onDone).not.toHaveBeenCalled()
+    expect(vi.getTimerCount()).toBe(0)
+  })
+
+  it("clears the backstop after an empty response body", async () => {
+    const callbacks = makeCallbacks()
+    fetchMock.mockResolvedValueOnce(new Response(null, {
+      status: 200,
+      statusText: "OK",
+    }))
+
+    await streamChat(llmConfig, messages, callbacks)
+
+    expect(callbacks.onError).toHaveBeenCalledTimes(1)
+    expect(callbacks.onError.mock.calls[0]?.[0].message).toBe("Response body is null")
+    expect(callbacks.onDone).not.toHaveBeenCalled()
+    expect(vi.getTimerCount()).toBe(0)
+  })
+
+  it("clears the backstop after a stream reader failure", async () => {
+    const callbacks = makeCallbacks()
+    const releaseLock = vi.fn()
+    fetchMock.mockResolvedValueOnce({
+      ok: true,
+      body: {
+        getReader() {
+          return {
+            async read() {
+              throw new TypeError("Failed to fetch")
+            },
+            releaseLock,
+          }
+        },
+      },
+    } as unknown as Response)
+
+    await streamChat(llmConfig, messages, callbacks)
+
+    expect(callbacks.onError).toHaveBeenCalledTimes(1)
+    expect(callbacks.onError.mock.calls[0]?.[0].message).toBe("Connection lost during streaming. Try again.")
+    expect(releaseLock).toHaveBeenCalledTimes(1)
+    expect(callbacks.onDone).not.toHaveBeenCalled()
+    expect(vi.getTimerCount()).toBe(0)
+  })
+
+  it("still reports the 30-minute request timeout and clears the fired timer", async () => {
+    const callbacks = makeCallbacks()
+    fetchMock.mockImplementationOnce((_url: string, init: RequestInit) => (
+      new Promise((_resolve, reject) => {
+        init.signal?.addEventListener("abort", () => {
+          const error = new Error("The operation was aborted.")
+          error.name = "AbortError"
+          reject(error)
+        }, { once: true })
+      })
+    ))
+
+    const pending = streamChat(llmConfig, messages, callbacks)
+    await Promise.resolve()
+    await Promise.resolve()
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+
+    await vi.advanceTimersByTimeAsync(30 * 60 * 1000)
+    await pending
+
+    expect(callbacks.onError).toHaveBeenCalledTimes(1)
+    expect(callbacks.onError.mock.calls[0]?.[0].message).toContain("Request timed out after 30 min")
+    expect(callbacks.onDone).not.toHaveBeenCalled()
+    expect(vi.getTimerCount()).toBe(0)
   })
 })

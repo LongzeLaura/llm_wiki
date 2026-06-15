@@ -128,32 +128,91 @@ describe("RPG Narration Generator interaction", () => {
     expect(combined).toContain("playerFacingText")
     expect(combined).toContain("parallelLineText")
     expect(combined).toContain("tensionBrief")
-    expect(combined).toContain("displayPolicy")
-    expect(combined).toContain("narrationMeta")
+    expect(combined).toContain("narrationSelfReport")
     expect(combined).toContain("nextActionOptions")
-    expect(combined).toContain("references")
+    expect(combined).toContain('"narrationSelfReport"?:')
+    expect(combined).toContain("不要输出 displayPolicy、narrationMeta、references")
     expect(combined).toContain("provisionalOutlinePatch.narrationHandoff")
-    expect(combined).toContain("outlineRevisionProposal is not Narration fact material")
-    expect(combined).toContain("parallel line display is not PC knowledge")
-    expect(combined).toContain("style does not become world / plot facts")
-    expect(combined).toContain("PostActionWorkingState")
-    expect(combined).toContain("ActionResolution")
-    expect(combined).toContain("WorldTickResult")
-    expect(combined).toContain("WorldTickVisibleSelection")
+    expect(combined).toContain("outlineRevisionProposal 不是 Narration 的事实材料")
+    expect(combined).toContain("parallel line 的展示不等于 PC 已知")
+    expect(combined).toContain("style 不会变成世界 / 剧情事实")
+    expect(combined).toContain("TurnSemanticHandoff")
     expect(combined).toContain("OutlineAwareNarrationBrief")
     expect(combined).toContain("RecallSelection")
     expect(combined).toContain("recalledMaterials")
-    expect(combined).toContain("forbidden narration constraints")
+    expect(combined).toContain("禁止叙事约束")
+    expect(combined).toContain('"reviewHandoff": string')
+    expect(combined).toContain('"followedPacingIntent"')
+    expect(combined).toContain("option-only future actions")
+    expect(combined).not.toContain('"likelyAffectedPaths": string[]')
+    expect(combined).not.toContain('"tensionBrief": TensionBrief')
+    expect(combined).not.toContain('"displayPolicy": NarrationDisplayPolicy')
+    expect(combined).not.toContain('"narrationMeta": NarrationMeta')
+    expect(combined).not.toContain('"nextActionOptions": RuntimeNarrationActionOption[]')
+    expect(combined).not.toContain('"references": NarrationSourceRef[]')
+    expect(prompt.debugSections?.map((section) => section.title)).toEqual(
+      expect.arrayContaining([
+        "系统固定提示词",
+        "TurnSemanticHandoff",
+        "OutlineAwareNarrationBrief",
+        "provisionalOutlinePatch.narrationHandoff / provisionalNarrationHandoff",
+        "RecallSelection",
+        "recalledMaterials",
+        "style bundle",
+        "禁止叙事约束",
+        "玩家知识边界",
+        "references / runtime refs",
+      ]),
+    )
+    expectPromptDebugSectionsRecompose(prompt)
   })
 
-  it("parses bare and fenced TurnNarration JSON", () => {
+  it("parses bare and fenced TurnNarrationDraft JSON", () => {
     const input = sampleNarrationGeneratorInput()
-    const output = sampleTurnNarration()
+    const draft = sampleTurnNarrationDraft()
 
-    expect(parseRpgNarrationGeneratorOutput(JSON.stringify(output), input)).toEqual(output)
+    expect(parseRpgNarrationGeneratorOutput(JSON.stringify(draft), input).playerFacingText).toBe(draft.playerFacingText)
     expect(
-      parseRpgNarrationGeneratorOutput(["```json", JSON.stringify(output, null, 2), "```"].join("\n"), input),
-    ).toEqual(output)
+      parseRpgNarrationGeneratorOutput(["```json", JSON.stringify(draft, null, 2), "```"].join("\n"), input),
+    ).toMatchObject({ playerFacingText: draft.playerFacingText })
+  })
+
+  it("escapes raw newlines inside TurnNarrationDraft strings before parsing", () => {
+    const input = sampleNarrationGeneratorInput()
+    const draft = sampleTurnNarrationDraft()
+    const output = JSON.stringify(draft, null, 2).replace(
+      "Mira studies the cracked mark and points to the safe edge of the sigil.",
+      "Mira studies the cracked mark.\nShe points to the safe edge of the sigil.",
+    )
+    const reports: unknown[] = []
+
+    const parsed = parseRpgNarrationGeneratorOutput(output, input, {
+      onJsonParseReport: (report) => reports.push(report),
+    })
+
+    expect(parsed.playerFacingText).toContain("Mira studies the cracked mark.\nShe points")
+    expect(reports).toEqual([
+      expect.objectContaining({
+        operations: expect.arrayContaining(["escaped_raw_newlines_in_strings"]),
+        parseSucceeded: true,
+      }),
+    ])
+  })
+
+  it("rejects underspecified legacy TurnNarration output without auto-repair", () => {
+    const legacyOutput = {
+      playerFacingText: "Mira studies the sigil and points to its safe edge.",
+      tensionBrief: "The patrol pressure rises.",
+      displayPolicy: {},
+      narrationMeta: {},
+      nextActionOptions: [],
+      references: [],
+      warnings: [],
+    }
+
+    expect(() => parseRpgNarrationGeneratorOutput(JSON.stringify(legacyOutput), sampleNarrationGeneratorInput())).toThrow(
+      /TurnNarrationDraft\.tensionBrief|derivable protocol|displayPolicy|narrationMeta/i,
+    )
   })
 
   it("accepts valid TurnNarration", () => {
@@ -210,13 +269,15 @@ describe("RPG Narration Generator interaction", () => {
 
   it("routes fixture and LLM adapters through parser and validator", async () => {
     const input = sampleNarrationGeneratorInput()
-    const output = sampleTurnNarration()
+    const draft = sampleTurnNarrationDraft()
     const prompt = buildNarrationGeneratorPrompt(input)
 
-    const fixture = createFixtureNarrationGeneratorAdapter(["```json", JSON.stringify(output), "```"].join("\n"))
-    await expect(fixture.generateNarration(prompt, input)).resolves.toEqual(output)
+    const fixture = createFixtureNarrationGeneratorAdapter(["```json", JSON.stringify(draft), "```"].join("\n"))
+    await expect(fixture.generateNarration(prompt, input)).resolves.toMatchObject({
+      playerFacingText: draft.playerFacingText,
+    })
 
-    const rawOutput = ["```json\n", JSON.stringify(output), "\n```"].join("")
+    const rawOutput = ["```json\n", JSON.stringify(draft), "\n```"].join("")
     const signal = new AbortController().signal
     const requestOverrides = { temperature: 0.1, max_tokens: 1200 }
     streamChatMock.mockImplementationOnce(async (_config, _messages, callbacks) => {
@@ -229,7 +290,9 @@ describe("RPG Narration Generator interaction", () => {
       { llmConfig: sampleLlmConfig(), signal },
       { requestOverrides },
     )
-    await expect(llm.generateNarration(prompt, input)).resolves.toEqual(output)
+    await expect(llm.generateNarration(prompt, input)).resolves.toMatchObject({
+      playerFacingText: draft.playerFacingText,
+    })
     expect(streamChatMock).toHaveBeenCalledWith(
       sampleLlmConfig(),
       [
@@ -283,6 +346,31 @@ describe("RPG Narration Generator interaction", () => {
 
 function cloneTurnNarration(): TurnNarration {
   return JSON.parse(JSON.stringify(sampleTurnNarration())) as TurnNarration
+}
+
+function sampleTurnNarrationDraft() {
+  return {
+    playerFacingText: "Mira studies the cracked mark and points to the safe edge of the sigil.",
+    parallelLineText: "Above the canal, the watch captain delays the lower sweep.",
+    tensionBrief: {
+      summary: "Patrol pressure and Mira's trust remain active.",
+      pressureSignals: ["The patrol clock is tighter."],
+      relationshipSignals: ["Mira notices Iven waited for her expertise."],
+      plotArcSignals: ["The canal gate sequence advances."],
+      reviewHandoff: "Keep this as runtime/review context.",
+    },
+    narrationSelfReport: {
+      followedPacingIntent: "followed",
+      campaignDelta: "meaningful",
+      revealBoundary: "hint_only",
+    },
+    nextActionOptions: [
+      { playerFacingText: "Touch the lantern key to the safe edge.", intent: "use_item", riskLevel: "medium", likelyAffectedPaths: ["wiki/current-scene/scene_state.md"] },
+      { playerFacingText: "Ask Mira what the safe edge means.", intent: "talk", riskLevel: "low", likelyAffectedPaths: ["wiki/relationships/runtime/player_mira.md"] },
+      { playerFacingText: "Wait and listen for patrol movement.", intent: "wait", riskLevel: "medium", likelyAffectedPaths: ["wiki/current-scene/scene_state.md"] },
+    ],
+    warnings: [],
+  }
 }
 
 function sampleNarrationGeneratorInput(): NarrationGeneratorInput {
@@ -369,6 +457,16 @@ function sampleLlmConfig(): LlmConfig {
     customEndpoint: "",
     maxContextSize: 10000,
   }
+}
+
+function expectPromptDebugSectionsRecompose(prompt: ReturnType<typeof buildNarrationGeneratorPrompt>): void {
+  const sections = prompt.debugSections ?? []
+  expect(sections.filter((section) => section.promptRole === "system").map((section) => section.content).join("\n\n")).toBe(
+    prompt.systemPrompt,
+  )
+  expect(sections.filter((section) => section.promptRole === "user").map((section) => section.content).join("\n\n")).toBe(
+    prompt.userPrompt,
+  )
 }
 
 async function writeNarrationFixture(projectPath: string): Promise<void> {

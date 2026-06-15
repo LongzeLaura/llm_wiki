@@ -21,9 +21,11 @@ import type {
   RecalledMaterial,
   RecalledMaterialSection,
   RetrievalIndexEntry,
+  TurnSemanticHandoff,
   WorldTickResult,
   WorldTickVisibleSelection,
 } from "./types"
+import { defaultKnowledgeClaimsForPath } from "./actor-knowledge"
 
 const SYNTHETIC_WHOLE_SECTION_ID = "synthetic.whole"
 const SUMMARY_EXCERPT_LIMIT = 800
@@ -36,6 +38,7 @@ export interface BuildRecallSelectorInputFromTurnStateInput {
   worldTickResult: WorldTickResult
   visibleSelection: WorldTickVisibleSelection
   postActionWorkingState: PostActionWorkingState
+  turnSemanticHandoff?: TurnSemanticHandoff
 }
 
 export interface BuildRecallSelectorInputFromTurnStateResult {
@@ -55,6 +58,7 @@ export function buildRecallSelectorInputFromTurnState(
   const { retrievalIndex, warnings } = buildRetrievalIndexFromTurnState(input)
   return {
     input: {
+      turnSemanticHandoff: input.turnSemanticHandoff,
       postActionWorkingState: input.postActionWorkingState,
       actionResolution: input.actionResolution,
       worldTickResult: input.worldTickResult,
@@ -194,7 +198,7 @@ export async function readRecalledMaterials(
         fileContent = await fs.readFile(resolveSafeWikiPath(input.projectPath, item.path), "utf-8")
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error)
-        materialWarnings.push(`Could not read allowlisted recall path ${item.path}: ${message}`)
+        materialWarnings.push(`无法读取 allowlist 中的 recall 路径 ${item.path}：${message}`)
       }
     }
 
@@ -216,6 +220,12 @@ export async function readRecalledMaterials(
       expectedUse: item.expectedUse,
       visibilityScope: item.visibilityScope,
       knowledgeScope: item.knowledgeScope,
+      knowledgeClaims: defaultKnowledgeClaimsForPath({
+        path: item.path,
+        visibilityScope: item.visibilityScope,
+        knowledgeScope: item.knowledgeScope,
+        summary: item.reason,
+      }),
       sections,
       warnings: materialWarnings,
     })

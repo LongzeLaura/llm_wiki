@@ -4,6 +4,7 @@ import type { LlmConfig } from "@/stores/wiki-store"
 import { streamChat } from "./llm-client"
 import {
   buildRecallSelectorPrompt,
+  compileRecallSelectionDraftOutput,
   createFixtureRecallSelectorAdapter,
   createLlmRpgRecallSelectorAdapter,
   getRpgInteractionRegistryEntry,
@@ -21,6 +22,7 @@ import type {
   RecallBudget,
   RecallPolicy,
   RecallSelection,
+  RecallSelectionDraft,
   RecallSelectorInput,
   RetrievalIndexEntry,
   SubmittedAction,
@@ -38,21 +40,24 @@ afterEach(() => {
 })
 
 describe("RPG Recall Selector interaction", () => {
-  it("builds a prompt around PostActionWorkingState and Recall Selector boundaries", () => {
+  it("builds a prompt around TurnSemanticHandoff and Recall Selector boundaries", () => {
     const prompt = buildRecallSelectorPrompt(sampleRecallSelectorInput())
     const combined = `${prompt.systemPrompt}\n${prompt.userPrompt}`
 
     expect(recallSelectorInteractionSpec.kind).toBe("recall_selector")
-    expect(combined).toContain("PostActionWorkingState")
-    expect(combined).toContain("post-action")
-    expect(combined).toContain("not old current-scene coarse recall")
-    expect(combined).toContain("recall plan")
+    expect(combined).toContain("TurnSemanticHandoff")
+    expect(combined).toContain("compact TurnSemanticHandoff")
+    expect(combined).toContain("不是展开完整 canonical ActionResolution / WorldTickResult / PostActionWorkingState")
+    expect(combined).toContain("recall 计划")
     expect(combined).toContain("allowlist")
-    expect(combined).toContain("cannot read files")
-    expect(combined).toContain("cannot generate narration")
-    expect(combined).toContain("cannot write wiki")
-    expect(combined).toContain("cannot generate update proposal")
-    expect(combined).toContain("Do not enter LLM 4")
+    expect(combined).toContain("不能读取文件")
+    expect(combined).toContain("不能生成叙事")
+    expect(combined).toContain("不能写 wiki")
+    expect(combined).toContain("不能生成 update proposal")
+    expect(combined).toContain("不要进入 LLM 4")
+    expect(combined).toContain("RecallSelectionDraft")
+    expect(combined).toContain("不要输出 selectionId")
+    expect(combined).toContain("本地 compiler")
     expect(combined).toContain("Outline-aware Brief")
     expect(combined).toContain("Outline Impact")
     expect(combined).toContain("Outline Regeneration")
@@ -60,33 +65,73 @@ describe("RPG Recall Selector interaction", () => {
     expect(combined).toContain("outlineImpactReport")
     expect(combined).toContain("provisionalOutlinePatch")
     expect(combined).toContain("regenerationRequest")
-    expect(combined).toContain("stable sectionId")
-    expect(combined).toContain("lineTarget")
-    expect(combined).toContain("visibilityScope")
-    expect(combined).toContain("knowledgeScope")
+    expect(combined).toContain("稳定的 sectionId")
+    expect(combined).toContain("sectionIds")
+    expect(combined).toContain("lineTarget 是本轮 narration lens target / fallback")
+    expect(combined).toContain("不是大纲归属")
+    expect(combined).toContain("不是三条平等主线")
+    expect(combined).toContain("不要求每轮同步推进")
+    expect(combined).toContain("playerVisibleLine 可以只覆盖当前 PC 可见/可推断信息")
+    expect(combined).toContain("parallelLine 只表示用户可见但 PC 未知")
+    expect(combined).toContain("tensionLine 只表示关系/情绪/伏笔/节奏压力信号")
     expect(combined).toContain("priority")
     expect(combined).toContain("reason")
     expect(combined).toContain("expectedUse")
     expect(combined).toContain("Exclusions")
+    expect(combined).toContain("retrievalIndex[].path")
+    expect(combined).toContain("RetrievalIndexEntry.availableSections")
+    expect(combined).toContain("wildcard/glob/pathPattern")
+    expect(combined).toContain("wiki/sources/*.md")
     expect(combined).toContain("parallelLine")
     expect(combined).toContain("user_visible_pc_unknown")
-    expect(combined).toContain("must never be marked as PC knowledge")
+    expect(combined).toContain("绝不能被标记为 PC 已知")
+    expect(prompt.debugSections?.map((section) => section.title)).toEqual(
+      expect.arrayContaining([
+        "系统固定提示词",
+        "输入边界",
+        "TurnSemanticHandoff",
+        "检索索引",
+        "Recall 预算",
+        "Recall 策略",
+        "返回契约",
+      ]),
+    )
+    expectPromptDebugSectionsRecompose(prompt)
   })
 
-  it("parses bare RecallSelection JSON", () => {
+  it("parses bare RecallSelectionDraft JSON into canonical RecallSelection", () => {
     const input = sampleRecallSelectorInput()
     const selection = sampleRecallSelection()
+    const draft = sampleRecallSelectionDraft()
 
-    expect(parseRpgRecallSelectionOutput(JSON.stringify(selection), input)).toEqual(selection)
+    expect(parseRpgRecallSelectionOutput(JSON.stringify(draft), input)).toEqual(selection)
   })
 
-  it("parses fenced RecallSelection JSON", () => {
+  it("parses fenced RecallSelectionDraft JSON into canonical RecallSelection", () => {
     const input = sampleRecallSelectorInput()
     const selection = sampleRecallSelection()
+    const draft = sampleRecallSelectionDraft()
 
     expect(
-      parseRpgRecallSelectionOutput(["```json", JSON.stringify(selection, null, 2), "```"].join("\n"), input),
+      parseRpgRecallSelectionOutput(["```json", JSON.stringify(draft, null, 2), "```"].join("\n"), input),
     ).toEqual(selection)
+  })
+
+  it("compiles minimal RecallSelectionDraft fields into canonical RecallSelection", () => {
+    const input = sampleRecallSelectorInput()
+    const compiled = compileRecallSelectionDraftOutput(sampleRecallSelectionDraft(), input)
+
+    expect(compiled).toEqual(sampleRecallSelection())
+    expect(compiled.selectionId).toBe("recall-selection-act-recall")
+    expect(compiled.sourceWorkingStateId).toBe("post-action-working-state-act-recall")
+    expect(compiled.recallBudget).toEqual(input.recallBudget)
+    expect(compiled.recallPolicy).toEqual(input.recallPolicy)
+    expect(compiled.warnings).toEqual([])
+    expect(compiled.selectedItems[0]).toMatchObject({
+      lineTarget: "playerVisibleLine",
+      visibilityScope: "pc_visible",
+      knowledgeScope: "pc_known",
+    })
   })
 
   it("accepts a legal RecallSelection", () => {
@@ -102,6 +147,30 @@ describe("RPG Recall Selector interaction", () => {
     selection.selectedItems[0].path = "wiki/locations/unknown.md"
 
     expect(() => validateRecallSelection(selection, input)).toThrow(/retrievalIndex/i)
+  })
+
+  it("rejects forbidden protocol and boundary fields in RecallSelectionDraft", () => {
+    const forbiddenDraftFields = [
+      { selectionId: "model-authored" },
+      { sourceWorkingStateId: "model-authored" },
+      { recallBudget: sampleRecallBudget() },
+      { recallPolicy: sampleRecallPolicy() },
+      { warnings: ["model-authored warning"] },
+      { selectedItems: [{ ...sampleRecallSelectionDraft().selectedItems[0], lineTarget: "playerVisibleLine" }] },
+      { selectedItems: [{ ...sampleRecallSelectionDraft().selectedItems[0], visibilityScope: "pc_visible" }] },
+      { selectedItems: [{ ...sampleRecallSelectionDraft().selectedItems[0], knowledgeScope: "pc_known" }] },
+    ]
+
+    for (const pollution of forbiddenDraftFields) {
+      const draft = {
+        ...sampleRecallSelectionDraft(),
+        ...pollution,
+      }
+
+      expect(() => compileRecallSelectionDraftOutput(draft, sampleRecallSelectorInput())).toThrow(
+        /RecallSelectionDraft/i,
+      )
+    }
   })
 
   it("rejects selected sectionId not present in the entry availableSections", () => {
@@ -211,9 +280,23 @@ describe("RPG Recall Selector interaction", () => {
     unknownPath.exclusions[0].path = "wiki/items/missing.md"
     expect(() => validateRecallSelection(unknownPath, sampleRecallSelectorInput())).toThrow(/exclusion path/i)
 
+    const wildcardPath = cloneSelection()
+    wildcardPath.exclusions[0].path = "wiki/sources/*.md"
+    expect(() => validateRecallSelection(wildcardPath, sampleRecallSelectorInput())).toThrow(/exclusion path/i)
+
     const unknownSection = cloneSelection()
     unknownSection.exclusions[0].sectionIds = ["unknown.section"]
     expect(() => validateRecallSelection(unknownSection, sampleRecallSelectorInput())).toThrow(/sectionId/i)
+  })
+
+  it("allows category-level exclusion rationale only as warnings", () => {
+    const selection = cloneSelection()
+    selection.exclusions = []
+    selection.warnings = [
+      "Do not recall broad wiki/sources category this turn; no concrete retrievalIndex path was excluded.",
+    ]
+
+    expect(validateRecallSelection(selection, sampleRecallSelectorInput())).toEqual(selection)
   })
 
   it("rejects forbidden pollution fields", () => {
@@ -255,7 +338,7 @@ describe("RPG Recall Selector interaction", () => {
     const input = sampleRecallSelectorInput()
     const selection = sampleRecallSelection()
     const prompt = buildRecallSelectorPrompt(input)
-    const output = ["```json\n", JSON.stringify(selection), "\n```"].join("")
+    const output = ["```json\n", JSON.stringify(sampleRecallSelectionDraft()), "\n```"].join("")
     const signal = new AbortController().signal
     const requestOverrides = { temperature: 0.1, max_tokens: 1200 }
 
@@ -357,7 +440,7 @@ function sampleRecallSelectorInput(): RecallSelectorInput {
 function sampleRecallSelection(): RecallSelection {
   return {
     selectionId: "recall-selection-act-recall",
-    sourceWorkingStateId: "act-recall",
+    sourceWorkingStateId: "post-action-working-state-act-recall",
     selectedItems: [
       {
         path: "wiki/current-scene/scene_state.md",
@@ -371,8 +454,8 @@ function sampleRecallSelection(): RecallSelection {
         sections: [
           {
             sectionId: "currentScene.visible_deltas",
-            reason: "Stable section for visible post-action deltas.",
-            expectedUse: "Prevent narration from inventing a different scene state.",
+            reason: "Current visible consequences and active clocks constrain immediate narration.",
+            expectedUse: "Anchor player-visible scene facts after the World Tick.",
             priority: "critical",
           },
         ],
@@ -389,8 +472,8 @@ function sampleRecallSelection(): RecallSelection {
         sections: [
           {
             sectionId: "factionRuntime.current_order",
-            reason: "Stable section for the captain order referenced by the World Tick.",
-            expectedUse: "Support parallel-line context only.",
+            reason: "World Tick selected a user-visible PC-unknown Harbor Watch parallel lens.",
+            expectedUse: "Let later brief decide whether to include parallel-line pressure without granting PC knowledge.",
             priority: "high",
           },
         ],
@@ -407,8 +490,8 @@ function sampleRecallSelection(): RecallSelection {
         sections: [
           {
             sectionId: "outlineProgress.adjacent_beats",
-            reason: "Stable adjacent-beat section.",
-            expectedUse: "Keep recall bounded to beat context.",
+            reason: "Gap state points at the canal-gate beat but is not an outline rewrite.",
+            expectedUse: "Help LLM 4 later screen adjacent beats without entering outline regeneration here.",
             priority: "medium",
           },
         ],
@@ -427,6 +510,24 @@ function sampleRecallSelection(): RecallSelection {
     recallBudget: sampleRecallBudget(),
     recallPolicy: sampleRecallPolicy(),
     warnings: [],
+  }
+}
+
+function sampleRecallSelectionDraft(): RecallSelectionDraft {
+  return {
+    selectedItems: sampleRecallSelection().selectedItems.map((item) => ({
+      path: item.path,
+      readMode: item.readMode,
+      priority: item.priority,
+      reason: item.reason,
+      expectedUse: item.expectedUse,
+      sectionIds: item.sections.map((section) => section.sectionId),
+    })),
+    exclusions: sampleRecallSelection().exclusions.map((exclusion) => ({
+      path: exclusion.path,
+      sectionIds: exclusion.sectionIds,
+      reason: exclusion.reason,
+    })),
   }
 }
 
@@ -555,4 +656,14 @@ function sampleLlmConfig(): LlmConfig {
     customEndpoint: "",
     maxContextSize: 10000,
   }
+}
+
+function expectPromptDebugSectionsRecompose(prompt: ReturnType<typeof buildRecallSelectorPrompt>): void {
+  const sections = prompt.debugSections ?? []
+  expect(sections.filter((section) => section.promptRole === "system").map((section) => section.content).join("\n\n")).toBe(
+    prompt.systemPrompt,
+  )
+  expect(sections.filter((section) => section.promptRole === "user").map((section) => section.content).join("\n\n")).toBe(
+    prompt.userPrompt,
+  )
 }

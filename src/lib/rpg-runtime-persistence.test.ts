@@ -84,7 +84,7 @@ describe("RPG Runtime Persistence", () => {
     const result = await loadRpgPendingUpdates(ctx.tmp.path)
 
     expect(result.updates).toEqual([])
-    expect(result.warnings.join("\n")).toContain("Could not load RPG pending updates")
+    expect(result.warnings.join("\n")).toContain("无法加载 RPG 待处理更新")
   })
 
   it("appends turn journal entries as one JSON object per line", async () => {

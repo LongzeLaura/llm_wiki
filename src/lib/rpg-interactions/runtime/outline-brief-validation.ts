@@ -14,6 +14,7 @@ import type {
   RpgVisibilityScope,
 } from "../../rpg-wiki-schema"
 import { getRpgOutlineImpactLevels } from "../../rpg-wiki-schema"
+import { isConcreteNonPcActorRef, validateRpgKnowledgeClaim } from "../../rpg-runtime/actor-knowledge"
 
 const ALLOWED_IMPACT_LEVELS = new Set<RpgOutlineImpactLevel>(getRpgOutlineImpactLevels())
 
@@ -355,7 +356,13 @@ function validateReferencesArray(
   label: string,
   knownRefs: KnownReferenceSet,
 ): OutlineBriefReference[] {
-  return values.map((value, index) => validateReference(value, `${label}[${index}]`, knownRefs))
+  return values.map((value, index) => {
+    const reference = validateReference(value, `${label}[${index}]`, knownRefs)
+    if (label.includes("playerFacingBrief.allowedKnowledge")) {
+      assertPlayerFacingReferenceIsAllowed(reference, `${label}[${index}]`, knownRefs)
+    }
+    return reference
+  })
 }
 
 function validateStableRefsArray(values: unknown[], label: string, knownRefs: KnownReferenceSet): void {
@@ -387,9 +394,45 @@ function validateReference(value: unknown, label: string, knownRefs: KnownRefere
   readEnum(record, "lineTarget", ALLOWED_LINE_TARGETS, `${label}.lineTarget`)
   readEnum(record, "usePurpose", ALLOWED_USE_PURPOSES, `${label}.usePurpose`)
   readEnum(record, "visibilityScope", ALLOWED_VISIBILITY_SCOPES, `${label}.visibilityScope`)
-  readEnum(record, "knowledgeScope", ALLOWED_KNOWLEDGE_SCOPES, `${label}.knowledgeScope`)
+  const knowledgeScope = readEnum(record, "knowledgeScope", ALLOWED_KNOWLEDGE_SCOPES, `${label}.knowledgeScope`)
+  const knowledgeClaims = record.knowledgeClaims === undefined
+    ? undefined
+    : readArray(record, "knowledgeClaims", `${label}.knowledgeClaims`).map((claim, index) =>
+      validateRpgKnowledgeClaim(claim, `${label}.knowledgeClaims[${index}]`),
+    )
+  if (
+    knowledgeScope === "npc_known" &&
+    !knowledgeClaims?.some((claim) => claim.holders.some(isConcreteNonPcActorRef))
+  ) {
+    throw new Error(`Invalid ${label}.knowledgeClaims: npc_known references require concrete npc/faction/group holders.`)
+  }
   readString(record, "reason", `${label}.reason`)
-  return record as unknown as OutlineBriefReference
+  return { ...(record as unknown as OutlineBriefReference), ...(knowledgeClaims ? { knowledgeClaims } : {}) }
+}
+
+function assertPlayerFacingReferenceIsAllowed(
+  reference: OutlineBriefReference,
+  label: string,
+  knownRefs: KnownReferenceSet,
+): void {
+  if (knownRefs.pcForbiddenPaths.has(reference.path)) {
+    throw new Error(
+      `Invalid ${label}: playerFacingBrief.allowedKnowledge must not include GM-only or delayed outline control material.`,
+    )
+  }
+  if (
+    reference.sectionId &&
+    knownRefs.pcForbiddenPathSections.has(referenceKey(reference.path, reference.sectionId))
+  ) {
+    throw new Error(
+      `Invalid ${label}: playerFacingBrief.allowedKnowledge must not include GM-only or delayed outline control material.`,
+    )
+  }
+  if (reference.stableId && knownRefs.pcForbiddenStableIds.has(reference.stableId)) {
+    throw new Error(
+      `Invalid ${label}: playerFacingBrief.allowedKnowledge must not include forbidden reveal or GM-control stableIds.`,
+    )
+  }
 }
 
 function validateReferenceLikeObjects(value: unknown, knownRefs: KnownReferenceSet, label: string): void {
@@ -515,6 +558,9 @@ interface KnownReferenceSet {
   sectionsByPath: Map<string, Set<string>>
   runtimeDeltaIds: Set<string>
   stableIds: Set<string>
+  pcForbiddenPaths: Set<string>
+  pcForbiddenPathSections: Set<string>
+  pcForbiddenStableIds: Set<string>
 }
 
 function collectKnownReferences(input: OutlineBriefCompilerInput): KnownReferenceSet {
@@ -523,6 +569,9 @@ function collectKnownReferences(input: OutlineBriefCompilerInput): KnownReferenc
     sectionsByPath: new Map(),
     runtimeDeltaIds: new Set(),
     stableIds: new Set(),
+    pcForbiddenPaths: new Set(),
+    pcForbiddenPathSections: new Set(),
+    pcForbiddenStableIds: new Set(),
   }
 
   const addPath = (path?: string, sectionId?: string) => {
@@ -549,9 +598,19 @@ function collectKnownReferences(input: OutlineBriefCompilerInput): KnownReferenc
   }
   for (const slice of input.outlineSlices) {
     addPath(slice.path, slice.sectionId)
+    if (outlineSliceMustNotEnterPcKnowledge(slice)) {
+      knownRefs.pcForbiddenPaths.add(slice.path)
+      knownRefs.pcForbiddenPathSections.add(referenceKey(slice.path, slice.sectionId))
+    }
     for (const ref of [...slice.beatRefs, ...slice.revealRefs, ...slice.branchConditionRefs]) {
       addPath(ref.path, ref.sectionId)
       knownRefs.stableIds.add(ref.stableId)
+      if (
+        outlineSliceMustNotEnterPcKnowledge(slice) ||
+        slice.revealPolicies.some((policy) => policy.stableId === ref.stableId && policyMustNotEnterPcKnowledge(policy.policy))
+      ) {
+        knownRefs.pcForbiddenStableIds.add(ref.stableId)
+      }
     }
     for (const dependency of slice.dependencies) {
       knownRefs.stableIds.add(dependency.dependencyId)
@@ -602,6 +661,20 @@ function collectKnownReferences(input: OutlineBriefCompilerInput): KnownReferenc
   }
 
   return knownRefs
+}
+
+function outlineSliceMustNotEnterPcKnowledge(input: OutlineBriefCompilerInput["outlineSlices"][number]): boolean {
+  if (input.outlineControl?.mustNotRevealTo.includes("pc")) return true
+  if (input.visibilityScope === "gm_only" || input.visibilityScope === "hidden") return true
+  return false
+}
+
+function policyMustNotEnterPcKnowledge(policy: string): boolean {
+  return policy === "delay" || policy === "forbid" || policy === "gm_only" || policy === "parallel_only"
+}
+
+function referenceKey(path: string, sectionId: string): string {
+  return `${path}#${sectionId}`
 }
 
 function expectRecord(value: unknown, label: string): Record<string, unknown> {

@@ -147,6 +147,7 @@ function validateSelectedItem(
     knowledgeScope,
     label,
   })
+  assertNpcKnownHasConcreteActorPath(path, knowledgeScope, label)
   if (!recallPolicy.allowFullPageRead && readMode === "fullPage") {
     throw new Error(`Invalid ${label}.readMode: fullPage is not allowed by input.recallPolicy.`)
   }
@@ -218,6 +219,7 @@ function validateSelectedSection(
   if (section.visibilityScope === "user_visible_pc_unknown" && PC_KNOWLEDGE_SCOPES.has(knowledgeScope)) {
     throw new Error(`Invalid ${label}: user_visible_pc_unknown section must not be marked as PC knowledge.`)
   }
+  assertNpcKnownHasConcreteActorPath(entry.path, knowledgeScope, label)
 
   return {
     sectionId,
@@ -331,6 +333,12 @@ function assertNotPcKnowledgeBoundary(input: {
       `Invalid ${input.label}: parallelLine or user_visible_pc_unknown material must not be marked as PC knowledge.`,
     )
   }
+}
+
+function assertNpcKnownHasConcreteActorPath(path: string, knowledgeScope: RpgKnowledgeScope, label: string): void {
+  if (knowledgeScope !== "npc_known") return
+  if (/^wiki\/(?:characters|factions)\/runtime\/[^/]+\.md$/u.test(path)) return
+  throw new Error(`Invalid ${label}: npc_known material requires a concrete characters/runtime or factions/runtime actor path.`)
 }
 
 function assertNoForbiddenOutputKeys(value: unknown, path = "RecallSelection"): void {

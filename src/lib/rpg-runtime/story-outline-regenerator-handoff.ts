@@ -26,6 +26,7 @@ export function buildStoryOutlineRegeneratorInputFromTurnState(
   ])
 
   return {
+    turnSemanticHandoff: input.outlineBriefInput.turnSemanticHandoff,
     postActionWorkingState: input.outlineBriefInput.postActionWorkingState,
     outlineImpactReport: input.outlineImpactReport,
     regenerationRequest: input.regenerationRequest,

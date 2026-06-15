@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest"
 import { validateRpgRuntimeUpdateProposals } from "./rpg-interactions"
-import type { ProposedWikiUpdate } from "./rpg-runtime"
+import type { RuntimeProposedWikiUpdate, RuntimeUpdateSourceDelta } from "./rpg-runtime"
 
 describe("RPG Runtime Update Validation", () => {
   it("rejects events updates contaminated by possible futures, next actions, or foreshadowing", () => {
@@ -199,6 +199,30 @@ describe("RPG Runtime Update Validation", () => {
     expect(result.issues.every((issue) => issue.code === "runtime_candidate_action_pollution")).toBe(true)
   })
 
+  it("allows runtime overlays to record that no later action has been taken yet", () => {
+    const update = sampleUpdate({
+      id: "character-no-follow-up-yet",
+      targetPath: "wiki/characters/runtime/unidentified_middle_aged_male.md",
+      strategy: "merge",
+      content: [
+        "# Runtime: Unidentified Middle Aged Male",
+        "",
+        "## Current State",
+        "* State: unconscious",
+        "* Misc: 玩家尚未进行直接接触或更深度检查。",
+        "",
+        "## Notes",
+        "* 截至当前回合，玩家未采取后续行动。",
+      ].join("\n"),
+    })
+
+    const result = validateRpgRuntimeUpdateProposals([update])
+
+    expect(result.acceptedUpdates).toEqual([update])
+    expect(result.rejectedUpdates).toEqual([])
+    expect(result.issues.map((issue) => issue.code)).not.toContain("runtime_candidate_action_pollution")
+  })
+
   it("warns when current-scene carries long-term NPC state without a character runtime overlay", () => {
     const result = validateRpgRuntimeUpdateProposals([
       sampleUpdate({
@@ -262,6 +286,50 @@ describe("RPG Runtime Update Validation", () => {
 
     expect(result.acceptedUpdates).toHaveLength(1)
     expect(result.issues.map((issue) => issue.code)).toContain("current_scene_missing_item_runtime_sync")
+  })
+
+  it("does not warn for ordinary scene wording that mentions observing gear, completed checks, or untriggered reveals", () => {
+    const sceneUpdate = sampleUpdate({
+      id: "scene-observation-wording",
+      targetPath: "wiki/current-scene/scene_state.md",
+      strategy: "overwrite",
+      reason: "场景快照需要更新以反映玩家位置变化、昏倒男性状态及环境信息，确保下一回合有正确的上下文。",
+      content: [
+        "# Current Scene",
+        "",
+        "## Runtime Capsule",
+        "当前场景是玩家抵达冬木市后的第一个可游玩时刻。玩家已从隐蔽处移动至昏倒中年男性旁进行目视检查。",
+        "",
+        "## Present Characters",
+        "* 玩家角色",
+        "  * 状态: 刚抵达冬木市，携带基础行李与观测装备。身体正常，略有疲惫。正在检查现场。",
+        "  * 行动: 站在昏倒男性旁约2米处，已完成目视检查。",
+        "* 昏倒的中年男性",
+        "  * 状态: 无意识，斜靠在路灯柱基底。面色苍白，无明显外伤，呼吸平稳。衣物口袋外翻，无随身物品。",
+        "",
+        "## Immediate Situation",
+        "玩家在检查昏倒男性。尚未触发关键揭示或分支条件。现场存在未确认的观察者，压力保持积累状态。",
+      ].join("\n"),
+    })
+
+    const result = validateRpgRuntimeUpdateProposals([
+      sceneUpdate,
+      sampleUpdate({
+        id: "character-sync",
+        targetPath: "wiki/characters/runtime/unidentified_middle_aged_male.md",
+        strategy: "merge",
+      }),
+    ])
+
+    expect(result.rejectedUpdates).toEqual([])
+    expect(result.acceptedUpdates.map((update) => update.id)).toEqual(["scene-observation-wording", "character-sync"])
+    expect(result.issues.map((issue) => issue.code)).not.toEqual(
+      expect.arrayContaining([
+        "current_scene_missing_item_runtime_sync",
+        "current_scene_missing_plot_arc_runtime_sync",
+        "current_scene_missing_outline_progress_sync",
+      ]),
+    )
   })
 
   it("warns when inventory records object state without item runtime sync", () => {
@@ -335,15 +403,133 @@ describe("RPG Runtime Update Validation", () => {
   })
 })
 
-function sampleUpdate(overrides: Partial<ProposedWikiUpdate>): ProposedWikiUpdate {
+function sampleUpdate(overrides: Partial<RuntimeProposedWikiUpdate>): RuntimeProposedWikiUpdate {
+  const targetPath = overrides.targetPath ?? "wiki/events/example.md"
+  const actor = actorForTargetPath(targetPath)
+  const visibility = overrides.visibility ?? (targetPath.startsWith("wiki/events/") ? "gm_only" : actor ? "gm_only" : "pc_visible")
+  const knowledgeScope = overrides.knowledgeScope ?? (targetPath.startsWith("wiki/events/") ? "gm_only" : actor ? "npc_known" : "pc_known")
+  const sourceDelta = runtimeSourceDelta({
+    targetPath,
+    visibility,
+    knowledgeScope,
+    actor,
+  })
   return {
     id: "update-1",
-    targetPath: "wiki/events/example.md",
+    targetPath,
     strategy: "append",
     reason: "Track accepted runtime state.",
     content: "# Update\n\nAccepted runtime state.",
     sourceTurnId: "turn-validation",
     references: ["wiki/current-scene/scene_state.md"],
+    sourceDeltas: [sourceDelta],
+    lineTarget: "playerVisibleLine",
+    visibility,
+    knowledgeScope,
+    happenedStatus: targetPath.startsWith("wiki/events/") ? "confirmed_happened" : "ongoing",
+    confidence: "high",
+    validationHints: [],
     ...overrides,
+  }
+}
+
+function runtimeSourceDelta(input: {
+  targetPath: string
+  visibility: RuntimeProposedWikiUpdate["visibility"]
+  knowledgeScope: RuntimeProposedWikiUpdate["knowledgeScope"]
+  actor?: `npc:${string}` | `faction:${string}`
+}): RuntimeUpdateSourceDelta {
+  const deltaId = `delta-${input.targetPath.replace(/[^a-z0-9]+/gi, "-").replace(/^-+|-+$/g, "")}`
+  return {
+    deltaId,
+    sourceStage: "postActionWorkingState",
+    sourcePath: ".llm-wiki/runtime/turns/turn-validation/post-action-working-state.json",
+    sourceField: "campaignDelta",
+    summary: "Structured runtime validation source delta.",
+    lineTarget: "playerVisibleLine",
+    visibility: input.visibility,
+    knowledgeScope: input.knowledgeScope,
+    happenedStatus: input.targetPath.startsWith("wiki/events/") ? "confirmed_happened" : "ongoing",
+    usePurpose: "writeback",
+    affectedPaths: [input.targetPath],
+    runtimeDeltaRefs: [],
+    knowledgeClaims: input.actor
+      ? [actorClaim(`claim-${deltaId}`, input.actor, input.targetPath)]
+      : input.visibility === "gm_only"
+        ? [gmClaim(`claim-${deltaId}`, input.targetPath)]
+        : [pcClaim(`claim-${deltaId}`, input.targetPath)],
+    revealGateRefs: [],
+  }
+}
+
+function actorForTargetPath(targetPath: string): `npc:${string}` | `faction:${string}` | undefined {
+  const characterMatch = /^wiki\/characters\/runtime\/([^/]+)\.md$/u.exec(targetPath)
+  if (characterMatch) return `npc:${characterMatch[1]}`
+  const factionMatch = /^wiki\/factions\/runtime\/([^/]+)\.md$/u.exec(targetPath)
+  if (factionMatch) return `faction:${factionMatch[1]}`
+  return undefined
+}
+
+function pcClaim(claimId: string, sourcePath: string) {
+  return {
+    claimId,
+    summary: "PC-visible accepted runtime claim.",
+    truthStatus: "unknown" as const,
+    holders: ["pc" as const],
+    nonHolders: [],
+    beliefStateByActor: [
+      {
+        actor: "pc" as const,
+        beliefState: "known" as const,
+        reason: "The runtime update is PC-visible.",
+      },
+    ],
+    sourcePath,
+  }
+}
+
+function gmClaim(claimId: string, sourcePath: string) {
+  return {
+    claimId,
+    summary: "GM-tracked accepted runtime claim.",
+    truthStatus: "unknown" as const,
+    holders: ["gm" as const],
+    nonHolders: ["pc" as const],
+    beliefStateByActor: [
+      {
+        actor: "gm" as const,
+        beliefState: "known" as const,
+        reason: "The runtime update is tracked outside PC knowledge.",
+      },
+      {
+        actor: "pc" as const,
+        beliefState: "unknown" as const,
+        reason: "This update does not grant PC knowledge.",
+      },
+    ],
+    sourcePath,
+  }
+}
+
+function actorClaim(claimId: string, actor: `npc:${string}` | `faction:${string}`, sourcePath: string) {
+  return {
+    claimId,
+    summary: "Concrete actor runtime knowledge claim.",
+    truthStatus: "unknown" as const,
+    holders: [actor],
+    nonHolders: ["pc" as const],
+    beliefStateByActor: [
+      {
+        actor,
+        beliefState: "known" as const,
+        reason: "The concrete actor holds this runtime knowledge.",
+      },
+      {
+        actor: "pc" as const,
+        beliefState: "unknown" as const,
+        reason: "This update does not grant PC knowledge.",
+      },
+    ],
+    sourcePath,
   }
 }

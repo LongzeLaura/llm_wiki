@@ -16,6 +16,15 @@ import { useWikiStore } from "@/stores/wiki-store"
 const OLD_LIVE_MARKER = "[RPG" + "-LIVE]"
 const OLD_LIVE_MARKER_FIELD = "live_" + "input_marker"
 const OLD_LIVE_ALLOWED_FIELD = "live_" + "scene_allowed"
+const FORBIDDEN_SOURCE_INGEST_FILE_TARGET_HINTS = [
+  "wiki/current-scene/**",
+  "wiki/outlines/**",
+  "wiki/rules/**",
+  "wiki/style/**",
+  "wiki/memory/**",
+  "wiki/quests/**",
+  "wiki/*/runtime/**",
+] as const
 
 function buildAnalysisPrompt(
   purpose: string,
@@ -81,6 +90,12 @@ function sourceProfile(
   ].filter(Boolean).join("\n")
 }
 
+function expectNoForbiddenSourceIngestFileTargetHints(prompt: string): void {
+  for (const pathHint of FORBIDDEN_SOURCE_INGEST_FILE_TARGET_HINTS) {
+    expect(prompt).not.toContain(pathHint)
+  }
+}
+
 describe("buildAnalysisPrompt language directive", () => {
   it("injects the user's explicit language setting", () => {
     useWikiStore.getState().setOutputLanguage("Chinese")
@@ -135,8 +150,8 @@ describe("buildAnalysisPrompt language directive", () => {
     expect(prompt).toContain("suppressed_categories")
     expect(prompt).not.toContain(OLD_LIVE_ALLOWED_FIELD)
     expect(prompt).toContain("Ordinary ingest must not put current-scene in needed_categories")
-    expect(prompt).toContain("Ordinary ingest must not generate or update wiki/current-scene/scene_state.md")
-    expect(prompt).toContain("current-scene is owned by the RPG Play/Runtime apply flow")
+    expect(prompt).toContain("Live current-scene material is REVIEW-only here")
+    expect(prompt).toContain("campaign_setup_import or runtime_update_apply")
     expect(prompt).toContain("event_extraction_mode: none | discrete_only | plot_arc_preferred | split_if_possible")
     expect(prompt).toContain("runtime_utility_focus: npc_portrayal | player_action | plot_pressure | state_update | atmosphere_style | mixed | low")
     expect(prompt).toContain("noise_ratio: low | medium | high")
@@ -164,6 +179,8 @@ describe("buildAnalysisPrompt language directive", () => {
     expect(prompt).toContain("Stage 1 is analysis only")
     expect(prompt).toContain("Allowed object_type values:")
     expect(prompt).toContain("Allowed suggested_route values:")
+    expect(prompt).toContain("fixed world slots (wiki/world/basic_overview.md, wiki/world/history.md, wiki/world/common_sense.md, wiki/world/supernatural_presence.md, wiki/world/social_structure.md)")
+    expect(prompt).toContain("fixed player slots (wiki/player/player.md, wiki/player/abilities.md, wiki/player/inventory.md, wiki/player/goals.md, wiki/player/known_information.md; only for explicitly declared current PC)")
     expect(prompt).toContain("Allowed action values:")
     expect(prompt).toContain("For every candidate object, decide what the object is before choosing a folder")
     expect(prompt).toContain("Assess whether the source contains RPG-runtime-useful material")
@@ -198,17 +215,23 @@ describe("buildAnalysisPrompt language directive", () => {
     const prompt = buildAnalysisPrompt("", "", "", "llmwikirpg")
 
     expect(prompt).toContain("## RPG Directory Boundary Guidance")
-    expect(prompt).toContain("Do not put quests, rules, or style in ordinary Source Profile needed_categories")
+    expect(prompt).toContain("Do not put current-scene, quests, rules, style, memory, outlines, or runtime-overlay material in ordinary Source Profile needed_categories")
     expect(prompt).toContain("PC subjective goals, wishes, promises, commitments, personal motives")
     expect(prompt).toContain("do not classify plot pressure or game objective progress as player goals")
-    expect(prompt).toContain("Game-recognized, trackable objectives")
     expect(prompt).toContain("player TODO/checklist or quest ledger")
     expect(prompt).toContain("executable mechanics, limits, costs, checks, allowed/disallowed actions, success/failure boundaries")
-    expect(prompt).toContain("ordinary source ingest should emit REVIEW instead of writing rules/")
+    expect(prompt).toContain("ordinary source ingest should emit REVIEW instead of hiding them inside world prose")
     expect(prompt).toContain("global writing rules are control_doc_import material for REVIEW")
-    expect(prompt).toContain("Forbidden in ordinary Source Ingest")
-    expect(prompt).toContain("wiki/memory/**")
-    expect(prompt).toContain("wiki/outlines/**")
+    expect(prompt).toContain("## Source Ingest Target Policy")
+    expect(prompt).toContain("REVIEW-only material in ordinary Source Ingest")
+    expect(prompt).toContain("Rules/control material: REVIEW only; recommended mode control_doc_import")
+    expect(prompt).toContain("Global style material: REVIEW only; recommended mode control_doc_import")
+    expect(prompt).toContain("Memory/context material: REVIEW only; recommended mode control_doc_import")
+    expect(prompt).toContain("Outline/GM control material: REVIEW only; recommended mode control_doc_import")
+    expect(prompt).toContain("Live current-scene material: REVIEW only; recommended mode runtime_update_apply")
+    expect(prompt).toContain("Runtime overlay/update material: REVIEW only; recommended mode runtime_update_apply")
+    expect(prompt).toContain("Quest ledger/objective-tracking material: REVIEW only; recommended mode review_only")
+    expectNoForbiddenSourceIngestFileTargetHints(prompt)
     expect(prompt).toContain("character-specific voice, catchphrases, address habits, politeness level")
     expect(prompt).toContain("player current holdings, quantity, equipped/backpack status")
   })
@@ -279,8 +302,10 @@ describe("buildGenerationPrompt language directive", () => {
       "source.pdf",
     )
 
-    expect(prompt).toContain("## RPG Project Schema and Routing (AUTHORITATIVE)")
-    expect(prompt).toContain("project-level naming, formatting, and override guidance")
+    expect(prompt).toContain("## RPG Project Schema and Naming Guidance")
+    expect(prompt).toContain("project-level naming and formatting guidance")
+    expect(prompt).toContain("Source Ingest Target Policy below is the write-boundary authority")
+    expect(prompt).toContain("cannot reopen forbidden target categories")
     expect(prompt).not.toContain("otherwise use wiki/entities/")
     expect(prompt).not.toContain("wiki/entities/")
     expect(prompt).not.toContain("wiki/concepts/")
@@ -539,19 +564,25 @@ describe("buildGenerationPrompt language directive", () => {
     )
 
     expect(prompt).toContain("## RPG Directory Boundary Guidance")
+    expect(prompt).toContain("only source_ingest-allowed FILE target semantics are expanded below")
+    expect(prompt).toContain("intentionally not expanded here as FILE target guidance")
     expect(prompt).toContain("PC subjective goals may enter wiki/player/goals.md only for an explicitly declared current PC")
-    expect(prompt).toContain("Do not create wiki/quests/*.md in ordinary Source Ingest")
+    expect(prompt).toContain("Player contract for fixed slots: wiki/player/player.md, wiki/player/abilities.md, wiki/player/inventory.md, wiki/player/goals.md, wiki/player/known_information.md.")
+    expect(prompt).toContain("Quest-like material is REVIEW-only in ordinary Source Ingest")
     expect(prompt).toContain("Plot pressure, unresolved conflict, foreshadowing, and possible development belong in wiki/plot-arcs/, not wiki/player/goals.md")
     expect(prompt).toContain("Player TODO/checklists are REVIEW in ordinary Source Ingest")
     expect(prompt).toContain("Global writing rules are control_doc_import material for REVIEW")
     expect(prompt).toContain("character-specific voice, catchphrases, address habits, politeness level")
     expect(prompt).toContain("Executable mechanics, limits, costs, checks")
     expect(prompt).toContain("control_doc_import material for REVIEW")
-    expect(prompt).toContain("world/ is fixed to basic_overview.md, history.md, common_sense.md, supernatural_presence.md, and social_structure.md")
+    expect(prompt).toContain("world source-ingest facts must use fixed slots: wiki/world/basic_overview.md, wiki/world/history.md, wiki/world/common_sense.md, wiki/world/supernatural_presence.md, wiki/world/social_structure.md")
     expect(prompt).toContain("wiki/player/inventory.md is for current holdings")
+    expect(prompt).toContain("one of the ordinary Source Ingest allowed types (source | world | characters | player | locations | factions | items | plot-arcs | events | relationships | index | overview | log)")
+    expect(prompt).toContain("Do not use current-scene, rules, style, memory, outlines, quests, or runtime overlay as ordinary Source Ingest frontmatter types")
     expect(prompt).toContain("Do not store player TODO/checklists or quest progress ledgers in plot-arcs")
-    expect(prompt).toContain("Character-specific voice, catchphrases, address habits, politeness level, and avoided topics belong here, not in global wiki/style/")
+    expect(prompt).toContain("Character-specific voice, catchphrases, address habits, politeness level, and avoided topics belong here; global style material is REVIEW/control-doc import material")
     expect(prompt).toContain("Do not replace wiki/player/inventory.md")
+    expectNoForbiddenSourceIngestFileTargetHints(prompt)
   })
 
   it("keeps domain guidance independent from the generic RPG generation prompt", () => {
@@ -569,6 +600,8 @@ describe("buildGenerationPrompt language directive", () => {
     expect(domain).toContain("## Domain-Specific Guidance")
     expect(domain).toContain("Detected Fate/stay night style source markers")
     expect(domain).toContain("Holy Grail War material")
+    expect(domain).toContain("Live current-scene belongs to campaign_setup_import or runtime_update_apply")
+    expect(domain).not.toContain("requires explicit RPG session/current-scene framing")
   })
 })
 
@@ -645,14 +678,15 @@ describe("long-source ingest planning", () => {
     expect(prompt).toContain("emit kind noise with utilityScore 0 or 1")
     expect(prompt).toContain("emit state_change signals for wiki/events/ only when the main chunk contains a confirmed discrete already-happened event")
     expect(prompt).toContain("## Source Ingest Target Policy")
-    expect(prompt).toContain("wiki/*/runtime/**")
-    expect(prompt).toContain("wiki/current-scene/**")
-    expect(prompt).toContain("Do not target wiki/quests/ in ordinary Source Ingest")
+    expect(prompt).toContain("Runtime overlay/update material: REVIEW only; recommended mode runtime_update_apply")
+    expect(prompt).toContain("Live current-scene material: REVIEW only; recommended mode runtime_update_apply")
+    expect(prompt).toContain("Quest-like material is REVIEW-only in ordinary Source Ingest")
     expect(prompt).toContain("Do not target wiki/player/goals.md for plot pressure")
     expect(prompt).toContain("Do not turn player TODO/checklists into plot-arcs")
     expect(prompt).toContain("Executable mechanics, limits, costs, checks, allowed/disallowed actions")
     expect(prompt).toContain("campaign_setup_import")
     expect(prompt).toContain("runtime_update_apply")
+    expectNoForbiddenSourceIngestFileTargetHints(prompt)
   })
 
   it("reminds long-source chunk user prompts to return all three sections", () => {

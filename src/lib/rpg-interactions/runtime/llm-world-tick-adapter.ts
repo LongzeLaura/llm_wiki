@@ -14,6 +14,7 @@ export interface CreateLlmRpgWorldTickAdapterInput {
 
 export interface LlmRpgWorldTickAdapterOptions {
   requestOverrides?: RequestOverrides
+  repairRequestOverrides?: RequestOverrides
 }
 
 export function createLlmRpgWorldTickAdapter(
@@ -26,6 +27,16 @@ export function createLlmRpgWorldTickAdapter(
       if (promptInput) return worldTickInteractionSpec.parseOutput(output, promptInput)
       return parseRpgWorldTickOutput(output)
     },
+    async advanceWorldTickRawOutput(prompt) {
+      return collectRpgWorldTickOutput(input, options, prompt)
+    },
+    async repairWorldTickRawOutput(prompt) {
+      return collectRpgWorldTickOutput(input, options, prompt, {
+        temperature: 0,
+        max_tokens: 1800,
+        ...options.repairRequestOverrides,
+      })
+    },
   }
 }
 
@@ -33,6 +44,7 @@ async function collectRpgWorldTickOutput(
   input: CreateLlmRpgWorldTickAdapterInput,
   options: LlmRpgWorldTickAdapterOptions,
   prompt: RpgWorldTickPrompt,
+  requestOverrides: RequestOverrides | undefined = options.requestOverrides,
 ): Promise<string> {
   let output = ""
   let streamError: Error | undefined
@@ -54,7 +66,7 @@ async function collectRpgWorldTickOutput(
         },
       },
       input.signal,
-      options.requestOverrides,
+      requestOverrides,
     )
   } catch (error) {
     if (input.signal?.aborted) {

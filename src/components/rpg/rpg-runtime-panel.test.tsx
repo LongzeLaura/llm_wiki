@@ -7,21 +7,15 @@ import {
   getAppliedRpgUpdatePaths,
   loadRpgCurrentScene,
   loadRpgRuntimePanelPendingUpdates,
+  saveCompletedRpgRuntimeDebugTrace,
   saveRpgRuntimePanelPendingUpdates,
   submitRpgRuntimePanelAction,
 } from "@/components/rpg"
 import * as writePolicy from "@/lib/rpg-runtime/write-policy"
 import type { LlmConfig } from "@/stores/wiki-store"
-import type {
-  RpgActionResolverAdapter,
-  RpgNarrationGeneratorAdapter,
-  RpgOutlineBriefAdapter,
-  RpgRecallSelectorAdapter,
-  RpgRuntimeUpdateInteractionAdapter,
-  RpgWorldTickAdapter,
-} from "@/lib/rpg-interactions/runtime"
 import type { RunRpgRuntimeTurnFlowResult } from "@/lib/rpg-runtime/runtime-controller"
 import type { SubmittedAction } from "@/lib/rpg-runtime/types"
+import type { RpgRuntimeDebugTrace } from "@/lib/rpg-runtime/debug-trace"
 import type { PendingRpgUpdate } from "@/lib/rpg-runtime/update-staging"
 import * as updateStaging from "@/lib/rpg-runtime/update-staging"
 import {
@@ -32,6 +26,10 @@ import {
 
 vi.mock("@/commands/fs", () => ({
   readFile: vi.fn(),
+  writeFileAtomic: vi.fn(),
+  createDirectory: vi.fn(),
+  fileExists: vi.fn(),
+  listDirectory: vi.fn(),
 }))
 
 vi.mock("@/lib/rpg-runtime/write-policy", async (importOriginal) => {
@@ -70,8 +68,8 @@ describe("RpgRuntimePanel", () => {
     expect(RpgRuntimePanel).toBeTypeOf("function")
     expect(html).toContain("RPG Runtime")
     expect(html).toContain("Iven and Mira face the canal gate.")
-    expect(html).toContain("Pending updates: 0")
-    expect(html).toContain("Pending RPG updates")
+    expect(html).toContain("待处理更新：0")
+    expect(html).toContain("待处理 RPG 更新")
   })
 
   it("loads current-scene from the RPG scene snapshot path", async () => {
@@ -92,102 +90,62 @@ describe("RpgRuntimePanel", () => {
     })
 
     expect(result.currentScene).toBe("")
-    expect(result.warnings.join("\n")).toContain("Missing current scene: wiki/current-scene/scene_state.md")
+    expect(result.warnings.join("\n")).toContain("缺少当前场景文件：wiki/current-scene/scene_state.md")
   })
 
-  it("submits a freeform action through the LLM adapter and runtime flow", async () => {
+  it("submits a freeform action through the backend runtime flow", async () => {
     const submittedAction: SubmittedAction = {
       id: "freeform-1",
       text: "Check the glowing sigil before opening the gate.",
       source: "freeform",
     }
-    const narrationAdapter: RpgNarrationGeneratorAdapter = {
-      generateNarration: vi.fn(),
-    }
-    const actionResolverAdapter: RpgActionResolverAdapter = {
-      resolveAction: vi.fn(),
-    }
-    const updateInteractionAdapter: RpgRuntimeUpdateInteractionAdapter = {
-      generateUpdateProposal: vi.fn(),
-    }
-    const worldTickAdapter: RpgWorldTickAdapter = {
-      advanceWorldTick: vi.fn(),
-    }
-    const recallSelectorAdapter: RpgRecallSelectorAdapter = {
-      selectRecall: vi.fn(),
-    }
-    const outlineBriefCompilerAdapter: RpgOutlineBriefAdapter = {
-      compileOutlineBrief: vi.fn(),
-    }
-    const createActionResolverAdapter = vi.fn(() => actionResolverAdapter)
-    const createWorldTickAdapter = vi.fn(() => worldTickAdapter)
-    const createRecallSelectorAdapter = vi.fn(() => recallSelectorAdapter)
-    const createOutlineBriefCompilerAdapter = vi.fn(() => outlineBriefCompilerAdapter)
-    const createNarrationAdapter = vi.fn(() => narrationAdapter)
-    const createUpdateInteractionAdapter = vi.fn(() => updateInteractionAdapter)
     const runTurnFlow = vi.fn(async () => sampleRuntimeResult())
-    const appendTurnJournalEntry = vi.fn(async () => undefined)
-    const savePendingUpdates = vi.fn(async () => ({ warnings: [] }))
 
     const result = await submitRpgRuntimePanelAction({
       projectPath: "C:/tmp/rpg-project",
       llmConfig: sampleLlmConfig(),
       submittedAction,
       dependencies: {
-        createActionResolverAdapter,
-        createWorldTickAdapter,
-        createRecallSelectorAdapter,
-        createOutlineBriefCompilerAdapter,
-        createNarrationAdapter,
-        createUpdateInteractionAdapter,
         runTurnFlow,
-        appendTurnJournalEntry,
-        savePendingUpdates,
       },
     })
 
-    expect(createActionResolverAdapter).toHaveBeenCalledWith({
-      llmConfig: sampleLlmConfig(),
-      signal: undefined,
-    })
-    expect(createWorldTickAdapter).toHaveBeenCalledWith({
-      llmConfig: sampleLlmConfig(),
-      signal: undefined,
-    })
-    expect(createRecallSelectorAdapter).toHaveBeenCalledWith({
-      llmConfig: sampleLlmConfig(),
-      signal: undefined,
-    })
-    expect(createOutlineBriefCompilerAdapter).toHaveBeenCalledWith({
-      llmConfig: sampleLlmConfig(),
-      signal: undefined,
-    })
-    expect(createNarrationAdapter).toHaveBeenCalledWith({
-      llmConfig: sampleLlmConfig(),
-      signal: undefined,
-    })
-    expect(createUpdateInteractionAdapter).toHaveBeenCalledWith({
-      llmConfig: sampleLlmConfig(),
-      signal: undefined,
-    })
     expect(runTurnFlow).toHaveBeenCalledWith({
       projectPath: "C:/tmp/rpg-project",
       wikiMode: "llmwikirpg",
       submittedAction,
-      actionResolverAdapter,
-      worldTickAdapter,
-      recallSelectorAdapter,
-      outlineBriefCompilerAdapter,
-      narrationAdapter,
-      updateInteractionAdapter,
-      runtimePersistence: {
-        appendTurnJournalEntry,
-      },
+      llmConfig: sampleLlmConfig(),
     })
-    expect(savePendingUpdates).toHaveBeenCalledWith("C:/tmp/rpg-project", sampleRuntimeResult().pendingUpdates)
     expect(result.lastNarrative).toContain("Mira reads the sigil")
     expect(result.nextActionOptions.map((option) => option.playerFacingText)).toContain("Touch the lantern key to the sigil.")
     expect(result.pendingUpdates).toEqual(sampleRuntimeResult().pendingUpdates)
+  })
+
+  it("passes soft semantic repair retry options only when requested", async () => {
+    const submittedAction: SubmittedAction = {
+      id: "freeform-repair",
+      text: "Check the glowing sigil before opening the gate.",
+      source: "freeform",
+    }
+    const runTurnFlow = vi.fn(async () => sampleRuntimeResult())
+
+    await submitRpgRuntimePanelAction({
+      projectPath: "C:/tmp/rpg-project",
+      llmConfig: sampleLlmConfig(),
+      submittedAction,
+      softSemanticRepairRetry: { enabled: true, maxAttempts: 1 },
+      dependencies: {
+        runTurnFlow,
+      },
+    })
+
+    expect(runTurnFlow).toHaveBeenCalledWith({
+      projectPath: "C:/tmp/rpg-project",
+      wikiMode: "llmwikirpg",
+      submittedAction,
+      llmConfig: sampleLlmConfig(),
+      softSemanticRepairRetry: { enabled: true, maxAttempts: 1 },
+    })
   })
 
   it("renders disabled controls while a turn is submitting", () => {
@@ -202,7 +160,7 @@ describe("RpgRuntimePanel", () => {
       />,
     )
 
-    expect(html).toContain("Running turn...")
+    expect(html).toContain("正在执行回合……")
     expect(html).toContain("disabled")
   })
 
@@ -218,7 +176,7 @@ describe("RpgRuntimePanel", () => {
       />,
     )
 
-    expect(html).toContain("Runtime warnings")
+    expect(html).toContain("Runtime 警告")
     expect(html).toContain("outside allowed runtime update paths")
   })
 
@@ -234,8 +192,8 @@ describe("RpgRuntimePanel", () => {
       />,
     )
 
-    expect(html).toContain("Pending updates: 1")
-    expect(html).toContain("Pending RPG updates")
+    expect(html).toContain("待处理更新：1")
+    expect(html).toContain("待处理 RPG 更新")
     expect(html).toContain("overwrite: wiki/current-scene/scene_state.md")
     expect(html).toContain("Refresh the current scene snapshot.")
     expect(html).toContain("The lantern key has answered the sigil.")
@@ -257,11 +215,6 @@ describe("RpgRuntimePanel", () => {
   })
 
   it("does not apply pending updates during panel submission", async () => {
-    const createUpdateInteractionAdapter = vi.fn(() => ({
-      generateUpdateProposal: vi.fn(),
-    }))
-    const savePendingUpdates = vi.fn(async () => ({ warnings: [] }))
-
     await submitRpgRuntimePanelAction({
       projectPath: "C:/tmp/rpg-project",
       llmConfig: sampleLlmConfig(),
@@ -271,20 +224,10 @@ describe("RpgRuntimePanel", () => {
         source: "freeform",
       },
       dependencies: {
-        createActionResolverAdapter: () => ({ resolveAction: vi.fn() }),
-        createWorldTickAdapter: () => ({ advanceWorldTick: vi.fn() }),
-        createRecallSelectorAdapter: () => ({ selectRecall: vi.fn() }),
-        createOutlineBriefCompilerAdapter: () => ({ compileOutlineBrief: vi.fn() }),
-        createNarrationAdapter: () => ({ generateNarration: vi.fn() }),
-        createUpdateInteractionAdapter,
         runTurnFlow: vi.fn(async () => sampleRuntimeResult()),
-        appendTurnJournalEntry: vi.fn(async () => undefined),
-        savePendingUpdates,
       },
     })
 
-    expect(createUpdateInteractionAdapter).toHaveBeenCalledOnce()
-    expect(savePendingUpdates).toHaveBeenCalledWith("C:/tmp/rpg-project", sampleRuntimeResult().pendingUpdates)
     expect(updateStaging.acceptPendingRpgUpdate).not.toHaveBeenCalled()
     expect(updateStaging.rejectPendingRpgUpdate).not.toHaveBeenCalled()
     expect(writePolicy.applyRpgPendingUpdates).not.toHaveBeenCalled()
@@ -454,6 +397,86 @@ describe("RpgRuntimePanel", () => {
     ])
   })
 
+  it("does not save debug traces while persistence is disabled", async () => {
+    const saveDebugTrace = vi.fn(async () => ({ warnings: [] }))
+
+    const result = await saveCompletedRpgRuntimeDebugTrace({
+      projectPath: "C:/tmp/rpg-project",
+      trace: sampleDebugTrace("trace-disabled", "succeeded"),
+      policy: { enabled: false, maxTraces: 5 },
+      savedTraceIds: new Set(),
+      dependencies: { saveDebugTrace },
+    })
+
+    expect(result).toEqual({ saved: false, warnings: [] })
+    expect(saveDebugTrace).not.toHaveBeenCalled()
+  })
+
+  it("saves each completed debug trace at most once when persistence is enabled", async () => {
+    const trace = sampleDebugTrace("trace-complete", "succeeded")
+    const saveDebugTrace = vi.fn(async () => ({ warnings: [] }))
+    const savedTraceIds = new Set<string>()
+
+    const first = await saveCompletedRpgRuntimeDebugTrace({
+      projectPath: "C:/tmp/rpg-project",
+      trace,
+      policy: { enabled: true, maxTraces: 10 },
+      savedTraceIds,
+      dependencies: { saveDebugTrace },
+    })
+    const duplicate = await saveCompletedRpgRuntimeDebugTrace({
+      projectPath: "C:/tmp/rpg-project",
+      trace,
+      policy: { enabled: true, maxTraces: 10 },
+      savedTraceIds,
+      dependencies: { saveDebugTrace },
+    })
+    const running = await saveCompletedRpgRuntimeDebugTrace({
+      projectPath: "C:/tmp/rpg-project",
+      trace: sampleDebugTrace("trace-running", "running"),
+      policy: { enabled: true, maxTraces: 10 },
+      savedTraceIds,
+      dependencies: { saveDebugTrace },
+    })
+
+    expect(first).toEqual({ saved: true, warnings: [] })
+    expect(duplicate).toEqual({ saved: false, warnings: [] })
+    expect(running).toEqual({ saved: false, warnings: [] })
+    expect(saveDebugTrace).toHaveBeenCalledOnce()
+    expect(saveDebugTrace).toHaveBeenCalledWith("C:/tmp/rpg-project", trace, { maxTraces: 10 })
+  })
+
+  it("returns debug trace persistence warnings and keeps failed traces retryable", async () => {
+    const trace = sampleDebugTrace("trace-warning", "failed")
+    const savedTraceIds = new Set<string>()
+    const saveDebugTrace = vi.fn()
+      .mockRejectedValueOnce(new Error("debug disk unavailable"))
+      .mockResolvedValueOnce({ warnings: [] })
+
+    const debugResult = await saveCompletedRpgRuntimeDebugTrace({
+      projectPath: "C:/tmp/rpg-project",
+      trace,
+      policy: { enabled: true, maxTraces: 5 },
+      savedTraceIds,
+      dependencies: { saveDebugTrace },
+    })
+    expect(debugResult.saved).toBe(false)
+    expect(debugResult.warnings.join("\n")).toContain("debug disk unavailable")
+    expect(savedTraceIds.has(trace.traceId)).toBe(false)
+
+    const retryResult = await saveCompletedRpgRuntimeDebugTrace({
+      projectPath: "C:/tmp/rpg-project",
+      trace,
+      policy: { enabled: true, maxTraces: 5 },
+      savedTraceIds,
+      dependencies: { saveDebugTrace },
+    })
+
+    expect(savedTraceIds.has(trace.traceId)).toBe(true)
+    expect(retryResult).toEqual({ saved: true, warnings: [] })
+    expect(saveDebugTrace).toHaveBeenCalledTimes(2)
+  })
+
   it("does not auto-apply restored accepted pending updates", () => {
     renderToStaticMarkup(
       <RpgRuntimePanel
@@ -480,14 +503,6 @@ describe("RpgRuntimePanel", () => {
           source: "freeform",
         },
         dependencies: {
-          createNarrationAdapter: () => ({ generateNarration: vi.fn() }),
-          createActionResolverAdapter: () => ({ resolveAction: vi.fn() }),
-          createWorldTickAdapter: () => ({ advanceWorldTick: vi.fn() }),
-          createRecallSelectorAdapter: () => ({ selectRecall: vi.fn() }),
-          createOutlineBriefCompilerAdapter: () => ({ compileOutlineBrief: vi.fn() }),
-          createUpdateInteractionAdapter: () => ({ generateUpdateProposal: vi.fn() }),
-          appendTurnJournalEntry: vi.fn(async () => undefined),
-          savePendingUpdates: vi.fn(async () => ({ warnings: [] })),
           runTurnFlow: vi.fn(async () => {
             throw new Error("adapter failed")
           }),
@@ -508,6 +523,20 @@ function sampleLlmConfig(): LlmConfig {
   }
 }
 
+function sampleDebugTrace(traceId: string, status: RpgRuntimeDebugTrace["status"]): RpgRuntimeDebugTrace {
+  return {
+    traceId,
+    turnId: traceId,
+    submittedActionId: `action-${traceId}`,
+    submittedActionText: `Action ${traceId}`,
+    status,
+    startedAt: "2026-06-13T00:00:00.000Z",
+    endedAt: status === "running" ? undefined : "2026-06-13T00:00:01.000Z",
+    steps: [],
+    warnings: [],
+  }
+}
+
 function sampleRuntimeResult(): RunRpgRuntimeTurnFlowResult {
   const submittedAction: SubmittedAction = {
     id: "freeform-1",
@@ -525,6 +554,7 @@ function sampleRuntimeResult(): RunRpgRuntimeTurnFlowResult {
     worldTickResult: runtimeParts.worldTickResult,
     visibleSelection: runtimeParts.visibleSelection,
     postActionWorkingState: runtimeParts.postActionWorkingState,
+    turnSemanticHandoff: runtimeParts.turnSemanticHandoff,
     recallSelection: runtimeParts.recallSelection,
     recalledMaterials,
     outlineAwareNarrationBrief: runtimeParts.outlineAwareNarrationBrief,
@@ -612,6 +642,16 @@ function sampleRuntimeResult(): RunRpgRuntimeTurnFlowResult {
       proposalGroups: [],
       outlineRevisionReviewItems: [],
       warnings: [],
+    },
+    runtimePersistenceBoundary: {
+      proposedCount: 1,
+      acceptedCount: 1,
+      rejectedCount: 0,
+      pendingEligibleCount: 1,
+      pendingEligibleUpdateIds: ["update-scene"],
+      rejectedIssueCodes: [],
+      warningIssueCodes: [],
+      reviewOnlyAuditIds: [],
     },
     outlineRevisionReviewItems: [],
     skippedDeltas: [],

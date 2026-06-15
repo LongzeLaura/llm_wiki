@@ -8,6 +8,7 @@ import type {
   RecallSelectorInput,
   RetrievalIndexEntry,
   SubmittedAction,
+  TurnSemanticHandoff,
   WorldTickResult,
   WorldTickVisibleSelection,
 } from "./types"
@@ -32,6 +33,7 @@ export interface BuildRecallSelectorInputFromTurnStateAndWikiInput {
   worldTickResult: WorldTickResult
   visibleSelection: WorldTickVisibleSelection
   postActionWorkingState: PostActionWorkingState
+  turnSemanticHandoff?: TurnSemanticHandoff
 }
 
 export interface BuildRecallSelectorInputFromTurnStateAndWikiResult {
@@ -140,6 +142,7 @@ export async function buildRecallSelectorInputFromTurnStateAndWiki(
 
   return {
     input: {
+      turnSemanticHandoff: input.turnSemanticHandoff,
       postActionWorkingState: input.postActionWorkingState,
       actionResolution: input.actionResolution,
       worldTickResult: input.worldTickResult,
@@ -160,7 +163,7 @@ function selectRelevantPages(
   input: BuildRecallSelectorInputFromTurnStateAndWikiInput,
 ): RuntimePage[] {
   const affected = new Set(collectAffectedPaths(input).filter(isAllowedReference))
-  const affectedPages = pages.filter((page) => affected.has(page.relativePath) || page.relativePath.includes("/runtime/"))
+  const affectedPages = pages.filter((page) => affected.has(page.relativePath))
   const ranked = rankedPages(pages, tokens, MAX_RELEVANT_PAGES)
   return uniquePages([...affectedPages, ...ranked]).slice(0, MAX_RELEVANT_PAGES)
 }
